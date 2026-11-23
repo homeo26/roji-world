@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Roji World - minigames</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      body { overflow: auto; background: linear-gradient(180deg, #fff7ee, #ffeef2); }
+      .menu { max-width: 860px; margin: 0 auto; padding: 28px 18px; }
+      .menu h1 { color: var(--rose); margin: 0 0 6px; }
+      .menu p { color: var(--ink-soft); margin: 0 0 18px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+      .tile { text-align: left; border: 0; border-radius: 20px; padding: 16px; background: #fff; box-shadow: var(--shadow); }
+      .tile b { display: block; font-size: 1.05rem; }
+      .tile span { color: var(--ink-soft); font-size: .9rem; }
+      .tile i { font-style: normal; font-size: .75rem; color: #a08aa5; text-transform: uppercase; letter-spacing: .06em; }
+    </style>
+  </head>
+  <body>
+    <!-- Test page for the minigames. games.html?game=<id>&as=roji|homama opens one directly. -->
+    <div class="menu">
+      <h1>Minigames</h1>
+      <p>Test page. Pick a game.</p>
+      <div class="grid" id="grid"></div>
+    </div>
+    <script type="module">
+      import { GAMES } from './src/games/registry.js';
+      import { openGame } from './src/games/shell.js';
+      import { loadLooks } from './src/looks.js';
+      import { Sound } from './src/audio.js';
+      const params = new URLSearchParams(location.search);
+      const looks = loadLooks();
+      const as = params.get('as') === 'homama' ? 'homama' : 'roji';
+      const me = looks[as];
+      const partner = looks[as === 'roji' ? 'homama' : 'roji'];
+      const sound = new Sound();
+      addEventListener('pointerdown', () => sound.start({ music: false }), { once: true });
+      const grid = document.getElementById('grid');
+      for (const g of GAMES) {
+        const b = document.createElement('button');
+        b.className = 'tile';
+        b.innerHTML = `<i>${g.place}</i><b>${g.title}</b><span>${g.tagline}</span>`;
+        b.onclick = () => openGame(g.id, { me, partner, sound });
+        grid.appendChild(b);
+      }
+      if (params.get('game')) openGame(params.get('game'), { me, partner, sound });
+      window.__games = { openGame, me, partner };
+    </script>
+  </body>
+</html>

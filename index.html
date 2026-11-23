@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Roji World</title>
+    <meta name="description" content="Walk with Roji and Homama through a little island of weekend adventures." />
+    <meta name="theme-color" content="#a6dde2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath fill=%22%23ef5b6f%22 d=%22M12 21s-8-5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 6-8 11-8 11z%22/%3E%3C/svg%3E" />
+    <link rel="preload" href="./fonts/fredoka-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="vignette" aria-hidden="true"></div>
+    <div id="fade" aria-hidden="true"></div>
+
+    <header id="hud">
+      <div class="brand">
+        <span id="brand-me" class="brand-me" aria-hidden="true"></span>
+        <span class="brand-text">
+          <span class="brand-name">Roji World</span>
+          <span id="count" class="brand-count">0 of 6 stamps</span>
+        </span>
+      </div>
+      <ol id="journey" aria-label="Weekends"></ol>
+      <div class="hud-buttons">
+        <button id="btn-swap" class="round face" aria-label="Switch character"></button>
+        <button id="btn-wardrobe" class="round" aria-label="Wardrobe" title="Wardrobe (C)"></button>
+        <button id="btn-journal" class="round" aria-label="Journey and notes" title="Journey and notes (J)"></button>
+        <button id="btn-sound" class="round" aria-label="Sound"></button>
+        <button id="btn-help" class="round" aria-label="Help"></button>
+      </div>
+    </header>
+
+    <nav id="dock" aria-label="Dances and hand holding"></nav>
+    <canvas id="minimap" aria-label="Map"></canvas>
+    <button id="prompt" class="prompt hidden"></button>
+    <div id="card" class="card hidden" role="dialog" aria-live="polite"></div>
+    <div id="toast" role="status"></div>
+
+    <div id="help" class="panel hidden" role="dialog" aria-label="How to play">
+      <button id="help-close" class="round small" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+      <h3>How to play</h3>
+      <ul class="keys">
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>walk, drive, ride</span></li>
+        <li><kbd>Shift</kbd> <span>run</span></li>
+        <li><kbd>Space</kbd> <span>jump, or honk</span></li>
+        <li><kbd>E</kbd> <span>stamp, get in, ride, sit</span></li>
+        <li><kbd>H</kbd> <span>hold hands</span></li>
+        <li><kbd>1</kbd> to <kbd>6</kbd> <span>wave, dance and more</span></li>
+        <li><kbd>Tab</kbd> <span>switch Roji and Homama</span></li>
+        <li><kbd>C</kbd> <kbd>J</kbd> <span>wardrobe, journey</span></li>
+        <li>Click or tap the ground <span>walk there</span></li>
+      </ul>
+      <div class="help-row">
+        <button id="btn-fullscreen" class="btn ghost">Full screen</button>
+        <button id="btn-reset" class="btn ghost">Start the journey over</button>
+      </div>
+    </div>
+
+    <aside id="wardrobe" class="sheet left hidden" aria-label="Wardrobe"></aside>
+    <aside id="journal" class="sheet hidden" aria-label="Journey"></aside>
+    <div id="notes" class="modal hidden" role="dialog" aria-label="Notes"></div>
+    <div id="games-menu" class="modal hidden" role="dialog" aria-label="Games"></div>
+
+    <div id="joy" aria-hidden="true"><div id="joy-knob"></div></div>
+    <div id="touch" aria-label="Touch controls">
+      <div id="stick"><div id="stick-knob"></div></div>
+      <div id="tbuttons">
+        <button id="t-emote" class="tbtn" aria-label="Dance"></button>
+        <button id="t-hands" class="tbtn" aria-label="Hold hands"></button>
+        <button id="t-jump" class="tbtn" aria-label="Jump">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6" /></svg>
+        </button>
+        <button id="t-action" class="tbtn big idle" aria-label="Action"><b>A</b><span></span></button>
+      </div>
+      <div id="emote-wheel" class="hidden"></div>
+    </div>
+
+    <div id="rotate" aria-live="polite">
+      <div class="rotate-card">
+        <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /><path d="M20.5 9a8 8 0 0 1 0 6 M3.5 15a8 8 0 0 1 0-6" /></svg>
+        <b>Turn your phone sideways</b>
+        <span>Roji World plays in landscape.</span>
+      </div>
+    </div>
+
+    <section id="intro">
+      <div class="intro-card">
+        <div class="intro-eyebrow">One weekend at a time</div>
+        <h1>Roji <span>World</span></h1>
+        <p>Walk the path with Roji and Homama. Every stop is a weekend adventure with games to play and a stamp to collect.</p>
+        <div class="pick" role="radiogroup" aria-label="Who do you want to play">
+          <button class="pick-btn" data-pick="roji" role="radio"></button>
+          <button class="pick-btn" data-pick="homama" role="radio"></button>
+        </div>
+        <button id="start" class="btn primary big">Start the journey</button>
+        <div class="intro-hints">
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
+          <span><kbd>E</kbd> do things</span>
+          <span><kbd>H</kbd> hold hands</span>
+          <span class="touch-only">Thumbstick to walk, A to do things</span>
+        </div>
+      </div>
+    </section>
+
+    <noscript>This game needs JavaScript.</noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
