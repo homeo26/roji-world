@@ -54,7 +54,12 @@ export function choose({ title = '', text = '', options = [] } = {}) {
         done(null);
       }
     };
+    // Only a press that starts on the card counts: the click left over from the tap that opened it
+    // (for example the touch A button) must not pick an option or close the card
+    let armed = false;
+    el.addEventListener('pointerdown', () => (armed = true));
     el.addEventListener('click', (e) => {
+      if (!armed && e.detail !== 0) return;
       const b = e.target.closest('[data-c]');
       if (b) done(b.dataset.c);
       else if (e.target === el) done(null);

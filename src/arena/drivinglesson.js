@@ -1,4 +1,4 @@
-// Driving Lesson: Roji drives the little learner car round Nora's practice course.
+// Driving Lesson: Roji drives the little learner car round Abu Sanad's practice course.
 // Point the stick, the arrows or the mouse where to go (like the car in town), hold the brake (E or the
 // Brake button) to stop, Space honks. Six tasks in order, stars for smooth driving and a licence meter
 // that fills over several lessons. Homama cheers at the roadside (or rides along when he is the player).
@@ -90,7 +90,7 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 export default {
   id: 'drivinglesson',
   title: 'Driving Lesson',
-  tagline: 'Six little tasks with Nora',
+  tagline: 'Six little tasks with Abu Sanad',
 
   async start(ctx) {
     const { scene, camera, hud, input, sound, fx } = ctx;
@@ -678,8 +678,8 @@ export default {
     const layer = document.createElement('div');
     layer.className = 'dl-layer';
     layer.innerHTML = `
-      <div class="dl-list"><h4>Lesson with Nora</h4><ol>${TASKS.map((t, i) => `<li data-i="${i}"><i></i><span>${t.label}</span></li>`).join('')}</ol><div class="dl-smooth">Smooth driving<span></span></div></div>
-      <div class="dl-say hide"><b>Nora</b><span></span></div>
+      <div class="dl-list"><h4>Lesson with Abu Sanad</h4><ol>${TASKS.map((t, i) => `<li data-i="${i}"><i></i><span>${t.label}</span></li>`).join('')}</ol><div class="dl-smooth">Smooth driving<span></span></div></div>
+      <div class="dl-say hide"><b>Abu Sanad</b><span></span></div>
       <div class="dl-pop"></div>
       <div class="dl-card"><canvas width="760" height="460"></canvas></div>`;
     (document.getElementById('arena') || document.body).appendChild(layer);
@@ -699,7 +699,7 @@ export default {
     };
     let sayTimer = 0;
     let sayTemp = false; // a short remark is showing; the task instruction comes back after it
-    const say = (text, who = 'Nora', ms = 0) => {
+    const say = (text, who = 'Abu Sanad', ms = 0) => {
       sayEl.querySelector('b').textContent = who;
       sayEl.querySelector('span').textContent = text;
       sayEl.className = `dl-say${who === 'Homama' ? ' who-homama' : ''}`;
@@ -779,7 +779,7 @@ export default {
     const addOops = (n, line) => {
       oops += n;
       sfx.bonk();
-      say(line || OOPS_LINES[oopsI++ % OOPS_LINES.length], 'Nora', 2600);
+      say(line || OOPS_LINES[oopsI++ % OOPS_LINES.length], 'Abu Sanad', 2600);
       drawList();
     };
 
@@ -845,9 +845,9 @@ export default {
       const stars = starsNow();
       const titles = ['', 'Lesson done!', 'Lovely driving!', 'Super smooth!'];
       const lines = {
-        3: 'Nora: "Not a single wobble. You are a natural, Roji."',
-        2: 'Nora: "Very good! A tiny bit gentler next time."',
-        1: 'Nora: "Every driver starts somewhere. You are getting better!"',
+        3: 'Abu Sanad: "Not a single wobble. You are a natural, Roji."',
+        2: 'Abu Sanad: "Very good! A tiny bit gentler next time."',
+        1: 'Abu Sanad: "Every driver starts somewhere. You are getting better!"',
       };
       const extra = meIsRoji ? 'Homama waves his GO ROJI! banner.' : 'Homama: "I am so proud of you, Roji!"';
       const bar = hadLicence ? '<b>Licence: got it!</b> This was a practice drive.' : `Licence progress <b>${newProgress}%</b> (+${gained})<span class="bar"><b style="width:${newProgress}%"></b></span>`;
@@ -1077,7 +1077,7 @@ export default {
       offCd -= dt;
       if (phase === 'drive' && !onRoad(p.x, p.z, 0.2) && Math.abs(car.speed) > 1 && offCd <= 0) {
         offCd = 6;
-        say('Back onto the road, please! The grass is for the ducks.', 'Nora', 2400);
+        say('Back onto the road, please! The grass is for the ducks.', 'Abu Sanad', 2400);
       }
     }
 
@@ -1101,12 +1101,12 @@ export default {
         else if (f.z < STOP_Z + 3.0 && sp < 0.2) complete('Perfect stop!');
         else if (!stopSaid && f.z < STOP_Z + 6 && sp > 3) {
           stopSaid = true;
-          say('Brake now! Hold the brake button.', 'Nora', 2000);
+          say('Brake now! Hold the brake button.', 'Abu Sanad', 2000);
         }
       } else if (id === 'light') {
         if (lightState !== 'green') {
           if (f.z < LIGHT_Z - 0.4) {
-            addOops(1, 'Oh! That light was red. Nora covers her eyes.');
+            addOops(1, 'Oh! That light was red. Abu Sanad covers his eyes.');
             lightState = 'green';
             setLight(lampMats, 'green');
           } else if (f.z < LIGHT_Z + 3.7 && sp < 0.25) {
@@ -1115,7 +1115,7 @@ export default {
               lightState = 'redamber';
               lightT = 0;
               setLight(lampMats, 'redamber');
-              say('Good waiting. Get ready...', 'Nora', 0);
+              say('Good waiting. Get ready...', 'Abu Sanad', 0);
             }
           }
           if (lightState === 'redamber') {
@@ -1125,7 +1125,7 @@ export default {
               setLight(lampMats, 'green');
               pop('Green!', '#c9ffd9');
               sfx.chime();
-              say('Green light! Off we go.', 'Nora', 0);
+              say('Green light! Off we go.', 'Abu Sanad', 0);
             }
           }
         } else if (f.z < LIGHT_Z - 0.5) complete('Nice and patient!', lightWait > 0.5);
@@ -1155,7 +1155,7 @@ export default {
           ringPrev = null;
           if (ringAcc > 0.4 && !leftEarly) {
             leftEarly = true;
-            say('We left a bit early! Back to the roundabout, all the way round.', 'Nora', 3000);
+            say('We left a bit early! Back to the roundabout, all the way round.', 'Abu Sanad', 3000);
           }
         }
       } else if (id === 'ducks') {
@@ -1172,7 +1172,7 @@ export default {
         }
         if (!duckWaitSaid && sp < 0.2 && f.z > ZEBRA.z0 - 3 && onRoadDuck) {
           duckWaitSaid = true;
-          say('Lovely waiting. Look at the little ones!', 'Nora', 0);
+          say('Lovely waiting. Look at the little ones!', 'Abu Sanad', 0);
         }
         if (duckState === 'pond') complete(scared ? 'The ducks made it!' : 'The ducks say thank you!', !scared);
       } else if (id === 'park') {
@@ -1186,7 +1186,7 @@ export default {
           parkT = 0;
           if (inBay && !straight && sp < 0.3 && crookedCd <= 0) {
             crookedCd = 4;
-            say('Nearly! Straighten up a little, then brake.', 'Nora', 2600);
+            say('Nearly! Straighten up a little, then brake.', 'Abu Sanad', 2600);
           }
         }
       }
@@ -1334,7 +1334,7 @@ export default {
         if (licT > 6.2 && !dbg.licFinished) {
           dbg.licFinished = true;
           $('.dl-card').classList.remove('on');
-          ctx.finish({ win: true, title: 'Roji got her licence!', text: `<span class="dl-res"><span class="stars">${[1, 2, 3].map((n) => STAR(n <= starsNow(), 34)).join('')}</span>Certified driver: <b>Roji</b>. Nora signs her card with a heart.<br>Homama: "Now we can take turns driving to the beach!"</span>`, stars: starsNow(), licence: true });
+          ctx.finish({ win: true, title: 'Roji got her licence!', text: `<span class="dl-res"><span class="stars">${[1, 2, 3].map((n) => STAR(n <= starsNow(), 34)).join('')}</span>Certified driver: <b>Roji</b>. Abu Sanad signs her card with a heart.<br>Homama: "Now we can take turns driving to the beach!"</span>`, stars: starsNow(), licence: true });
         }
       }
     }

@@ -68,7 +68,7 @@ export function stepVertical(a, physics, dt, water = null, radius = RADIUS) {
       a.y = ground;
       a.vy = 0;
       a.jumps = 0;
-      a.flipT = -1;
+      // A flip that is still going finishes quickly on the ground (syncKid) instead of snapping upright
     }
   } else {
     a.y = ground; // steps up small ledges, sits on the water surface
@@ -120,7 +120,11 @@ export function syncKid(a, dt, t) {
     k.root.position.set(a.pos.x, a.y, a.pos.z);
     k.root.rotation.set(0, a.yaw, 0);
   }
+  if (a.flipT >= 0) a.flipT += dt * (air < 0.02 ? 5 : 0);
   k.flip = a.flipT >= 0 ? clamp(a.flipT / 0.5, 0, 1) : 0;
-  if (k.flip >= 1) a.flipT = -1;
+  if (k.flip >= 1) {
+    a.flipT = -1;
+    k.flip = 0;
+  }
   k.update(dt, t, k.pose === 'stand' || k.pose === 'swim' ? a.speed : 0, air, a.turn || 0);
 }

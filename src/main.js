@@ -15,7 +15,7 @@ import { loadLooks, saveLooks } from './looks.js';
 import { avatar } from './games/avatar.js';
 import { openGame } from './games/shell.js';
 import { GAMES, gamesAt } from './games/registry.js';
-import { damp, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
+import { damp, dampAngle, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
 import { ICONS } from './icons.js';
 import { Daylight, TIME_CHOICES } from './engine/daylight.js';
 import { choose } from './engine/choose.js';
@@ -241,6 +241,12 @@ actors.homama = addActor('homama', home.x + 1.3, home.z + 0.6, Math.PI * 0.85);
 const P = () => actors[playerId];
 const C = () => actors[otherId(playerId)];
 let holding = false;
+// Hand holding: which side the partner walks on (1 left, -1 right, 0 not chosen yet), whether the hands
+// are joined right now, and how long something has been in the partner's way
+let holdSign = 0;
+let holdGrip = false;
+let holdBlocked = 0;
+const HOLD_GAP = 0.64;
 let mount = null; // { type: 'car' } or { type: 'pony', ctl, walker }
 
 // ------------------------------------------------------------------ car
@@ -645,6 +651,8 @@ function emote(type) {
 function toggleHands() {
   if (!started || mount || game.activities.active) return;
   holding = !holding;
+  holdSign = 0;
+  holdGrip = false;
   ui.setHands(holding);
   if (holding) toast(`${looks[playerId].name} and ${looks[otherId(playerId)].name} are holding hands`, 2200);
   else {
@@ -661,6 +669,8 @@ function swapPlayer() {
   }
   const carried = P().kid.carried;
   playerId = otherId(playerId);
+  holdSign = 0;
+  holdGrip = false;
   localStorage.setItem(PLAYER_KEY, playerId);
   waypoints = [];
   ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
@@ -859,8 +869,9 @@ function placePair(pos, yaw) {
 }
 function onEnterInterior(space) {
   if (mount) dismount();
-  holding = false;
-  ui.setHands(false);
+  // Hands stay joined through the door; the partner takes the hand again on the other side
+  holdSign = 0;
+  holdGrip = false;
   waypoints = [];
   placePair(space.spawn, space.spawnYaw);
   document.body.classList.add('inside');
@@ -871,6 +882,8 @@ function onEnterInterior(space) {
 }
 function onExitInterior(space) {
   placePair(space.returnTo, 0);
+  holdSign = 0;
+  holdGrip = false;
   document.body.classList.remove('inside');
   world.water.visible = true;
   nightTarget = 0;
@@ -1211,34 +1224,59 @@ function updateCompanion(dt) {
   if (game.activities.active || mount?.type === 'car' || c.seated) return;
   const leader = mount?.type === 'pony' ? mount.ctl.pony.root.position : p.pos;
   c.surface = spaces.zoneAt(c.pos.x, c.pos.z);
-  if (holding && !mount && p.mode !== 'swim') {
-    // Walk side by side at the player's left, hand in hand
-    const target = tmpV.copy(p.pos).add(leftOf(p.yaw, 0.64));
-    const before = c.pos.clone();
-    const d0 = c.pos.distanceTo(target);
-    const pull = d0 > 1.2 ? Math.min(1, (9 * dt) / d0) : 1 - Math.exp(-20 * dt);
-    c.pos.lerp(target, pull);
-    c.pos.y = 0;
-    physics.resolve(c.pos, RADIUS, c.vel, { feet: c.y });
-    const stuck = c.pos.distanceTo(target);
-    if (stuck > 0.25 && d0 < 1.2) {
-      p.pos.addScaledVector(tmpV.subVectors(c.pos, target), 0.85);
-      p.pos.y = 0;
-      physics.resolve(p.pos, RADIUS, p.vel, { feet: p.y });
+  if (holding && !mount && p.mode !== 'swim' && c.mode !== 'swim') {
+    // Hand in hand: the partner keeps to one side of the player and swings around them on an arc
+    // when the player turns, so they never pass through each other. If a wall, a door frame or a
+    // bench gets in the way the hands let go for a moment and grab again once there is room.
+    const ox = c.pos.x - p.pos.x;
+    const oz = c.pos.z - p.pos.z;
+    const r0 = Math.hypot(ox, oz);
+    if (!holdSign) {
+      const l = leftOf(p.yaw, 1);
+      holdSign = ox * l.x + oz * l.z >= 0 ? 1 : -1;
     }
-    c.vel.subVectors(c.pos, before).divideScalar(Math.max(dt, 1e-3));
-    c.vel.y = 0;
-    c.speed = Math.min(p.speed + 0.01, Math.hypot(c.vel.x, c.vel.z));
-    faceTo(c, dt, p.yaw, 14);
-    if (d0 < 0.5) {
-      p.kid.holdSide = 1;
-      c.kid.holdSide = -1;
-    }
-    if (stuck > 2.2) {
-      holding = false;
-      ui.setHands(false);
+    const side = leftOf(p.yaw, holdSign);
+    if (holdGrip && r0 < 1.6) {
+      const before = c.pos.clone();
+      const ang = dampAngle(Math.atan2(ox, oz), Math.atan2(side.x, side.z), 14, dt);
+      const r = damp(r0, HOLD_GAP, 14, dt);
+      c.pos.set(p.pos.x + Math.sin(ang) * r, 0, p.pos.z + Math.cos(ang) * r);
+      const want = c.pos.clone();
+      physics.resolve(c.pos, RADIUS, c.vel, { feet: c.y });
+      holdBlocked = c.pos.distanceTo(want) > 0.18 ? holdBlocked + dt : 0;
+      c.vel.subVectors(c.pos, before).divideScalar(Math.max(dt, 1e-3));
+      c.vel.y = 0;
+      c.speed = Math.min(p.speed + 0.01, Math.hypot(c.vel.x, c.vel.z));
+      faceTo(c, dt, p.yaw, 14);
+      const linked = Math.abs(r - HOLD_GAP) < 0.2;
+      p.kid.holdSide = linked ? holdSign : 0;
+      c.kid.holdSide = linked ? -holdSign : 0;
+      if (holdBlocked > 0.25 || r0 > 1.5) holdGrip = false;
+    } else {
+      // Walk back to the player's side, then take their hand again
       p.kid.holdSide = 0;
       c.kid.holdSide = 0;
+      const target = tmpV.copy(p.pos).addScaledVector(side, HOLD_GAP);
+      const dx = target.x - c.pos.x;
+      const dz = target.z - c.pos.z;
+      const d = Math.hypot(dx, dz);
+      stepWalker(c, physics, dx, dz, clamp(d * 2, 0, 1), d > 3 ? 7.2 : 5.4, 14, dt);
+      if (c.speed > 0.25) faceTo(c, dt, Math.atan2(c.vel.x, c.vel.z));
+      else faceTo(c, dt, p.yaw, 8);
+      if (d > 30) {
+        fx.poof(c.pos);
+        c.pos.set(target.x, 0, target.z);
+        c.y = p.y;
+      }
+      if (d < 0.35 && Math.abs(c.y - p.y) < 0.2) {
+        holdGrip = true;
+        holdBlocked = 0;
+      }
+    }
+    // Hop up onto a step or a bench together
+    if (p.y > c.y + 0.25 && airOf(c) < 0.02 && airOf(p) < 0.02) {
+      tryJump(c);
+      holdGrip = false;
     }
   } else {
     p.kid.holdSide = 0;
@@ -1329,9 +1367,12 @@ window.__roji = {
   teleport: (id) => {
     const p = byId[id]?.pad;
     if (!p) return false;
-    P().pos.set(p.x, 0, p.z);
-    C().pos.set(p.x + 1, 0, p.z + 0.6);
-    camLook.set(p.x, 0.9, p.z);
+    return window.__roji.goto(p.x, p.z);
+  },
+  goto: (x, z) => {
+    P().pos.set(x, 0, z);
+    C().pos.set(x + 1, 0, z + 0.6);
+    camLook.set(x, 0.9, z);
     return true;
   },
   // Stand next to the hotspot whose label contains `text` and press it
