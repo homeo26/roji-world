@@ -596,6 +596,7 @@ export function buildInterior(ctx) {
   const maya = makePerson(makeKid, STAFF.maya);
   freeze(maya, { pose: 'stand', keep: [maya.arms[1]] });
   maya.root.position.set(RX + 0.3, 0, RZ - 0.85);
+  wall({ type: 'circle', x: RX + 0.3, z: RZ - 0.85, r: 0.3 });
   root.add(maya.root);
   dynamic.push(maya.root);
   let mayaWave = 0;

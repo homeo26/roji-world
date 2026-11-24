@@ -945,7 +945,7 @@ export function buildHill(ctx, out) {
     { type: 'circle', x: SPOT.tent.x, z: SPOT.tent.z + out.tent.D / 2, r: 0.12 },
     { type: 'circle', x: SPOT.tent.x + out.tent.W / 2, z: SPOT.tent.z - out.tent.D / 2, r: 0.12 },
     { type: 'circle', x: SPOT.tent.x + 0.2, z: SPOT.tent.z + 0.1, r: 0.45, h: 0.34 },
-    { type: 'circle', x: SPOT.fire.x, z: SPOT.fire.z, r: 0.5, h: 0.18 },
+    { type: 'circle', x: SPOT.fire.x, z: SPOT.fire.z, r: 0.55 }, // the fire, its tripod and the kettle: walk round it
     { type: 'circle', x: SPOT.camel.x, z: SPOT.camel.z, r: 1.0 },
     { type: 'circle', x: SPOT.camel.x + Math.cos(P * 0.92) * 1.45, z: SPOT.camel.z - Math.sin(P * 0.92) * 1.45, r: 0.42 },
     { type: 'circle', x: SPOT.well.x, z: SPOT.well.z, r: 0.8, h: L1 + 0.74 },
@@ -955,6 +955,8 @@ export function buildHill(ctx, out) {
     { type: 'box', x: -3.9, z: 2.3, hw: 0.8, hd: 1.3, h: L1 + 0.32 },
     { type: 'circle', x: -2.8, z: 0.9, r: 0.18 },
     { type: 'circle', x: SPOT.sign.x, z: SPOT.sign.z, r: 0.5 },
+    { type: 'circle', x: SPOT.sign.x - 0.84, z: SPOT.sign.z - 0.15, r: 0.36 },
+    { type: 'circle', x: SPOT.sign.x + 0.84, z: SPOT.sign.z + 0.15, r: 0.36 },
     { type: 'circle', x: 1.9, z: 6.8, r: 0.3, h: 0.35 },
     { type: 'circle', x: -1.9, z: 6.8, r: 0.3, h: 0.35 },
     { type: 'circle', x: 2.1, z: -0.6, r: 0.3, h: L1 + 0.35 },

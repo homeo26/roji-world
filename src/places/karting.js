@@ -310,7 +310,11 @@ export default {
       K.bakeKid(kid);
       add(kart.root);
       dynamic.push(kart.root);
-      return { kart, s: START + 6 + i * (T.L / 2), d: 0, v: 0, base: 4.2 + i * 0.15, honk: 0, wait: 0, name: d.name };
+      // Two circles (nose and tail) follow the kart so nobody walks through it
+      const s0 = START + 6 + i * (T.L / 2);
+      const p0 = T.at(s0, 0, new THREE.Vector3());
+      for (const end of ['nose', 'tail']) colliders.push({ type: 'circle', x: p0.x, z: p0.z, r: 0.6, tag: `kart-${i}-${end}` });
+      return { kart, s: s0, d: 0, v: 0, base: 4.2 + i * 0.15, honk: 0, wait: 0, name: d.name, cols: null };
     });
 
     // ---------------------------------------------------------------- state and helpers
@@ -534,6 +538,13 @@ export default {
           const p = T.at(r.s, r.d, tmp);
           r.kart.root.position.set(p.x, 0, p.z);
           r.kart.root.rotation.y = T.yaw(r.s);
+          r.cols ??= ['nose', 'tail'].map((e) => api.space.colliders?.find((c) => c.tag === `kart-${i}-${e}`)).filter(Boolean);
+          const yw = r.kart.root.rotation.y;
+          r.cols.forEach((c, j) => {
+            const off = j ? -0.42 : 0.42;
+            c.x = api.space.origin.x + p.x + Math.sin(yw) * off;
+            c.z = api.space.origin.z + p.z + Math.cos(yw) * off;
+          });
           r.kart.body.rotation.z = damp(r.kart.body.rotation.z, clamp(-bend * r.v * 0.06, -0.12, 0.12), 6, dt);
           r.kart.animate(dt, t, r.v, bend * 4);
         });

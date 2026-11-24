@@ -190,7 +190,17 @@ export function buildPlaza(st) {
     at(back, x - Math.sin(ry) * 0.2, 0.72, z - Math.cos(ry) * 0.2);
     back.rotation.y = ry;
     g.add(seat, back);
-    st.addCollider({ type: 'circle', x, z, r: 0.75 });
+    // Two legs under the seat, and two posts holding up the backrest
+    for (const s of [-0.62, 0.62]) {
+      const leg = box(0.1, 0.42, 0.36, '#7a5234');
+      at(leg, x + Math.cos(ry) * s, 0.21, z - Math.sin(ry) * s);
+      leg.rotation.y = ry;
+      const post = box(0.07, 0.36, 0.06, '#7a5234');
+      at(post, x + Math.cos(ry) * s - Math.sin(ry) * 0.2, 0.62, z - Math.sin(ry) * s - Math.cos(ry) * 0.2);
+      post.rotation.y = ry;
+      g.add(leg, post);
+    }
+    st.addCollider({ type: 'circle', x, z, r: 0.75, h: 0.5 });
   }
 
   let beat = 0;
