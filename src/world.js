@@ -21,7 +21,7 @@ function layered(m, order) {
 // World frame: y up, ground at y = 0, the camera looks toward -Z.
 // The journey runs in three rows from the front (+Z) to the back (-Z).
 
-export const ISLAND = { cx: -11, cz: -51, hx: 75, hz: 74, r: 16 };
+export const ISLAND = { cx: 9, cz: -51, hx: 95, hz: 74, r: 16 };
 
 // City streets, as straight polylines [x, z]. Places from src/engine/manifest.js sit along them.
 export const CITY_ROADS = [
@@ -36,7 +36,10 @@ export const CITY_ROADS = [
   [[25.5, 11], [31, 11]], // journey to the east side
   [[31, 19.2], [31, -24]],
   [[31, 19.2], [46, 19.2]],
-  [[31, -3.8], [46, -3.8]],
+  [[31, -3.8], [100, -3.8]], // east side, out to the theme park
+  [[54, -24], [66, -24], [66, -3.8]],
+  [[46, 19.2], [92, 19.2]], // seaside promenade to the harbour
+  [[-52, -24], [-73, -24], [-73, -29.4]], // west, up to the desert hill
 ];
 export const SNOW_LINE = -88; // north of this (more negative z) the ground turns to snow
 

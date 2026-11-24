@@ -16,6 +16,7 @@ import { avatar } from './games/avatar.js';
 import { openGame } from './games/shell.js';
 import { GAMES, gamesAt } from './games/registry.js';
 import { damp, dampAngle, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
+import * as UTIL from './util.js';
 import { ICONS } from './icons.js';
 import { Daylight, TIME_CHOICES } from './engine/daylight.js';
 import { choose } from './engine/choose.js';
@@ -24,7 +25,8 @@ import { Spaces } from './engine/spaces.js';
 import { Activities } from './engine/activities.js';
 import { ArenaHost } from './engine/arena.js';
 import { loadProps } from './engine/props.js';
-import { ARENAS } from './engine/manifest.js';
+import { ARENAS, LIFE } from './engine/manifest.js';
+import { Life } from './engine/life.js';
 import { makeActor, stepWalker, stepVertical, tryJump, faceTo, syncKid, airOf, RADIUS } from './engine/movement.js';
 
 const STORE = 'roji-weekends-stamps-v1';
@@ -111,6 +113,8 @@ const game = {
   playArena: (id, opts) => playArena(id, opts),
   openWardrobe: () => openWardrobe(),
 };
+game.life = new Life();
+game.partnerBusy = null;
 game.activities = new Activities(game);
 const spaces = new Spaces(game);
 game.spaces = spaces;
@@ -135,11 +139,30 @@ const islandBounds = (p, r, v, bounce) => {
   }
 };
 physics.bounds = (p, r, v, bounce) => {
-  if (!spaces.inside && p.x < 300) islandBounds(p, r, v, bounce);
+  if (!spaces.inside && p.x < 300 && !spaces.onWalkway(p.x, p.z)) islandBounds(p, r, v, bounce);
 };
 
 // Places and interiors from src/engine/manifest.js (modules that are missing are skipped)
 await spaces.load();
+// Town life modules (see src/engine/life.js)
+const lifeState = () => ({
+  playerId,
+  holding,
+  mount: mount?.type || null,
+  inside: spaces.inside?.id || null,
+  activity: game.activities.active ? game.activities.current?.label || true : null,
+  free: started && !gameOpen && !arena.active && !mount && !game.activities.active && !ui.panelOpen && !document.querySelector('.choose'),
+});
+Promise.allSettled(LIFE.map((d) => import(new URL(d.module, new URL('./engine/manifest.js', import.meta.url)).href))).then((res) =>
+  res.forEach((r, i) => {
+    if (r.status !== 'fulfilled') return; // not built yet
+    try {
+      r.value.default.init({ THREE, util: UTIL, game, api: spaces.town.api, life: game.life, props: game.props, state: lifeState });
+    } catch (e) {
+      console.error(`life ${LIFE[i].id} failed to start`, e);
+    }
+  }),
+);
 const hasHome = !!spaces.byId.home;
 
 // ------------------------------------------------------------------ stations: weekends, town places, city places
@@ -553,6 +576,7 @@ function action(act = 'auto') {
   if (act === 'stamp' && !stamps.has(st.stop.id)) {
     const stop = st.stop;
     stamps.add(stop.id);
+    game.life.emit('stamp', stop.id);
     save();
     st.refresh(true);
     refreshTrail();
@@ -625,8 +649,10 @@ async function playArena(id, opts = {}) {
   ui.hideCard();
   currentStation = null;
   sound.setMusicLevel(0.25);
+  game.life.emit('arena', id);
   const result = await arena.open(id, { me: playerId, ...opts });
   gameOpen = false;
+  game.life.emit('arena-end', id, result);
   sound.setMusicLevel(1);
   celebrate(result);
   return result;
@@ -874,6 +900,7 @@ function onEnterInterior(space) {
   holdGrip = false;
   waypoints = [];
   placePair(space.spawn, space.spawnYaw);
+  setTimeout(() => game.life.emit('enter', space), 0);
   document.body.classList.add('inside');
   world.water.visible = false;
   ui.hideCard();
@@ -882,6 +909,7 @@ function onEnterInterior(space) {
 }
 function onExitInterior(space) {
   placePair(space.returnTo, 0);
+  setTimeout(() => game.life.emit('exit', space), 0);
   holdSign = 0;
   holdGrip = false;
   document.body.classList.remove('inside');
@@ -1221,7 +1249,7 @@ const tmpV = new THREE.Vector3();
 function updateCompanion(dt) {
   const p = P();
   const c = C();
-  if (game.activities.active || mount?.type === 'car' || c.seated) return;
+  if (game.activities.active || mount?.type === 'car' || c.seated || game.partnerBusy) return;
   const leader = mount?.type === 'pony' ? mount.ctl.pony.root.position : p.pos;
   c.surface = spaces.zoneAt(c.pos.x, c.pos.z);
   if (holding && !mount && p.mode !== 'swim' && c.mode !== 'swim') {
@@ -1523,6 +1551,7 @@ function frame() {
 
   world.update(dt, t);
   spaces.update(dt, t, P().pos);
+  if (!arena.active) game.life.emit('tick', dt, t);
   fx.update(dt, t);
   updateCamera(dt, t);
   if (started && !spaces.inside && frameCount % 2 === 0) minimap.draw(mount?.type === 'car' ? car.root.position : P().pos, mount?.type === 'car' ? car.yaw : P().yaw, stamps, t, C().pos, car.root.position);

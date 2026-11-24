@@ -1,16 +1,22 @@
-import { THREE, C, mat, mesh, roundRect, FONT, fitText, heartPath, freeze } from '../../places/school/kit.js';
-import { popcornMachine, bucket, drawPoster, RED, DEEP, GOLD, WINE } from './models.js';
+import { THREE, C, mat, mesh, roundRect, fitText, heartPath, freeze, colorBake } from '../../places/school/kit.js';
+import { popcornMachine, bucket, RED, DEEP, GOLD, WINE } from './models.js';
+import { byId, drawFilmPoster, drawProgramme, drawTicket, shortTitle } from './films/index.js';
+import { livePanel } from './hall.js';
+import { Bubble } from './bubbles.js';
 
 // The cinema lobby: ticket booth, popcorn counter with a helper, a candy shelf, movie posters,
 // a cosy sofa and the big popcorn cart where Popcorn Catch starts.
 
 const P = Math.PI;
 const HELPER = { id: 'popcorn-helper', name: 'Popcorn helper', gender: 'girl', skin: '#e3b08e', hair: '#7a4a26', hairstyle: 'ponytail', outfit: 'skirt', top: '#e5484d', bottom: '#3b2b3f', shoes: '#3b2b3f', accent: '#ffd166' };
-const USHER = { id: 'ticket-usher', name: 'Ticket usher', gender: 'boy', skin: '#c98f68', hair: '#2a1a13', hairstyle: 'curly', outfit: 'tee-pants', top: '#3b2b3f', bottom: '#3b2b3f', shoes: '#3b2b3f', accent: '#e5484d' };
+const SELLER = { id: 'ticket-seller', name: 'Ticket seller', gender: 'boy', skin: '#c98f68', hair: '#2a1a13', hairstyle: 'curly', outfit: 'tee-pants', top: '#3b2b3f', bottom: '#3b2b3f', shoes: '#3b2b3f', accent: '#e5484d' };
 
 export const COUNTER = { x: -9.1, z: -3.3 };
 export const CART = { x: -6.3, z: 1.2 };
 export const BOOTH = { x: -13.6, z: 0.5 };
+// The usher who greets people at the door of Screen 1
+const USHER = { id: 'cinema-usher', name: 'Usher', gender: 'boy', skin: '#e3b08e', hair: '#4a2c1a', hairstyle: 'sidepart', outfit: 'tee-pants', top: '#7a1f33', bottom: '#3b2b3f', shoes: '#3b2b3f', accent: '#f4c24f' };
+export const DOORMAN = { x: -3.6, z: 0.15 };
 
 export function buildLobby(R) {
   const { k, add, dyn, col, hot, upd, atlas, L, ictx } = R;
@@ -29,22 +35,23 @@ export function buildLobby(R) {
     add(rot(at(mesh(new THREE.PlaneGeometry(8.6, 0.06), edge, { cast: false }), -7.15, 0.018, -1.5 + s * 0.57), -P / 2, 0, 0));
   }
 
-  // ---------------------------------------------------------------- posters on the wall
-  const poster = (id, x, y = 1.95) => {
-    add(at(rbox(1.14, 1.54, 0.08, GOLD, 0.04, { metal: 0.3, rough: 0.4 }), x, y, ZB + 0.05));
-    add(at(atlas.panel(1.0, 1.4, 256, 358, (c, w, h) => drawPoster(c, w, h, id)), x, y, ZB + 0.1));
-    add(at(sph(0.06, mat('#fff2c2', { emissive: '#ffd27a', ei: 1.2 }), undefined, 10), x, y + 0.92, ZB + 0.12));
+  // ---------------------------------------------------------------- posters of the films that are on
+  const poster = (id, x, y = 1.95, sc = 1) => {
+    add(at(rbox(1.14 * sc, 1.54 * sc, 0.08, GOLD, 0.04, { metal: 0.3, rough: 0.4 }), x, y, ZB + 0.05));
+    add(at(atlas.panel(1.0 * sc, 1.4 * sc, 256, 358, (c, w, h) => drawFilmPoster(c, w, h, byId[id])), x, y, ZB + 0.1));
+    add(at(sph(0.06, mat('#fff2c2', { emissive: '#ffd27a', ei: 1.2 }), undefined, 10), x, y + 0.92 * sc, ZB + 0.12));
   };
-  poster('panda', -12.3);
+  poster('twostars', -12.55, 1.95, 0.86);
+  poster('creaky', -11.48, 1.95, 0.86);
   // One more on the side wall, facing into the room
   const side = new THREE.Group();
   side.add(rbox(1.14, 1.54, 0.08, GOLD, 0.04, { metal: 0.3, rough: 0.4 }));
-  side.add(at(atlas.panel(1.0, 1.4, 256, 358, (c, w, h) => drawPoster(c, w, h, 'twostars')), 0, 0, 0.05));
+  side.add(at(atlas.panel(1.0, 1.4, 256, 358, (c, w, h) => drawFilmPoster(c, w, h, byId.mishmish)), 0, 0, 0.05));
   side.add(at(sph(0.06, mat('#fff2c2', { emissive: '#ffd27a', ei: 1.2 }), undefined, 10), 0, 0.92, 0.07));
   side.rotation.y = P / 2;
   add(at(side, -14.95, 1.95, -1.7));
-  poster('moonbunny', -5.6);
-  poster('kitty', -4.15);
+  poster('penguin', -5.6);
+  poster('rocket', -4.15);
 
   // ---------------------------------------------------------------- candy shelf
   const SX = -13.95;
@@ -210,7 +217,7 @@ export function buildLobby(R) {
   add(at(tix, BX, 2.48, BZ + 0.66));
   add(at(rbox(0.8, 0.05, 0.3, C.white, 0.02), BX, 1.15, BZ + 0.52));
   add(at(rot(cyl(0.06, 0.06, 0.1, '#ff9eb5', 12), 0, 0, P / 2), BX + 0.28, 1.22, BZ + 0.5));
-  const usher = ictx.makeKid(USHER);
+  const usher = ictx.makeKid(SELLER);
   for (const s of [-1, 1]) {
     const tie = cone(0.05, 0.09, RED, 8);
     tie.rotation.z = (s * P) / 2;
@@ -221,21 +228,22 @@ export function buildLobby(R) {
   usher.root.position.set(BX, 0.5, BZ - 0.12);
   add(usher.root);
   col({ type: 'box', x: BX, z: BZ, hw: 0.8, hd: 0.6 });
-  // A ticket that slides out of the slot
-  const ticket = atlas.panel(0.26, 0.12, 128, 60, (c, w, h) => {
-    c.fillStyle = '#ffd166';
-    roundRect(c, 0, 0, w, h, 10);
-    c.fill();
-    c.fillStyle = WINE;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.font = `700 ${h * 0.5}px ${FONT}`;
-    c.fillText('ADMIT 2', w / 2, h / 2 + 2);
-  });
+  // A ticket that slides out of the slot, printed with the film's name
+  const ticket = livePanel(0.32, 0.14, 256, 112, (c, w, h) => drawTicket(c, w, h, R.ticket ? byId[R.ticket] : null, {}));
   ticket.rotation.x = -P / 2;
   ticket.position.set(BX + 0.28, 1.18, BZ + 0.5);
   ticket.visible = false;
   add(dyn(ticket));
+  // The same ticket pops up over the player's head for a moment
+  const tcan = document.createElement('canvas');
+  tcan.width = 256;
+  tcan.height = 112;
+  const ttex = new THREE.CanvasTexture(tcan);
+  ttex.colorSpace = THREE.SRGBColorSpace;
+  const tpop = new THREE.Sprite(new THREE.SpriteMaterial({ map: ttex, transparent: true, depthTest: false }));
+  tpop.renderOrder = 20;
+  tpop.visible = false;
+  add(dyn(tpop));
   // Queue ropes
   const ropeMat = mat('#9e1b32', { rough: 0.6 });
   const posts = [[-14.5, 1.95], [-13.6, 1.95], [-12.75, 1.95]];
@@ -289,15 +297,17 @@ export function buildLobby(R) {
   }), 0, 1.35, 0.035));
   add(at(gameSign, CART.x + 1.05, 0, CART.z + 0.3));
   col({ type: 'circle', x: CART.x, z: CART.z, r: 0.62 }, { type: 'circle', x: CART.x + 1.05, z: CART.z + 0.3, r: 0.08 });
-  // Coming soon easel
+  // The "Now showing" board on an easel
   const easel = new THREE.Group();
-  for (const s of [-1, 1]) easel.add(at(rot(rbox(0.06, 1.7, 0.06, '#9b6a43', 0.02), 0.12, 0, s * 0.12), s * 0.36, 0.82, -0.05));
-  easel.add(at(rot(rbox(0.06, 1.6, 0.06, '#9b6a43', 0.02), -0.3, 0, 0), 0, 0.78, -0.3));
-  easel.add(at(rbox(0.86, 1.18, 0.05, GOLD, 0.03), 0, 1.12, 0.02));
-  easel.add(at(rot(atlas.panel(0.76, 1.06, 256, 358, (c, w, h) => drawPoster(c, w, h, 'cupcake')), 0, 0, 0), 0, 1.12, 0.05));
+  for (const sx of [-1, 1]) easel.add(at(rot(rbox(0.06, 1.8, 0.06, '#9b6a43', 0.02), 0.12, 0, sx * 0.14), sx * 0.44, 0.86, -0.05));
+  easel.add(at(rot(rbox(0.06, 1.7, 0.06, '#9b6a43', 0.02), -0.3, 0, 0), 0, 0.82, -0.32));
+  easel.add(at(rbox(1.04, 1.36, 0.05, GOLD, 0.03), 0, 1.16, 0.02));
+  const board = livePanel(0.96, 1.28, 360, 480, (c, w, h) => drawProgramme(c, w, h, { unlocked: R.prog.unlocked(), watched: R.prog.watched() }));
+  easel.add(at(board, 0, 1.16, 0.05));
+  R.boards.push(board);
   easel.rotation.x = -0.12;
   add(at(easel, -5.0, 0, 3.6));
-  col({ type: 'box', x: -5.0, z: 3.5, hw: 0.45, hd: 0.25 });
+  col({ type: 'box', x: -5.0, z: 3.5, hw: 0.52, hd: 0.25 });
   // Plants
   for (const [x, z] of [[-3.65, -3.95], [-14.35, 4.0], [-7.5, -3.95]]) {
     add(at(cyl(0.24, 0.18, 0.46, GOLD, 14), x, 0.23, z));
@@ -385,14 +395,63 @@ export function buildLobby(R) {
     r: 1.2,
     icon: 'star',
     label: 'Buy tickets',
-    act: (a) => {
+    act: async (a) => {
+      const id = await a.choose(R.prog.menu('Buy tickets', `Two tickets for ${name(a)} and ${other(a)}. Which film?`));
+      if (!id) return;
+      if (id === 'locked') return a.toast('That one is a secret for now. Watch a few films first.', 2600);
+      R.ticket = id;
+      ticket.userData.redraw();
+      const c = tcan.getContext('2d');
+      c.clearRect(0, 0, 256, 112);
+      drawTicket(c, 256, 112, byId[id], {});
+      ttex.needsUpdate = true;
       state.ticketT = 0;
       ticket.visible = true;
       a.sound.ui('coin');
       a.emote('player', 'wave');
-      a.toast(`Two tickets for ${name(a)} and ${other(a)}, please! The love seat in row three.`, 3000);
+      a.toast(`Two tickets for ${shortTitle(byId[id])}, please! The love seat in row three.`, 3000);
     },
   });
+
+  // ---------------------------------------------------------------- the usher at the door of Screen 1
+  const doorman = ictx.makeKid(USHER);
+  doorman.root.scale.setScalar(1.12);
+  const cap = new THREE.Group();
+  cap.add(mesh(new THREE.CylinderGeometry(0.2, 0.21, 0.13, 16), mat(WINE, { rough: 0.6 })));
+  cap.add(at(mesh(new THREE.CylinderGeometry(0.212, 0.212, 0.035, 16), mat(GOLD, { rough: 0.4 })), 0, -0.04, 0));
+  cap.add(at(rbox(0.22, 0.03, 0.1, '#3b2b3f', 0.012), 0, -0.06, 0.2));
+  cap.position.set(0, 0.6, -0.01);
+  cap.rotation.set(-0.12, 0, 0.08);
+  doorman.head.add(cap);
+  for (const y of [0.62, 0.52, 0.42]) doorman.body.add(at(sph(0.022, GOLD, undefined, 8), 0, y, 0.165));
+  // A little torch for showing people to their seats
+  const torch = new THREE.Group();
+  torch.add(rot(cyl(0.03, 0.03, 0.18, '#3b2b3f', 10), P / 2, 0, 0));
+  torch.add(at(rot(cyl(0.04, 0.032, 0.05, GOLD, 10), P / 2, 0, 0), 0, 0, 0.1));
+  const bulb = mesh(new THREE.SphereGeometry(0.032, 10, 8), mat('#fff6c8', { emissive: '#ffe27a', ei: 1.4 }), { cast: false });
+  torch.add(at(bulb, 0, 0, 0.13));
+  torch.position.set(0, -0.3, 0.02);
+  torch.rotation.x = P / 2;
+  doorman.arms[1].add(torch);
+  doorman.root.position.set(DOORMAN.x, 0, DOORMAN.z);
+  doorman.root.rotation.y = -P / 2 + 0.5;
+  doorman.hands = 'hold';
+  doorman.update(1 / 60, 0, 0, 0, 0);
+  // Merge his still parts (he only turns, waves and looks around) to keep the draw calls down
+  colorBake(doorman.body, [doorman.head, ...doorman.arms]);
+  colorBake(doorman.head, doorman.eyes);
+  for (const arm of doorman.arms) colorBake(arm);
+  add(dyn(doorman.root));
+  col({ type: 'circle', x: DOORMAN.x, z: DOORMAN.z, r: 0.32 });
+  const say = new Bubble(R.g);
+  const greet = { cool: 0, n: 0, near: false, yaw: doorman.root.rotation.y };
+  const greetings = (a) => [
+    `Good evening, ${name(a)} and ${other(a)}! Your love seat is ready.`,
+    a.playerId === 'roji' ? 'Welcome back, Dr. Roji. Row three, as always.' : 'Welcome back, Homama. Row three, as always.',
+    'The popcorn is fresh and the lights are low. Enjoy!',
+    'Tickets? Ah, you two never need tickets.',
+  ];
+  const tmp = new THREE.Vector3();
 
   let pulse = 0;
   upd((dt, t, a) => {
@@ -421,12 +480,42 @@ export function buildLobby(R) {
       state.ticketT += dt;
       const u = Math.min(1, state.ticketT / 0.6);
       ticket.position.z = BZ + 0.5 + u * 0.22;
+      const pk = Math.min(1, state.ticketT * 4, Math.max(0, 3 - state.ticketT) * 3);
+      tpop.visible = pk > 0.01;
+      if (tpop.visible) {
+        a.player.kid.head.getWorldPosition(tmp);
+        const l = a.local(tmp);
+        tpop.position.set(l.x, l.y + 0.95 + Math.sin(state.ticketT * 3) * 0.04, l.z);
+        tpop.scale.set(0.9 * pk, 0.394 * pk, 1);
+      }
       if (state.ticketT > 3.5) {
         state.ticketT = -1;
         ticket.visible = false;
+        tpop.visible = false;
         ticket.position.z = BZ + 0.5;
       }
     }
+    // The usher turns to people walking up to the door, waves and says hello
+    const p = a.localPos(a.player);
+    const d = Math.hypot(p.x - DOORMAN.x, p.z - DOORMAN.z);
+    greet.cool -= dt;
+    const want = d < 3.4 ? Math.atan2(p.x - DOORMAN.x, p.z - DOORMAN.z) : -P / 2 + 0.5;
+    let dy = want - greet.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    greet.yaw += dy * (1 - Math.exp(-4 * dt));
+    doorman.root.rotation.y = greet.yaw;
+    if (d < 2.6 && !greet.near && greet.cool <= 0 && !R.state.movie) {
+      greet.cool = 25;
+      doorman.emote('wave');
+      const list = greetings(a);
+      say.say(R.justWatched ? 'How was the film? You two looked so happy.' : list[greet.n++ % list.length], { kind: 'say', dur: 3.6 });
+      R.justWatched = false;
+      a.sound.ui('tap');
+    }
+    greet.near = d < 2.6;
+    doorman.update(dt, t, 0, 0, 0);
+    doorman.root.position.set(DOORMAN.x, 0, DOORMAN.z);
+    say.update(dt, tmp.set(DOORMAN.x, 1.95, DOORMAN.z));
   });
   R.onExit((a) => {
     for (const actor of [a.player, a.partner]) if (isOurs(actor)) a.carry(actor, null);

@@ -80,6 +80,10 @@ export const EMOTES = {
   cheer: { name: 'Cheer', duration: 1.7 },
   heart: { name: 'Heart', duration: 2.2 },
   bow: { name: 'Bow', duration: 1.4 },
+  // Moves for two (games and places trigger these; they are not on the dance wheel)
+  kiss: { name: 'Kiss', duration: 1.6, wheel: false },
+  hug: { name: 'Hug', duration: 2.4, wheel: false },
+  nod: { name: 'Nod', duration: 1.6, wheel: false },
 };
 
 export class Kid {
@@ -715,7 +719,23 @@ export class Kid {
       } else if (e === 'bow') {
         B.rotation.x = 0.55 * Math.sin(Math.min(1, T / D) * Math.PI);
         armL.rotation.x = armR.rotation.x = 0.3 * k;
+      } else if (e === 'kiss') {
+        // Lean in on tiptoe, a little peck, then back
+        const p = Math.sin(Math.min(1, T / D) * Math.PI);
+        B.rotation.x = 0.22 * p;
+        B.position.y += 0.05 * p;
+        B.position.z += 0.06 * p;
+        armL.rotation.set(-0.5 * p, 0, 0.3 * p + 0.18);
+        armR.rotation.set(-0.5 * p, 0, -0.3 * p - 0.18);
+        this.mouth.scale.set(1 - 0.45 * p, 1, 1);
+      } else if (e === 'hug') {
+        // Arms wrap forward round the other one, with a gentle sway
+        armL.rotation.set(-1.35 * k, 0, -0.55 * k + 0.18 * (1 - k));
+        armR.rotation.set(-1.35 * k, 0, 0.55 * k - 0.18 * (1 - k));
+        B.rotation.x = 0.12 * k;
+        B.rotation.z = Math.sin(T * 2.6) * 0.07 * k;
       }
+      if (e !== 'kiss') this.mouth.scale.set(1, 1, 1);
       if (T >= D) this.emoteType = e === 'dance' && this.danceLoop ? (this.emoteTime = 0, 'dance') : null;
     }
 
@@ -723,6 +743,12 @@ export class Kid {
     const idle = standing && !this.emoteType ? 1 - Math.min(1, w * 2) : 0;
     this.lookYaw = damp(this.lookYaw, idle * Math.sin(t * 0.6) * 0.35, 3, dt);
     this.head.rotation.set(-0.06 * w - 0.2 * idle, this.lookYaw, Math.sin(this.walkPhase) * 0.05 * w + Math.sin(t * 0.9) * 0.03 * idle);
+    if (this.emoteType === 'nod') {
+      const kn = Math.min(1, this.emoteTime * 4, (EMOTES.nod.duration - this.emoteTime) * 4);
+      this.head.rotation.x += Math.max(0, Math.sin(this.emoteTime * 9)) * 0.32 * kn;
+    }
+    if (this.emoteType === 'kiss') this.head.rotation.x -= 0.12;
+    if (this.emoteType && !standing) this.emoteType = null;
     if (pose === 'sleep') this.head.rotation.set(0, 0, 0.12);
 
     // Blink, or closed eyes while asleep

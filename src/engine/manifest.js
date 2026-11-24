@@ -29,6 +29,10 @@ export const INTERIORS = [
   { id: 'clay', module: '../interiors/clay.js', door: [5.65, -3.5] },
 ];
 
+// Town life modules (src/engine/life.js): small moments layered on the whole game.
+export const LIFE = [
+];
+
 // 3D minigames. place: the stop or place whose card offers it.
 export const ARENAS = [
   { id: 'horserace', module: '../arena/horserace.js', place: 'horse' },

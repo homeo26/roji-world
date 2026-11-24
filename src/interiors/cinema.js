@@ -2,6 +2,7 @@ import { THREE, kit, makeAtlas, colorBake, mesh, umat, canvasTexture, uvScale } 
 import { buildLobby } from './cinema/lobby.js';
 import { buildHall } from './cinema/hall.js';
 import { GOLD, WINE, wallpaper } from './cinema/models.js';
+import { FILMS, byId, UNLOCK, shortTitle } from './cinema/films/index.js';
 
 // Inside the cinema, built like a dollhouse with no front wall:
 // the lobby (tickets, popcorn counter, candy, posters) | the screening room (velvet seats on steps and the big screen).
@@ -49,6 +50,40 @@ export default {
       onExit: (fn) => exits.push(fn),
       state: { movie: false },
       bulbs: [],
+      boards: [], // live canvas panels redrawn after a film (stubs, programme, secret poster)
+      ticket: null, // the film on the tickets bought at the booth
+    };
+
+    // ---------------------------------------------------------------- the programme and what they have seen
+    const watched = () => new Set(api.load('watched', []).filter((id) => byId[id] && !byId[id].secret));
+    const unlocked = () => watched().size >= UNLOCK;
+    R.prog = {
+      watched,
+      unlocked,
+      open: () => FILMS.filter((f) => !f.secret || unlocked()),
+      stubs: () => api.load('stubs', []).filter((s) => byId[s.id]),
+      // A film watched to the end: pin its stub; returns true when this one unlocked the secret film
+      finished(id) {
+        const before = unlocked();
+        const w = watched();
+        if (!byId[id].secret) w.add(id);
+        api.save('watched', [...w]);
+        const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        api.save('stubs', [...R.prog.stubs(), { id, date }].slice(-5));
+        return !before && unlocked();
+      },
+      menu(title, text) {
+        const w = watched();
+        return {
+          title,
+          text,
+          options: FILMS.map((f) =>
+            f.secret && !unlocked()
+              ? { id: 'locked', label: 'A secret film', sub: `Opens after ${UNLOCK} films (${w.size} of ${UNLOCK})` }
+              : { id: f.id, label: f.secret ? shortTitle(f) : f.title, sub: `${f.genre}${w.has(f.id) ? ', seen it' : ''}` },
+          ),
+        };
+      },
     };
 
     // ---------------------------------------------------------------- shell
@@ -101,7 +136,8 @@ export default {
     const hallPaper = wallpaper('#4b2552', null, 0.25, '#8a2436', { stars: '#7a4a86' });
     const hw = new THREE.BoxGeometry(hx1 - hx0, HH, 0.2);
     uvScale(hw, (hx1 - hx0) / 1.4, 1);
-    add(at(mesh(hw, umat('#ffffff', { rough: 0.9, map: hallPaper })), (hx0 + hx1) / 2, HH / 2, ZB - 0.1));
+    R.hallWall = umat('#ffffff', { rough: 0.9, map: hallPaper });
+    add(at(mesh(hw, R.hallWall), (hx0 + hx1) / 2, HH / 2, ZB - 0.1));
     add(at(box(lx1 - lx0, 0.12, 0.08, GOLD), (lx0 + lx1) / 2, HL - 0.06, ZB + 0.04));
     add(at(box(hx1 - hx0, 0.12, 0.08, GOLD), (hx0 + hx1) / 2, HH - 0.06, ZB + 0.04));
     colliders.push({ type: 'box', x: 0, z: ZB - 0.1, hw: L.W / 2 + 0.2, hd: 0.12 });
