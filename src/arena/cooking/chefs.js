@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { dressChef } from '../../interiors/yumyum/kit.js';
 
-// Kids for the kitchen with few draw calls: every joint keeps moving (legs, arms, head, mouth),
-// but the fixed parts of each joint merge into one vertex-coloured mesh plus one per textured material.
+// Roji and Homama as chefs: their own saved looks, a white apron and a chef hat. Every joint keeps
+// moving, but the fixed parts of each joint merge into one vertex-coloured mesh to save draw calls.
 
 const vcMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.64 });
 
-export function bakeKid(kid, { keepEyes = false, keepTails = false, shadow = true } = {}) {
+export function bakeKid(kid) {
   const joints = new Set([kid.root, kid.body, ...kid.legs, ...kid.arms, kid.head, kid.carryAnchor].filter(Boolean));
-  if (keepEyes) for (const e of kid.eyes) joints.add(e);
-  if (keepTails) for (const t of kid.tails) joints.add(t.pivot);
+  for (const e of kid.eyes) joints.add(e);
+  for (const t of kid.tails) joints.add(t.pivot);
   const skip = new Set([kid.mouth, kid.blob]);
   const shown = (o) => {
     for (let p = o; p; p = p.parent) if (!p.visible) return false;
@@ -27,9 +28,8 @@ export function bakeKid(kid, { keepEyes = false, keepTails = false, shadow = tru
     if (!j) return;
     const m = o.material;
     if (Array.isArray(m)) return;
-    // Glowing bits without a texture (eye sparkles) bake in too, their glow added to the colour
     const plain = m.isMeshStandardMaterial && !m.map && !m.transparent && !m.vertexColors;
-    const key = plain ? 'vc' : m.isMeshBasicMaterial ? `basic${m.color.getHex()}${m.opacity}${m.transparent}` : m.uuid;
+    const key = plain ? 'vc' : m.uuid;
     const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     for (const n of Object.keys(g.attributes)) if (!(plain ? ['position', 'normal'] : ['position', 'normal', 'uv']).includes(n)) g.deleteAttribute(n);
     if (!g.attributes.normal) g.computeVertexNormals();
@@ -60,43 +60,18 @@ export function bakeKid(kid, { keepEyes = false, keepTails = false, shadow = tru
       for (const g of b.list) g.dispose();
       if (!geo) continue;
       const me = new THREE.Mesh(geo, b.material);
-      // Only the big plain parts cast shadows: eyes, cheeks and textured bits do not
-      me.castShadow = shadow && b.material === vcMat && !kid.eyes.includes(j);
+      me.castShadow = b.material === vcMat && (j === kid.body || j === kid.head || kid.legs.includes(j));
       me.receiveShadow = true;
       j.add(me);
     }
   }
-  if (!shadow) kid.mouth.castShadow = false;
+  kid.mouth.castShadow = false;
   return kid;
 }
 
-export const headPos = (kid, out = new THREE.Vector3()) => kid.head.localToWorld(out.set(0, 0.62, 0));
-
-// Walk an actor along a path of points at a speed. Returns true when the path is done.
-export function walk(a, dt, speed, dampAngle) {
-  const p = a.kid.root.position;
-  const w = a.path[0];
-  a.speed = 0;
-  if (!w) return true;
-  const dx = w.x - p.x;
-  const dz = w.z - p.z;
-  const d = Math.hypot(dx, dz);
-  const step = speed * dt;
-  if (d <= step) {
-    p.x = w.x;
-    p.z = w.z;
-    a.path.shift();
-  } else {
-    p.x += (dx / d) * step;
-    p.z += (dz / d) * step;
-    a.yaw = dampAngle(a.yaw, Math.atan2(dx, dz), 12, dt);
-  }
-  a.speed = speed;
-  return a.path.length === 0;
-}
-
-// Kids tick in small steps so a slow frame does not skip their animation.
-export function animate(kid, dt, t, speed = 0) {
-  const n = Math.max(1, Math.ceil(dt / 0.05));
-  for (let i = 0; i < n; i++) kid.update(dt / n, t, speed, 0, 0);
+export function makeChef(ctx, who) {
+  const kid = ctx.makeKid(who);
+  dressChef(kid, { apron: '#ffffff', trim: who === 'roji' ? '#e0607e' : '#3f7bf0' });
+  bakeKid(kid);
+  return kid;
 }
