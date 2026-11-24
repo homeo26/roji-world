@@ -48,7 +48,7 @@ export function buildClassroom(ictx) {
   const wg = new THREE.BoxGeometry(W, H, 0.2);
   uvScale(wg, W, 1);
   add(at(mesh(wg, umat('#ffffff', { rough: 0.9, map: paper })), 0, H / 2, ZB - 0.1));
-  col({ type: 'box', x: 0, z: ZB - 0.1, hw: W / 2 + 0.2, hd: 0.12 });
+  col({ type: 'box', x: 0, z: ZB - 0.02, hw: W / 2 + 0.2, hd: 0.22 }); // sills and the chalk tray stick out
   for (const s of [-1, 1]) {
     const x = s * (W / 2 + 0.1);
     add(at(box(0.2, H, 4.4, WALL), x, H / 2, ZB + 2.2));

@@ -153,7 +153,7 @@ export function buildRink(group, colliders) {
     const c = pts[i + 1];
     const mx = (a.x + c.x) / 2;
     const my = (a.y + c.y) / 2;
-    if (my > hd && Math.abs(mx) < gap) continue;
+    if (my < -hd && Math.abs(mx) < gap) continue; // the entrance gap is at the front (+Z), between the gate posts
     const len = Math.hypot(c.x - a.x, c.y - a.y) + 0.07;
     const yaw = -Math.atan2(c.y - a.y, c.x - a.x);
     const seg = (h, y, w, m) => {
@@ -179,6 +179,14 @@ export function buildRink(group, colliders) {
     { type: 'box', x: cx - (hw + gap) / 2, z: cz + hd + 0.12, hw: (hw - gap) / 2, hd: 0.12, h: H },
     { type: 'box', x: cx + (hw + gap) / 2, z: cz + hd + 0.12, hw: (hw - gap) / 2, hd: 0.12, h: H },
   );
+  // The boards curve in at the corners, so a few posts follow each curve on the inside
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      for (const a of [0.39, 0.79, 1.18]) {
+        colliders.push({ type: 'circle', x: cx + sx * (hw + 0.12 - 1.7 + Math.cos(a) * 1.7), z: cz + sz * (hd + 0.12 - 1.7 + Math.sin(a) * 1.7), r: 0.16, h: H });
+      }
+    }
+  }
 
   // String lights over the ice on four corner poles
   const corners = [
@@ -231,6 +239,7 @@ export function buildRink(group, colliders) {
   b.rbox(1.85, 0.75, 0.1, '#9b6a43', 0.05, cx + gap + 2.25, 1.35, cz + hd + 0.94);
   b.plane(1.72, 0.66, sign, cx + gap + 2.25, 1.35, cz + hd + 1.0);
   b.box(1.9, 0.08, 0.16, SNOW, cx + gap + 2.25, 1.76, cz + hd + 0.95);
+  colliders.push({ type: 'box', x: cx + gap + 2.25, z: cz + hd + 0.95, hw: 0.82, hd: 0.1 });
 
   // Benches beside the rink with snow on the seats
   for (const bz of [cz - 1.4, cz + 1.4]) {
@@ -611,10 +620,13 @@ export function buildLamp(group, colliders, x, z) {
 // Pines, rocks and soft drifts as instanced copies.
 export function buildNature(group, colliders, vc, { pines, rocks, mounds }) {
   group.add(instances(pineGeo(), vc, pines.map((p) => ({ ...p, color: p.color || '#ffffff' }))));
-  for (const p of pines) if (!p.noCollide) colliders.push({ type: 'circle', x: p.x, z: p.z, r: 0.42 * (p.s ?? 1) });
+  // The lowest branches spread wide, so the trunk circle covers most of them
+  for (const p of pines) if (!p.noCollide) colliders.push({ type: 'circle', x: p.x, z: p.z, r: 0.92 * (p.s ?? 1) });
   group.add(instances(rockGeo(), vc, rocks));
   for (const k of rocks) if ((k.s ?? 1) > 0.7) colliders.push({ type: 'circle', x: k.x, z: k.z, r: 0.42 * k.s, h: 0.55 * k.s });
   group.add(instances(moundGeo(), vc, mounds, { cast: false }));
+  // Big drifts are solid snow: hop up on them (small ones round the pines and along the hill stay soft)
+  for (const m of mounds) if (m.solid) colliders.push({ type: 'circle', x: m.x, z: m.z, r: Math.min(m.sx, m.sz) * 0.72, h: m.sy * 0.85 });
 }
 
 // Random spots on the big hill, away from the ski run and the chairlift line.

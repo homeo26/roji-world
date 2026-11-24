@@ -302,7 +302,7 @@ export function buildDrivingInterior(ctx) {
   add(at(cyl(0.3, 0.24, 0.5, '#e08a5c', 14), -4.8, 0.25, 3.9));
   add(at(sph(0.42, C.leaf, undefined, 14), -4.8, 0.8, 3.9));
   add(at(sph(0.28, C.leafDark, undefined, 12), -4.6, 1.1, 3.85));
-  colliders.push({ type: 'circle', x: -4.8, z: 3.9, r: 0.32 });
+  colliders.push({ type: 'circle', x: -4.75, z: 3.9, r: 0.42 });
   // A round rug by the door
   const rug = mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.02, 32), mat(C.peach, { rough: 0.95 }), { cast: false });
   add(at(rug, RX, 0.01, 2.6));
@@ -690,7 +690,7 @@ export function buildDrivingInterior(ctx) {
   }
   // A plant and a tall lamp
   add(at(tree(k, 0.42, 2), 11.4, 0, 3.6));
-  colliders.push({ type: 'circle', x: 11.4, z: 3.6, r: 0.2 });
+  colliders.push({ type: 'circle', x: 11.42, z: 3.62, r: 0.42 });
   const lampGlow = mat('#fff6d8', { emissive: '#ffe2a0', ei: 0.8 });
   add(at(cyl(0.03, 0.04, 1.6, C.ink, 8), 4.8, 0.8, -1.0));
   add(at(cyl(0.18, 0.18, 0.04, C.ink, 12), 4.8, 0.02, -1.0));

@@ -412,6 +412,9 @@ export function buildScenery(ctx, k, atlas, spots) {
     t.position.set(x, 0, z);
     root.add(t);
     colliders.push({ type: 'circle', x, z, r: 0.25 * s });
+    // The big crown hangs low enough to reach a kid: block its widest part below 1.3 m
+    const q = 1 - ((Math.min(1.3, 1.9 * s) - 1.9 * s) / (0.95 * s)) ** 2;
+    if (q > 0) colliders.push({ type: 'circle', x, z, r: 0.95 * s * Math.sqrt(q) - 0.18 });
   }
   for (const [x, z, w, d] of spots.hedges) {
     root.add(k.at(k.rbox(w, 0.75, d, '#5fb85a', 0.25), x, 0.375, z));

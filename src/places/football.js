@@ -59,7 +59,7 @@ export default {
     dynamic.push(ballM, shadow);
     const B = { p: ballM.position, v: new THREE.Vector3(), last: null, cd: 0, resetT: 0, bounceCd: 0, held: false };
     // The ball meets the same things as the kids, but the stand and the stairs are walls for it
-    const ballPhys = new Physics(colliders.map((c) => (c.tag === 'stand' || c.tag === 'stairs' ? { ...c, h: undefined } : c)));
+    const ballPhys = new Physics(colliders.filter((c) => c.tag !== 'kidnet').map((c) => (c.tag === 'stand' || c.tag === 'stairs' ? { ...c, h: undefined } : c)));
     const axis = new THREE.Vector3();
     const prev = new THREE.Vector3();
 

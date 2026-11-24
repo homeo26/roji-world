@@ -118,7 +118,7 @@ export function buildPlayground(R) {
   colorBake(plank);
   add(dyn(plank));
   col({ type: 'box', x: SS.x, z: SS.z, hw: 0.2, hd: 0.25 });
-  for (const s of [-1, 1]) col({ type: 'circle', x: SS.x + s * 1.3, z: SS.z, r: 0.18 });
+  for (const s of [-1, 1]) col({ type: 'circle', x: SS.x + s * 1.3, z: SS.z, r: 0.18 }, { type: 'circle', x: SS.x + s * 0.68, z: SS.z, r: 0.18 });
 
   // ---------------------------------------------------------------- sandpit with a sandcastle
   const D = SAND;
