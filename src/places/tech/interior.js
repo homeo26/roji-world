@@ -372,7 +372,7 @@ export function buildTechInterior(ctx) {
     const back = mesh(new THREE.SphereGeometry(0.34, 14, 10), m);
     back.scale.set(1.15, 0.85, 0.6);
     add(at(back, x, 0.44, z - 0.3));
-    colliders.push({ type: 'circle', x, z, r: 0.42, h: 0.4 });
+    colliders.push({ type: 'circle', x, z, r: 0.44, h: 0.4 }, { type: 'circle', x, z: z - 0.32, r: 0.34, h: 0.7 });
   }
   add(at(cyl(0.36, 0.36, 0.06, COL.white, 20), -13.25, 0.3, 3.85));
   add(at(cyl(0.05, 0.08, 0.28, COL.wood, 10), -13.25, 0.14, 3.85));
@@ -495,6 +495,7 @@ export function buildTechInterior(ctx) {
   bp.position.set(DX + 1.55, 0, DZ + 0.55);
   bp.rotation.y = -0.4;
   add(bp);
+  colliders.push({ type: 'circle', x: DX + 1.55, z: DZ + 0.55, r: 0.22, h: 0.46 });
   // Wall clock and a poster
   const clockFace = atlas.add(128, 128, (c, w) => {
     c.fillStyle = '#ffffff';
@@ -713,6 +714,7 @@ export function buildTechInterior(ctx) {
   add(at(makeMug(COL.sun, COL.white, 1.3), 9.7, 0.78, tbz - 0.25), at(makeMug(COL.pink, COL.white, 1.3), 10.2, 0.78, tbz + 0.3));
   add(at(rbox(0.3, 0.01, 0.22, mat(COL.sun), 0.005), 9.9, 0.785, tbz + 0.05));
   addNpc(LOOKS.fin, { x: 11.2, z: tbz - 0.97, y: 0.18, hands: 'type' });
+  colliders.push({ type: 'circle', x: 12.7, z: -3.85, r: 0.3 });
   addNpc(LOOKS.eve, {
     x: 12.7,
     z: -3.85,
@@ -752,6 +754,7 @@ export function buildTechInterior(ctx) {
   add(at(makePlant('round', 0.9, COL.white), 14.3, 0, 3.9));
   colliders.push({ type: 'circle', x: 14.3, z: 3.9, r: 0.26 });
   add(at(makePlant('round', 0.9, COL.sun), 6.7, 0, -4.4));
+  colliders.push({ type: 'circle', x: 6.7, z: -4.4, r: 0.3 });
 
   // ---------------------------------------------------------------- activities
   // Code at Homama's desk

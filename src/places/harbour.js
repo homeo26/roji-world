@@ -835,7 +835,7 @@ export default {
           { who: 'roji', x: R.x, z: R.z, y: DECK, yaw: -PI / 2 + 0.35, pose: 'stand', hands: null },
         ],
         focus: { x: -9.5, z: 28.9, y: 0.7, zoom: 0.5 },
-        exit: { x: -8.6, z: 28.3 },
+        exit: { x: -8.2, z: 29.4 }, // clear deck, away from the sunset bench (which you could end up standing on)
         update: (dt) => {
           st.t += dt;
           const ho = api.homama;

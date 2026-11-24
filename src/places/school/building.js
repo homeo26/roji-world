@@ -112,7 +112,7 @@ export function buildSchool(R) {
   add(at(mesh(base, brickMat), 0, 0.35, WZ));
   add(at(box(W1 - W0 + 0.1, 0.1, 5.1, C.white), 0, 0.72, WZ));
   add(at(box(W1 - W0 + 0.08, 0.16, 5.08, SHUTTER), 0, 2.55, WZ));
-  col({ type: 'box', x: 0, z: WZ, hw: (W1 - W0) / 2 + 0.05, hd: 2.55 });
+  col({ type: 'box', x: 0, z: WZ + 0.27, hw: (W1 - W0) / 2 + 0.05, hd: 2.82 }); // flower boxes stick out at the front
 
   // Roof: two tiled slopes per wing, stopping at the tower block
   const tileTex = canvasTexture(128, 128, tiles);

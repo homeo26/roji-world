@@ -176,7 +176,7 @@ export default {
     add(at(rbox(3.3, 3.3, 5.2, cream, 0.1), WX, 1.65, WZ));
     add(at(box(3.36, 0.5, 5.26, mat(COL.mint)), WX, 0.25, WZ));
     add(at(rbox(3.5, 0.22, 5.4, mat('#f2e6d6'), 0.05), WX, 3.36, WZ));
-    colliders.push({ type: 'box', x: WX, z: WZ, hw: 1.7, hd: 2.65 });
+    colliders.push({ type: 'box', x: WX, z: WZ + 0.2, hw: 1.7, hd: 2.85 }); // window boxes stick out at the front
     const roundWin = glassMat(1);
     for (const x of [WX - 0.75, WX + 0.75]) {
       const ring = mesh(new THREE.TorusGeometry(0.5, 0.08, 8, 24), frameMat);
@@ -312,7 +312,8 @@ export default {
     sign.position.set(3.3, 0, FZ + 6.7);
     sign.rotation.y = -0.2;
     add(sign);
-    colliders.push({ type: 'box', x: 3.3, z: FZ + 6.7, hw: 1.1, hd: 0.12 });
+    // The sign is turned a little, so a row of small circles follows its board
+    for (const d of [-1.2, -0.6, 0, 0.6, 1.2]) colliders.push({ type: 'circle', x: 3.3 + d * Math.cos(0.2), z: FZ + 6.7 + d * Math.sin(0.2), r: 0.16 });
 
     // Bike rack with two bikes
     const metal = mat(COL.steel, { metal: 0.6, rough: 0.35 });
@@ -359,7 +360,7 @@ export default {
     };
     bike(-8.6, COL.blue, false);
     bike(-7.75, COL.pink, true);
-    colliders.push({ type: 'box', x: -8.2, z: FZ + 2.05, hw: 1.05, hd: 0.55 });
+    colliders.push({ type: 'box', x: -8.2, z: FZ + 2.05, hw: 1.05, hd: 0.82 });
 
     // Giant debug duck in a little pond
     const PX = -6.0;
@@ -388,6 +389,7 @@ export default {
     plaque.rotation.x = -0.4;
     add(at(plaque, PX + 0.6, 0.55, PZ + 1.62));
     colliders.push({ type: 'circle', x: PX, z: PZ, r: 1.65 });
+    colliders.push({ type: 'box', x: PX + 0.6, z: PZ + 1.62, hw: 0.45, hd: 0.12 }); // the plaque
 
     // Outdoor coding table with a parasol
     const OX = 6.6;
@@ -428,6 +430,13 @@ export default {
       add(at(sph(0.9 * s, m, undefined, 14), x, 2.0 * s, z));
       add(at(sph(0.6 * s, pink ? m : leaf2, undefined, 12), x + 0.5 * s, 1.75 * s, z + 0.2 * s));
       colliders.push({ type: 'circle', x, z, r: 0.25 * s });
+      crown(x, 2.0 * s, z, 0.9 * s);
+      crown(x + 0.5 * s, 1.75 * s, z + 0.2 * s, 0.6 * s);
+    };
+    // A crown low enough to reach a kid's head or body blocks the way too (its widest part below 1.3 m)
+    const crown = (x, y, z, r) => {
+      const k = 1 - ((Math.min(1.3, Math.max(0.6, y)) - y) / r) ** 2;
+      if (k > 0 && r * Math.sqrt(k) > 0.3) colliders.push({ type: 'circle', x, z, r: r * Math.sqrt(k) - 0.18 });
     };
     tree(-9.0, FZ + 7.0, 0.9, true);
     tree(9.1, FZ + 6.9, 1.0);
@@ -435,6 +444,7 @@ export default {
     for (const [x, z, s] of [[-9.3, FZ + 3.9, 0.45], [-3.6, FZ + 7.4, 0.35], [8.0, FZ + 4.2, 0.4], [-9.4, FZ - 0.4, 0.5], [4.5, FZ + 7.6, 0.3]]) {
       add(at(sph(s, leaf, undefined, 12), x, s * 0.7, z));
       add(at(sph(s * 0.7, leaf2, undefined, 10), x + s * 0.6, s * 0.5, z + 0.1));
+      colliders.push({ type: 'circle', x: x + s * 0.2, z, r: s * 1.05, h: s * 1.6 });
     }
 
     // ---------------------------------------------------------------- hotspots and update

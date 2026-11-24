@@ -82,7 +82,7 @@ export default {
     }
     for (const p of pines) mounds.push({ x: p.x + 0.2, y: -0.04, z: p.z + 0.25, sx: 1.2 * p.s, sy: 0.25, sz: 1.1 * p.s });
     for (const [x, z, s] of [[-20, -3, 1.3], [-23.5, 5.6, 1], [20, 3.5, 1.4], [14.5, 7.6, 1.1], [-14.5, 11, 1], [4.5, 6.2, 0.8], [-9, -5, 0.9], [9.2, -1.5, 0.7], [20.2, -1.2, 1.1], [10.1, -8.4, 1.2], [21, -8.2, 1.3]]) {
-      mounds.push({ x, y: -0.05, z, sx: s * 1.3, sy: 0.3 * s + 0.1, sz: s });
+      mounds.push({ x, y: -0.05, z, sx: s * 1.3, sy: 0.3 * s + 0.1, sz: s, solid: true });
     }
     buildNature(g, colliders, vcFlat, { pines: [...pines, ...hillPines(26)], rocks, mounds });
     const bunnies = buildBunnies(g, dynamic, vcSoft, [[17.5, 5.2, 1.8], [-23, 6.4, 1.1]]);
@@ -117,6 +117,7 @@ export default {
     b.rbox(2.0, 0.6, 0.08, '#ef5b6f', 0.05, -9.1, 1.3, 2.95);
     b.plane(1.9, 0.5, cornerSign, -9.1, 1.3, 3.0);
     b.rbox(2.05, 0.08, 0.16, '#f6f9fc', 0.03, -9.1, 1.64, 2.95);
+    colliders.push({ type: 'box', x: -9.1, z: 2.95, hw: 0.95, hd: 0.1 });
     // A crate of carrots, a bucket of coal and a stack of snowballs
     b.rbox(0.7, 0.42, 0.5, '#c98a5a', 0.04, -9.7, 0.21, 4.1);
     for (let i = 0; i < 4; i++) {
@@ -335,12 +336,12 @@ export default {
       const lz = -fx;
       const roll = clamp(-rate * 0.18, -0.22, 0.22);
       [[a.player, 0.36, -1], [a.partner, -0.36, 1]].forEach(([q, off, hold], i) => {
-        const x = p.x + lx * off;
-        const z = p.z + lz * off;
+        // Local rink coordinates to the world (the place does not sit at the origin in town)
+        const w = worldAt(p.x + lx * off, p.z + lz * off);
         const glide = Math.sin(t * 2.4 + i * 0.4);
-        q.pos.set(x, 0, z);
+        q.pos.set(w.x, 0, w.z);
         q.yaw = yaw;
-        q.kid.root.position.set(x, 0.05 + Math.abs(glide) * 0.015, z);
+        q.kid.root.position.set(w.x, 0.05 + Math.abs(glide) * 0.015, w.z);
         q.kid.root.rotation.set(0, yaw + glide * 0.08, roll);
         q.kid.holdSide = q.kid.emoteType ? 0 : hold;
       });

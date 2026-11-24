@@ -85,8 +85,11 @@ export default {
     ['#ef5b6f', '#ffb347', '#ffd166', '#7fd36b', '#6fb8ff', '#c7a6ff'].forEach((c, i) => {
       const a = k.tor(1.75 - i * 0.09, 0.05, c, P, { rough: 0.6 }, 24, 6);
       a.rotation.y = P / 2;
+      a.scale.y = 1.35; // tall enough for the kids to walk under the middle
       add(at(a, PX1 + 0.02, 0, 4.8));
     });
+    // The low ends of the arch are solid
+    for (const s of [-1, 1]) col({ type: 'box', x: PX1, z: 4.8 + s * 1.42, hw: 0.1, hd: 0.36 });
     for (const s of [-1, 1]) {
       add(at(cyl(0.16, 0.2, 0.22, C.white, 12), PX1, 0.11, 4.8 + s * 1.72));
       col({ type: 'circle', x: PX1, z: 4.8 + s * 1.72, r: 0.2 });
@@ -96,7 +99,7 @@ export default {
     const bus = makeBus(k, atlas);
     bus.root.position.set(BUS.x, 0, BUS.z);
     add(dyn(bus.root));
-    col({ type: 'box', x: BUS.x + 0.1, z: BUS.z, hw: 3.15, hd: 1.12 });
+    col({ type: 'box', x: BUS.x - 0.05, z: BUS.z + 0.05, hw: 3.3, hd: 1.25 });
     // Parking bay lines
     for (const x of [BUS.x - 3.55, BUS.x + 3.6]) add(at(box(0.1, 0.012, 2.6, '#ffffff'), x, 0.006, BUS.z));
     const bay = atlas.panel(2.6, 0.42, 620, 100, (c, w, h) => {
@@ -147,6 +150,11 @@ export default {
       t.scale.setScalar(s);
       add(at(t, x, 0, z));
       col({ type: 'circle', x, z, r: 0.28 * s });
+      // Crown balls low enough to reach a kid's head or body block the way too (widest part below 1.3 m)
+      for (const [dx, dy, dz, rr] of [[0, 2.15, 0, 0.95], [0.55, 1.8, 0.25, 0.7], [-0.5, 2.55, 0.1, 0.62]]) {
+        const q = 1 - ((Math.min(1.3, Math.max(0.6, dy * s)) - dy * s) / (rr * s)) ** 2;
+        if (q > 0 && rr * s * Math.sqrt(q) > 0.3) col({ type: 'circle', x: x + dx * s, z: z + dz * s, r: rr * s * Math.sqrt(q) - 0.18 });
+      }
     };
     tree(-9.3, -6.4, 1.05);
     tree(9.2, -6.6, 1.1);

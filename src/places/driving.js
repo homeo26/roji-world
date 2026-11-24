@@ -70,7 +70,7 @@ export default {
     add(at(box(BW + 0.06, 0.12, BD + 0.06, C.sun), BX, 2.45, BZ));
     add(at(rbox(BW + 0.5, 0.32, BD + 0.5, C.teal, 0.1), BX, H + 0.12, BZ));
     for (let x = BX - BW / 2 + 0.25; x < BX + BW / 2; x += 0.5) add(at(sph(0.13, C.white, undefined, 8), x, H - 0.06, FZ + 0.24));
-    colliders.push({ type: 'box', x: BX, z: BZ, hw: BW / 2 + 0.1, hd: BD / 2 + 0.1 });
+    colliders.push({ type: 'box', x: BX, z: BZ + 0.12, hw: BW / 2 + 0.1, hd: BD / 2 + 0.22 }); // flower boxes stick out at the front
 
     // Windows with sun awnings and flower boxes
     const glass = util.mat('#cfeeff', { rough: 0.15, emissive: '#bfe6ff', ei: 0.3 });
@@ -360,6 +360,7 @@ export default {
     const stack = new THREE.Group();
     for (let i = 0; i < 3; i++) stack.add(at(makeCone(k), 0, i * 0.1, 0));
     add(at(stack, 13.8, 0.014, -10.9));
+    colliders.push({ type: 'circle', x: 13.8, z: -10.9, r: 0.22, h: 0.8 });
     // Stacked practice tyres in pastel colours
     const tyreGeo = new THREE.TorusGeometry(0.3, 0.13, 8, 18);
     tyreGeo.rotateX(Math.PI / 2);
@@ -494,6 +495,11 @@ export default {
     for (const [x, z, s, tone] of [[-14.1, 9.4, 0.95, 0], [-14.2, -3.4, 0.85, 1], [-3.5, -10.6, 0.8, 2], [14.2, 10.6, 0.8, 1]]) {
       add(at(tree(k, s, tone), x, 0, z));
       colliders.push({ type: 'circle', x, z, r: 0.25 * s });
+      // Crown balls low enough to reach a kid's head or body block the way too (widest part below 1.3 m)
+      for (const [dx, dy, dz, rr] of [[0, 2.0, 0, 0.9], [0.5, 1.7, 0.25, 0.62], [-0.45, 2.4, 0.1, 0.55]]) {
+        const q = 1 - ((Math.min(1.3, Math.max(0.6, dy * s)) - dy * s) / (rr * s)) ** 2;
+        if (q > 0 && rr * s * Math.sqrt(q) > 0.3) colliders.push({ type: 'circle', x: x + dx * s, z: z + dz * s, r: rr * s * Math.sqrt(q) - 0.18 });
+      }
     }
     for (const [x, z, s] of [[-14.2, 6.8, 0.9], [-14.4, 3.4, 0.7], [-3.6, -6.0, 0.75], [-3.8, -1.2, 0.7], [-3.6, 2.6, 0.8], [3.4, 10.0, 0.8], [5.8, 10.3, 0.65], [12.4, 10.1, 0.85], [-1.7, 8.9, 0.6]]) {
       const b = sph(0.45, s > 0.75 ? C.leaf : C.leafDark, { rough: 0.9 }, 12);

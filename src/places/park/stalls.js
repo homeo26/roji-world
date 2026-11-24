@@ -236,7 +236,7 @@ export function buildStalls(ctx, k, atlas, S) {
   const moleMesh = inst(moleGeo, vcMat(0.6), moles.length, { cast: false });
   alley.add(moleMesh);
   dynamic.push(moleMesh);
-  colliders.push({ type: 'box', x: A.x, z: A.z + 0.1, hw: (BW * 4 + 0.5) / 2, hd: 1.25 });
+  colliders.push({ type: 'box', x: A.x, z: A.z - 0.05, hw: (BW * 4 + 0.5) / 2, hd: 1.4 }); // the back boards stick out a little
   const huda = person(PEOPLE.games, A.x - BW * 0.5, 0.16, A.z + 0.2, 0, { noCollide: true });
   hotspots.push({
     x: A.x,

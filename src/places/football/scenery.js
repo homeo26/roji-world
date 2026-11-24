@@ -82,6 +82,8 @@ export function buildScenery() {
       colliders.push({ type: 'box', x: bx, z: PZ + zs * (GOAL.w / 2 + 0.02), hw: GOAL.dBot / 2, hd: 0.04, h: GOAL.h, tag: 'net' });
     }
     colliders.push({ type: 'box', x: side * (PL + GOAL.dBot), z: PZ, hw: 0.04, hd: GOAL.w / 2, h: GOAL.h, tag: 'net' });
+    // Kids only: the back net slopes in, so their heads stop before it (the ball ignores this one)
+    colliders.push({ type: 'box', x: side * (PL + 0.75), z: PZ, hw: 0.11, hd: GOAL.w / 2, h: GOAL.h, tag: 'kidnet' });
   }
 
   // ------------------------------------------------ corner flags
@@ -93,6 +95,7 @@ export function buildScenery() {
       f.flag.rotation.y = sx > 0 ? Math.PI : 0;
       flags.push({ pivot: f.flag, base: f.flag.rotation.y, ph: r() * 6 });
       dynamic.push(f.flag);
+      colliders.push({ type: 'circle', x: sx * PL, z: PZ + sz * PW, r: 0.1, tag: 'post' });
     }
   }
 
@@ -260,6 +263,14 @@ export function buildScenery() {
     add(mesh(new THREE.IcosahedronGeometry(0.6 * s, 1), lm), x + 0.5 * s, 1.6 * s, z + 0.25 * s);
     add(mesh(new THREE.IcosahedronGeometry(0.62 * s, 1), lm), x - 0.45 * s, 1.65 * s, z - 0.2 * s);
     colliders.push({ type: 'circle', x, z, r: 0.25 * s });
+    crown(x, 1.95 * s, z, 0.95 * s);
+    crown(x + 0.5 * s, 1.6 * s, z + 0.25 * s, 0.6 * s);
+    crown(x - 0.45 * s, 1.65 * s, z - 0.2 * s, 0.62 * s);
+  };
+  // A crown low enough to reach a kid's head or body blocks the way too (its widest part below 1.3 m)
+  const crown = (x, y, z, rr) => {
+    const k = 1 - ((Math.min(1.3, Math.max(0.6, y)) - y) / rr) ** 2;
+    if (k > 0 && rr * Math.sqrt(k) > 0.3) colliders.push({ type: 'circle', x, z, r: rr * Math.sqrt(k) - 0.18 });
   };
   tree(-12.5, -7.6, 1.1, leafCols[0]);
   tree(12.6, -7.7, 1.05, leafCols[3]);
@@ -269,7 +280,7 @@ export function buildScenery() {
     const bm = mat(c, { rough: 0.85, flat: true });
     add(mesh(new THREE.IcosahedronGeometry(0.55 * s, 1), bm), x, 0.42 * s, z);
     add(mesh(new THREE.IcosahedronGeometry(0.4 * s, 1), bm), x + 0.5 * s, 0.3 * s, z + 0.15);
-    colliders.push({ type: 'circle', x, z, r: 0.5 * s, h: 0.75 * s });
+    colliders.push({ type: 'circle', x: x + 0.2 * s, z: z + 0.05, r: 0.72 * s, h: 0.75 * s });
   };
   bush(-12.7, 7.6, 1, '#5aa84f');
   bush(12.6, 7.5, 1, '#6dbb58');

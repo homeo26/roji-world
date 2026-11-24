@@ -281,11 +281,20 @@ export function roundTree(group, x, z, s = 1, { colors = GREENS, blossom = false
   const pal = blossom ? ['#f6a5c0', '#f9bfd2', '#f28db0'] : colors;
   const blobs = [[0, 2.05, 0, 1.0], [0.55, 1.75, 0.25, 0.66], [-0.5, 1.8, -0.2, 0.7], [0.1, 2.6, -0.1, 0.62]];
   blobs.forEach(([dx, dy, dz, rr], i) => group.add(at(scl(ico(rr * s, pal[Math.abs(i + Math.round(x * 3)) % pal.length], { rough: 0.85 }, 1), 1, 0.92, 1), x + dx * s, dy * s, z + dz * s)));
-  return { type: 'circle', x, z, r: 0.28 * s };
+  // Colliders: the trunk, plus every crown blob low enough to reach a kid (its widest part below 1.3 m)
+  const out = [{ type: 'circle', x, z, r: 0.28 * s }];
+  for (const [dx, dy, dz, rr] of blobs) {
+    const cy = dy * s;
+    const q = 1 - ((Math.min(1.3, Math.max(0.6, cy)) - cy) / (rr * s * 0.92)) ** 2;
+    if (q > 0 && rr * s * Math.sqrt(q) > 0.3) out.push({ type: 'circle', x: x + dx * s, z: z + dz * s, r: rr * s * Math.sqrt(q) - 0.18 });
+  }
+  return out;
 }
 export function bush(group, x, z, rr, color = '#5aa84f') {
   group.add(at(scl(ico(rr, color, { rough: 0.85 }, 1), 1, 0.8, 1), x, rr * 0.62, z));
   group.add(at(scl(ico(rr * 0.68, '#6dbb58', { rough: 0.85 }, 1), 1, 0.8, 1), x + rr * 0.55, rr * 0.45, z + rr * 0.25));
+  // A collider over both blobs, low enough to hop onto
+  return { type: 'circle', x: x + rr * 0.2, z: z + rr * 0.08, r: rr * 1.0, h: rr * 1.3 };
 }
 // A low clipped hedge along a straight line.
 export function hedge(group, x0, z0, x1, z1, h = 0.7, t = 0.7, color = '#5aa84f') {

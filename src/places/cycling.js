@@ -193,6 +193,11 @@ export default {
       for (let x = -4.95; x < 5; x += 0.3) {
         const h = Math.max(hillX(x - 0.15), hillX(x + 0.15), hillX(x));
         if (h > 0.03) colliders.push({ type: 'box', x, z: ZB, hw: 0.15, hd: 1.25, h: h + 0.02 });
+        // The grassy shoulders on both sides, in bands that are each a small step up
+        for (const [u0, u1] of [[1.25, 1.5], [1.5, 1.75], [1.75, 2.0], [2.0, 2.25], [2.25, 2.5]]) {
+          const hb = h * prof((u0 + u1) / 2);
+          if (hb > 0.08) for (const sd of [-1, 1]) colliders.push({ type: 'box', x, z: ZB - sd * (u0 + u1) / 2, hw: 0.15, hd: (u1 - u0) / 2, h: hb });
+        }
       }
     }
     // Ramps: wooden wedges with a striped lip
@@ -229,7 +234,8 @@ export default {
     sign.position.set(-2.6, 0, 6.3);
     sign.rotation.y = 0.18;
     add(sign);
-    colliders.push({ type: 'box', x: -2.6, z: 6.25, hw: 1.1, hd: 0.12 });
+    // The sign is turned a little, so a row of small circles follows its board
+    for (const d of [-1.15, -0.58, 0, 0.58, 1.15]) colliders.push({ type: 'circle', x: -2.6 + d * Math.cos(0.18), z: 6.3 - d * Math.sin(0.18), r: 0.16 });
     // Bunting across the gate
     const flagGeo = new THREE.ConeGeometry(0.11, 0.26, 3).rotateX(Math.PI).rotateY(Math.PI / 6);
     const flagCols = ['#ef5b6f', '#ffd166', '#63c7ba', '#ff9eb5', '#7fb0ff'];
@@ -406,9 +412,9 @@ export default {
 
     // ---------------------------------------------------------- trees, bushes, beds, little signs
     for (const [x, z, s, b] of [[-9.6, -6.9, 1.05, false], [-5.2, -7.1, 0.9, true], [-0.4, -7.2, 1.0, false], [4.6, -7.0, 0.9, true], [9.4, -6.9, 1.05, false], [-11.0, 4.9, 0.7, false]]) {
-      colliders.push(roundTree(g, x, z, s, { blossom: b }));
+      colliders.push(...roundTree(g, x, z, s, { blossom: b }));
     }
-    for (const [x, z, rr] of [[-7.6, -7.3, 0.5], [-2.8, -7.4, 0.45], [2.2, -7.4, 0.5], [7.2, -7.4, 0.45], [11.3, -6.6, 0.45], [-11.3, -6.6, 0.5], [10.9, 5.6, 0.5], [-3.6, 2.0, 0.35], [3.6, -2.9, 0.4]]) bush(g, x, z, rr);
+    for (const [x, z, rr] of [[-7.6, -7.3, 0.5], [-2.8, -7.4, 0.45], [2.2, -7.4, 0.5], [7.2, -7.4, 0.45], [11.3, -6.6, 0.45], [-11.3, -6.6, 0.5], [10.9, 5.6, 0.5], [-3.6, 2.0, 0.35], [3.6, -2.9, 0.4]]) colliders.push(bush(g, x, z, rr));
     garden.bed(-3.2, 3.0, ZF - 1.75, ZF - 1.35, 0, 40, 44);
     garden.bed(-2.6, 2.4, ZB + 1.35, ZB + 1.7, 0, 30, 45);
     // Round tulip bed inside the right end, rows of colour around a wheel-shaped planter
