@@ -1624,3 +1624,6 @@ body.wardrobe-open .clock {
     display: none;
   }
 }
+
+/* A choice card on screen wins over a place toast (on phones they can touch) */
+body:has(.choose) #toast { opacity: 0; }

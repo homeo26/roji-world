@@ -370,7 +370,7 @@ export default {
       t.add(at(sph(0.62, '#7fd36b', { rough: 0.85 }, 14), -0.5, 2.55, 0.1));
       t.scale.setScalar(s);
       add(at(t, x, 0, z));
-      colliders.push({ type: 'circle', x, z, r: 0.3 * s });
+      colliders.push({ type: 'circle', x: x + 0.2 * s, z: z + 0.1 * s, r: 0.9 * s }); // the low crown, not only the trunk
     };
     tree(-9.9, 0.4, 1.1);
     tree(10.1, 0.1, 1.05);
