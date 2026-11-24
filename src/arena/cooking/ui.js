@@ -1,252 +1,305 @@
 import { PAL, drawFrame, frameLayout, artReady } from '../../interiors/yumyum/theme.js';
-import { itemUrl } from './food.js';
+import { url } from './art.js';
+import { DISH, HOW, LEVELS, NEED, totalStars, isOpen } from './data.js';
 
-// The cards and the score bar of Roji's YumYum Kitchen, drawn like Roji's logo card:
-// cream paper, raspberry ink, the pointed arch and the rose corners.
-
-const CSS = `
-body.ck-on #arena .a-title { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.16); }
-body.ck-on #arena .a-title span { color: ${PAL.frame}; }
-body.ck-on #arena .a-close { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.18); }
-body.ck-on #arena .a-score { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.16); padding: 6px 14px; }
-body.ck-on #arena .a-msg { color: ${PAL.paper}; text-shadow: 0 3px 0 ${PAL.inkDeep}, 0 0 2px ${PAL.inkDeep}, 0 10px 28px rgba(120,30,60,.45); }
-body.ck-on #arena .a-hint { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}; bottom: max(8px, env(safe-area-inset-bottom)); font-size: .8rem; padding: 4px 12px; }
-body.ck-on.ck-play.touch #arena .a-title, body.ck-on.ck-play #arena .a-title { display: none; }
-body.ck-on.ck-cardopen #arena .a-score { visibility: hidden; }
-body.ck-on.ck-cardopen #arena { z-index: 46; }
-@media (max-height: 520px) { body.ck-on.ck-cardopen #arena .a-title { display: none; } }
-.ck-hud { display: flex; align-items: center; gap: 10px; font: 700 1.05rem var(--font, 'Fredoka', system-ui); white-space: nowrap; }
-.ck-coinic { width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3c4 0 18%, #f4c24f 20% 62%, #c9921e 64%); box-shadow: inset 0 0 0 2px #e0a82e; display: inline-block; flex: none; }
-.ck-coins { min-width: 2.2em; text-align: right; display: inline-block; transition: transform .15s; }
-.ck-coins.bump { transform: scale(1.25); }
-.ck-prog { position: relative; width: 150px; height: 12px; border-radius: 99px; background: ${PAL.blush}; box-shadow: inset 0 0 0 2px ${PAL.band}; }
-.ck-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: linear-gradient(90deg, ${PAL.ink}, #ef6f8c); width: 0; transition: width .25s; }
-.ck-st { position: absolute; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); }
-.ck-st svg { width: 100%; height: 100%; display: block; }
-.ck-st.on { animation: ck-pop .4s cubic-bezier(.2,1.6,.4,1); }
-.ck-time { min-width: 2.6em; text-align: left; color: ${PAL.inkDeep}; }
-.ck-time.late { color: #e5484d; animation: ck-blink .5s infinite alternate; }
-.ck-combo { position: fixed; z-index: 41; right: max(14px, env(safe-area-inset-right)); top: calc(max(10px, env(safe-area-inset-top)) + 54px); background: ${PAL.ink}; color: ${PAL.paper}; font: 700 .95rem var(--font, 'Fredoka', system-ui); border-radius: 14px; padding: 4px 12px 7px; pointer-events: none; box-shadow: 0 6px 16px rgba(120,30,60,.3); transform-origin: 80% 0; opacity: 0; transition: opacity .2s; }
-.ck-combo.on { opacity: 1; }
-.ck-combo.bump { animation: ck-pop .35s cubic-bezier(.2,1.6,.4,1); }
-.ck-combo i { display: block; height: 4px; border-radius: 4px; background: ${PAL.paper}; margin-top: 3px; transform-origin: 0 50%; }
-.ck-lvl { position: fixed; z-index: 41; top: max(10px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); background: ${PAL.paper}; color: ${PAL.inkDeep}; border-radius: 16px; padding: 5px 13px 6px; font: 500 .82rem var(--font, 'Fredoka', system-ui); box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.14); pointer-events: none; display: none; line-height: 1.25; }
-.ck-lvl.on { display: block; }
-.ck-lvl b { color: ${PAL.ink}; font-weight: 700; }
-.ck-lvl .ck-ch { display: block; font-size: .74rem; color: ${PAL.oliveDeep}; }
-.ck-lvl .ck-ch[data-st="fail"] { color: #e5484d; text-decoration: line-through; }
-.ck-lvl .ck-ch[data-st="done"] { color: #b98222; font-weight: 700; }
-.ck-fly { position: fixed; inset: 0; z-index: 46; pointer-events: none; }
-.ck-fly .ck-coinic { position: absolute; left: 0; top: 0; width: 20px; height: 20px; }
-.ck-layer { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; background: rgba(90,30,50,.28); font-family: var(--font, 'Fredoka', system-ui, sans-serif); color: ${PAL.inkDeep}; }
-.ck-card { position: relative; width: min(780px, 94vw); height: min(560px, 92vh); animation: ck-in .28s cubic-bezier(.2,1.3,.4,1); filter: drop-shadow(0 18px 40px rgba(90,20,40,.35)); }
-.ck-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
-.ck-title { position: absolute; left: 0; right: 0; text-align: center; transform: translateY(-50%); pointer-events: none; }
-.ck-title small { display: block; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: ${PAL.frame}; font-weight: 600; }
-.ck-title b { display: block; font-size: 1.45rem; line-height: 1.1; color: ${PAL.ink}; }
-.ck-body { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
-.ck-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
-.ck-btn { border: 0; border-radius: 999px; padding: .55em 1.2em; font: 600 1rem var(--font, 'Fredoka', system-ui); cursor: pointer; background: ${PAL.blush}; color: ${PAL.inkDeep}; box-shadow: inset 0 0 0 2px ${PAL.band}; }
-.ck-btn.go { background: ${PAL.ink}; color: ${PAL.paper}; box-shadow: 0 4px 0 ${PAL.inkDeep}; }
-.ck-btn:hover, .ck-btn:focus-visible { filter: brightness(1.05); outline: none; transform: translateY(-1px); }
-.ck-btn:disabled { opacity: .5; cursor: default; transform: none; }
-.ck-wallet { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 1.05rem; background: ${PAL.paper}; border-radius: 99px; padding: 3px 12px 3px 6px; box-shadow: inset 0 0 0 2px ${PAL.band}; }
-.ck-levels { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; width: 100%; }
-.ck-lv { position: relative; border: 0; border-radius: 16px; padding: 6px 4px 5px; background: ${PAL.paper}; color: ${PAL.inkDeep}; font: 600 .78rem var(--font, system-ui); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: inset 0 0 0 2px ${PAL.band}; min-height: 84px; justify-content: center; }
-.ck-lv b { font-size: 1.35rem; line-height: 1; color: ${PAL.ink}; }
-.ck-lv span { font-size: .7rem; line-height: 1.1; color: ${PAL.inkDeep}; }
-.ck-lv .ck-stars svg { width: 16px; height: 16px; }
-.ck-lv.next { box-shadow: inset 0 0 0 3px ${PAL.ink}, 0 0 0 3px ${PAL.blush}; animation: ck-glow 1.2s infinite alternate; }
-.ck-lv:disabled { opacity: .55; cursor: default; background: ${PAL.blush}; }
-.ck-lv:hover:not(:disabled), .ck-lv:focus-visible { background: #fff3f2; outline: none; }
-.ck-lv .ck-rib { position: absolute; top: 4px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: ${PAL.gold}; box-shadow: 0 0 0 2px ${PAL.paper}; }
-.ck-stars { display: inline-flex; gap: 2px; }
-.ck-big svg { width: 44px; height: 44px; }
-.ck-big .s { opacity: 0; transform: scale(.3); }
-.ck-big .s.on { animation: ck-star .5s cubic-bezier(.2,1.6,.4,1) forwards; }
-.ck-big .s.off { animation: ck-fade .3s forwards; }
-.ck-menu { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.ck-menu img { width: 42px; height: 42px; background: ${PAL.paper}; border-radius: 12px; box-shadow: inset 0 0 0 2px ${PAL.band}; }
-.ck-new { display: flex; gap: 10px; align-items: center; text-align: left; background: ${PAL.paper}; border-radius: 16px; padding: 8px 12px; box-shadow: inset 0 0 0 2px ${PAL.band}; font-size: .86rem; line-height: 1.3; max-width: 560px; }
-.ck-new img { width: 52px; height: 52px; flex: none; }
-.ck-new b { color: ${PAL.ink}; }
-.ck-goal { display: flex; gap: 14px; font-weight: 700; font-size: .98rem; }
-.ck-goal span { display: inline-flex; align-items: center; gap: 2px; }
-.ck-goal svg { width: 18px; height: 18px; }
-.ck-line { font-size: .92rem; line-height: 1.35; }
-.ck-small { font-size: .8rem; color: ${PAL.frame}; }
-.ck-stats { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; font-size: .82rem; }
-.ck-stats span { background: ${PAL.paper}; border-radius: 99px; padding: 2px 10px; box-shadow: inset 0 0 0 2px ${PAL.band}; }
-.ck-chal { font-size: .86rem; padding: 3px 12px; border-radius: 99px; background: ${PAL.blush}; }
-.ck-chal.done { background: #e9f3d6; color: ${PAL.oliveDeep}; }
-.ck-shop { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
-.ck-up { display: grid; grid-template-columns: 46px 1fr; grid-template-rows: auto auto auto; column-gap: 8px; text-align: left; background: ${PAL.paper}; border-radius: 14px; padding: 6px 8px; box-shadow: inset 0 0 0 2px ${PAL.band}; font-size: .74rem; line-height: 1.2; align-items: center; }
-.ck-up img { grid-row: 1 / 4; width: 46px; height: 46px; }
-.ck-up b { font-size: .86rem; color: ${PAL.ink}; }
-.ck-up .pips { display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: middle; }
-.ck-up .pips i { width: 8px; height: 8px; border-radius: 50%; background: ${PAL.blush}; box-shadow: inset 0 0 0 1.5px ${PAL.frame}; }
-.ck-up .pips i.on { background: ${PAL.gold}; box-shadow: none; }
-.ck-up .ck-btn { padding: .25em .7em; font-size: .78rem; justify-self: start; margin-top: 3px; display: inline-flex; align-items: center; gap: 4px; }
-.ck-up .ck-btn .ck-coinic { width: 14px; height: 14px; }
-.ck-up.fit { animation: ck-pop .45s cubic-bezier(.2,1.6,.4,1); }
-.ck-up.locked { opacity: .55; }
-.ck-keys { font-size: .74rem; color: ${PAL.frame}; }
-body.touch .ck-keys { display: none; }
-@keyframes ck-in { from { transform: scale(.9); opacity: 0; } }
-@keyframes ck-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
-@keyframes ck-star { 0% { opacity: 0; transform: scale(.3) rotate(-30deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
-@keyframes ck-fade { to { opacity: .35; transform: scale(.85); } }
-@keyframes ck-glow { from { filter: brightness(1); } to { filter: brightness(1.08); } }
-@keyframes ck-blink { to { opacity: .55; } }
-@media (max-height: 520px) {
-  .ck-card { width: min(820px, 96vw); height: 94vh; }
-  .ck-title b { font-size: 1.12rem; }
-  .ck-title small { font-size: .62rem; }
-  .ck-body { gap: 6px; }
-  .ck-btn { font-size: .86rem; padding: .42em 1em; }
-  .ck-levels { gap: 6px; }
-  .ck-lv { min-height: 62px; padding: 3px 2px; border-radius: 12px; }
-  .ck-lv b { font-size: 1.05rem; }
-  .ck-lv span { font-size: .6rem; }
-  .ck-lv .ck-stars svg { width: 12px; height: 12px; }
-  .ck-big svg { width: 34px; height: 34px; }
-  .ck-menu img { width: 32px; height: 32px; }
-  .ck-new { font-size: .74rem; padding: 4px 10px; }
-  .ck-new img { width: 38px; height: 38px; }
-  .ck-line { font-size: .8rem; }
-  .ck-stats { font-size: .72rem; gap: 5px; }
-  .ck-goal { font-size: .86rem; }
-  .ck-shop { grid-template-columns: repeat(5, 1fr); gap: 5px; }
-  .ck-up { grid-template-columns: 1fr; text-align: center; justify-items: center; padding: 4px; font-size: .62rem; }
-  .ck-up img { grid-row: auto; width: 30px; height: 30px; }
-  .ck-up b { font-size: .7rem; }
-  .ck-up .ck-btn { justify-self: center; font-size: .7rem; }
-  .ck-up .what { display: none; }
-  .ck-hud { font-size: .95rem; gap: 7px; }
-  .ck-prog { width: 96px; height: 10px; }
-  .ck-st { width: 17px; height: 17px; }
-  .ck-coinic { width: 20px; height: 20px; }
-  .ck-combo { top: calc(max(8px, env(safe-area-inset-top)) + 46px); font-size: .82rem; }
-  .ck-lvl { font-size: .7rem; padding: 3px 10px 4px; }
-  .ck-lvl .ck-ch { font-size: .64rem; }
-}
-`;
+// The YumYum Kitchen's screens in Roji's logo style (cream paper, raspberry ink, the pink arch):
+// the order tickets, clock and score while cooking, and the framed cards for levels, recipes and results.
 
 const STAR = 'M12 2.6l2.8 5.8 6.3.9-4.6 4.4 1.1 6.3L12 17l-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z';
 export const starSvg = (on, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="${STAR}" fill="${on ? PAL.gold : PAL.blush}" stroke="${on ? '#b98222' : PAL.frame}" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
-const LOCK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${PAL.inkDeep}" stroke-width="2.6" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
-const coin = () => '<i class="ck-coinic"></i>';
+const LOCK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${PAL.inkDeep}" stroke-width="2.6" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+const coin = '<i class="ck2-coin"></i>';
+const STEP_ICON = { chop: 'step:chop', pan: 'step:pan', pot: 'step:pot', jug: 'step:jug', spit: 'step:spit' };
 
-// Little drawings for the upgrades that are not food.
-function upIcon(id) {
-  const food = { spit: 'wrap', coffee: 'latte', grill: 'burger:cheese', jar: 'lemonade', fries: 'fries', cakes: 'pecan' }[id];
-  if (food) return itemUrl(food, 92);
-  const c = document.createElement('canvas');
-  c.width = c.height = 92;
-  const g = c.getContext('2d');
-  g.lineWidth = 4;
-  g.strokeStyle = '#5a3a3f';
-  if (id === 'vases') {
-    g.fillStyle = PAL.ink;
-    g.beginPath();
-    g.moveTo(32, 50);
-    g.lineTo(60, 50);
-    g.lineTo(56, 84);
-    g.lineTo(36, 84);
-    g.closePath();
-    g.fill();
-    g.stroke();
-    for (const [x, y, col] of [[46, 30, PAL.rose], [30, 38, '#f6b9bd'], [62, 38, PAL.ink], [46, 44, '#f6b9bd']]) {
-      g.fillStyle = col;
-      g.beginPath();
-      g.arc(x, y, 11, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-    }
-    g.fillStyle = PAL.olive;
-    g.beginPath();
-    g.ellipse(24, 52, 10, 4, -0.5, 0, Math.PI * 2);
-    g.fill();
-  } else if (id === 'lanterns') {
-    g.fillStyle = PAL.gold;
-    g.beginPath();
-    g.moveTo(46, 8);
-    g.lineTo(62, 26);
-    g.lineTo(30, 26);
-    g.closePath();
-    g.fill();
-    g.stroke();
-    g.fillStyle = '#ffd98a';
-    g.fillRect(32, 28, 28, 40);
-    g.strokeRect(32, 28, 28, 40);
-    g.fillStyle = PAL.gold;
-    g.fillRect(30, 68, 32, 8);
-    g.strokeRect(30, 68, 32, 8);
-    g.fillStyle = 'rgba(255,190,90,.5)';
-    g.beginPath();
-    g.arc(46, 48, 10, 0, Math.PI * 2);
-    g.fill();
-  } else {
-    g.fillStyle = '#b8743a';
-    g.fillRect(16, 44, 60, 36);
-    g.strokeRect(16, 44, 60, 36);
-    g.fillStyle = PAL.gold;
-    g.fillRect(14, 38, 64, 8);
-    g.strokeRect(14, 38, 64, 8);
-    g.fillStyle = PAL.ink;
-    g.beginPath();
-    g.moveTo(46, 30);
-    g.bezierCurveTo(30, 18, 36, 6, 46, 16);
-    g.bezierCurveTo(56, 6, 62, 18, 46, 30);
-    g.fill();
-    g.fillStyle = PAL.blush;
-    g.fillRect(28, 54, 36, 16);
-  }
-  return c.toDataURL();
+const CSS = `
+body.ck2-on #arena .a-title { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.16); }
+body.ck2-on #arena .a-title span { color: ${PAL.frame}; }
+body.ck2-on #arena .a-close { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}, 0 6px 18px rgba(120,40,60,.18); }
+body.ck2-on #arena .a-msg { color: ${PAL.paper}; text-shadow: 0 3px 0 ${PAL.inkDeep}, 0 0 2px ${PAL.inkDeep}, 0 10px 28px rgba(120,30,60,.45); }
+body.ck2-on #arena .a-hint { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}; bottom: max(8px, env(safe-area-inset-bottom)); font-size: .78rem; padding: 4px 12px; }
+body.ck2-on.ck2-play #arena .a-title, body.ck2-on #arena .a-score { display: none; }
+body.ck2-on.ck2-cardopen #arena { z-index: 46; }
+body.ck2-on.ck2-cardopen #arena .a-hint { display: none; }
+@media (max-height: 520px) { body.ck2-on.ck2-cardopen #arena .a-title { display: none; } }
+body.ck2-on.touch #arena .a-btns { display: grid; grid-template-columns: 62px 82px; grid-template-rows: 62px 82px; gap: 6px; align-items: center; justify-items: center; }
+body.ck2-on.touch #arena .a-btn { width: 62px; height: 62px; font-size: .72rem; line-height: 1.05; padding: 0 4px; }
+body.ck2-on.touch #arena .a-btn.main { width: 82px; height: 82px; font-size: .82rem; background: ${PAL.ink}; }
+body.ck2-on.touch #arena .a-btn[data-b="swap"] { grid-area: 1 / 1; }
+body.ck2-on.touch #arena .a-btn[data-b="jump"] { grid-area: 1 / 2; background: #7cc95a; color: #fff; }
+body.ck2-on.touch #arena .a-btn[data-b="dash"] { grid-area: 2 / 1; }
+body.ck2-on.touch #arena .a-btn[data-b="action"] { grid-area: 2 / 2; }
+.ck2-hud { position: fixed; z-index: 41; left: 0; right: 0; top: max(8px, env(safe-area-inset-top)); pointer-events: none; font-family: var(--font, 'Fredoka', system-ui, sans-serif); color: ${PAL.inkDeep}; display: none; }
+body.ck2-play .ck2-hud { display: block; }
+.ck2-clock { position: absolute; left: max(10px, env(safe-area-inset-left)); top: 0; width: 64px; height: 64px; border-radius: 50%; background: ${PAL.paper}; box-shadow: 0 0 0 3px ${PAL.band}, 0 6px 16px rgba(120,40,60,.18); display: grid; place-items: center; font-weight: 700; font-size: 1.05rem; }
+.ck2-clock svg { position: absolute; inset: 4px; width: 56px; height: 56px; transform: rotate(-90deg); }
+.ck2-clock span { position: relative; }
+.ck2-clock.late { color: #e5484d; animation: ck2-blink .5s infinite alternate; }
+.ck2-score { position: absolute; right: calc(max(12px, env(safe-area-inset-right)) + 52px); top: 4px; background: ${PAL.paper}; border-radius: 18px; padding: 6px 12px 6px 8px; box-shadow: 0 0 0 3px ${PAL.band}, 0 6px 16px rgba(120,40,60,.16); display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 1.25rem; min-width: 70px; }
+.ck2-score b { display: inline-block; transition: transform .15s; }
+.ck2-score b.bump { transform: scale(1.3); }
+.ck2-score small { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 7px; white-space: nowrap; font-size: .72rem; color: ${PAL.inkDeep}; background: ${PAL.paper}; border-radius: 99px; padding: 1px 8px; box-shadow: 0 0 0 2px ${PAL.band}; }
+.ck2-score .ck2-goal { display: flex; gap: 1px; }
+.ck2-score .ck2-goal svg { width: 14px; height: 14px; }
+.ck2-coin { width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3c4 0 18%, #f4c24f 20% 62%, #c9921e 64%); box-shadow: inset 0 0 0 2px #e0a82e; display: inline-block; flex: none; }
+.ck2-orders { position: absolute; left: calc(max(10px, env(safe-area-inset-left)) + 76px); right: calc(max(12px, env(safe-area-inset-right)) + 150px); top: 0; height: 104px; display: flex; gap: 8px; align-items: flex-start; }
+.ck2-tk { position: relative; width: 116px; flex: none; background: ${PAL.paper}; border-radius: 14px; box-shadow: 0 0 0 2.5px ${PAL.band}, 0 6px 14px rgba(120,40,60,.16); padding: 9px 6px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; transition: transform .35s cubic-bezier(.2,1.3,.4,1), opacity .3s; animation: ck2-in .45s cubic-bezier(.2,1.3,.4,1); }
+.ck2-tk .bar { position: absolute; left: 6px; right: 6px; top: 4px; height: 6px; border-radius: 6px; background: ${PAL.blush}; overflow: hidden; }
+.ck2-tk .bar b { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: #7cc95a; }
+.ck2-tk .dish { width: 52px; height: 52px; }
+.ck2-tk .nm { font-size: .64rem; font-weight: 600; color: ${PAL.inkDeep}; white-space: nowrap; line-height: 1; margin-top: -2px; }
+.ck2-tk .ings { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; }
+.ck2-tk .ing { position: relative; width: 24px; height: 24px; border-radius: 7px; background: #fff; box-shadow: inset 0 0 0 1.5px ${PAL.band}; }
+.ck2-tk .ing img { width: 24px; height: 24px; display: block; }
+.ck2-tk .ing .st { position: absolute; right: -4px; bottom: -4px; width: 14px; height: 14px; border-radius: 50%; background: ${PAL.paper}; box-shadow: 0 0 0 1px ${PAL.band}; }
+.ck2-tk.late { animation: ck2-shake .35s infinite; }
+.ck2-tk.done { transform: translateY(-14px) scale(1.06); opacity: 0; box-shadow: 0 0 0 3px #7cc95a; }
+.ck2-tk.miss { transform: translateY(16px) rotate(-8deg); opacity: 0; box-shadow: 0 0 0 3px #e5484d; }
+.ck2-tk.first { box-shadow: 0 0 0 3px ${PAL.ink}, 0 6px 14px rgba(120,40,60,.2); }
+.ck2-banner { position: fixed; z-index: 42; left: 50%; top: calc(max(8px, env(safe-area-inset-top)) + 116px); transform: translate(-50%, -10px); background: ${PAL.ink}; color: ${PAL.paper}; font: 700 1.05rem var(--font, 'Fredoka', system-ui); padding: 6px 16px 7px; border-radius: 99px; box-shadow: 0 6px 18px rgba(120,30,60,.3); opacity: 0; transition: opacity .2s, transform .3s cubic-bezier(.2,1.4,.4,1); pointer-events: none; white-space: nowrap; }
+.ck2-banner.on { opacity: 1; transform: translate(-50%, 0); }
+.ck2-banner.bad { background: #e5484d; }
+.ck2-banner.warn { background: #ffb02e; color: #4a2b3a; }
+.ck2-banner.good { background: #4fae5a; }
+.ck2-words { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-family: var(--font, 'Fredoka', system-ui, sans-serif); }
+.ck2-w { position: absolute; left: 0; top: 0; white-space: nowrap; font-weight: 700; will-change: transform; }
+.ck2-pop { color: var(--c, #fff); font-size: 1.35rem; text-shadow: 0 2px 0 ${PAL.inkDeep}, 0 0 2px ${PAL.inkDeep}; }
+.ck2-bad { color: #fff; font-size: 1.1rem; text-shadow: 0 2px 0 #b8202a, 0 0 2px #b8202a; }
+.ck2-say { background: #fffdf8; color: ${PAL.inkDeep}; border-radius: 14px; padding: 4px 10px 5px; font-size: .88rem; box-shadow: 0 0 0 2px ${PAL.band}, 0 4px 10px rgba(80,30,40,.18); }
+.ck2-say::after { content: ''; position: absolute; left: 50%; bottom: -7px; margin-left: -6px; border: 6px solid transparent; border-top-color: #fffdf8; border-bottom: 0; }
+.ck2-tag { position: absolute; font: 700 .7rem var(--font, 'Fredoka', system-ui); color: #fff; padding: 1px 7px 2px; border-radius: 99px; white-space: nowrap; transform: translate(-50%, -100%); }
+.ck2-layer { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; background: rgba(90,30,50,.28); font-family: var(--font, 'Fredoka', system-ui, sans-serif); color: ${PAL.inkDeep}; }
+.ck2-card { position: relative; width: min(800px, 95vw); height: min(580px, 93vh); animation: ck2-pop .28s cubic-bezier(.2,1.3,.4,1); filter: drop-shadow(0 18px 40px rgba(90,20,40,.35)); }
+.ck2-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ck2-title { position: absolute; left: 0; right: 0; text-align: center; transform: translateY(-50%); pointer-events: none; }
+.ck2-title small { display: block; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: ${PAL.frame}; font-weight: 600; }
+.ck2-title b { display: block; font-size: 1.5rem; line-height: 1.1; color: ${PAL.ink}; }
+.ck2-body { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.ck2-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
+.ck2-btn { border: 0; border-radius: 999px; padding: .55em 1.2em; font: 600 1rem var(--font, 'Fredoka', system-ui); cursor: pointer; background: ${PAL.blush}; color: ${PAL.inkDeep}; box-shadow: inset 0 0 0 2px ${PAL.band}; }
+.ck2-btn.go { background: ${PAL.ink}; color: ${PAL.paper}; box-shadow: 0 4px 0 ${PAL.inkDeep}; }
+.ck2-btn:hover, .ck2-btn:focus-visible { filter: brightness(1.05); outline: none; transform: translateY(-1px); }
+.ck2-pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; background: ${PAL.paper}; border-radius: 99px; padding: 3px 12px 3px 8px; box-shadow: inset 0 0 0 2px ${PAL.band}; }
+.ck2-pill svg { width: 20px; height: 20px; }
+.ck2-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; }
+.ck2-lv { position: relative; border: 0; border-radius: 16px; padding: 6px 4px; background: ${PAL.paper}; color: ${PAL.inkDeep}; font: 600 .8rem var(--font, system-ui); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; box-shadow: inset 0 0 0 2px ${PAL.band}; min-height: 92px; justify-content: center; }
+.ck2-lv b { font-size: 1.3rem; line-height: 1; color: ${PAL.ink}; }
+.ck2-lv span { font-size: .74rem; line-height: 1.1; }
+.ck2-lv em { font-style: normal; font-size: .62rem; color: ${PAL.frame}; }
+.ck2-lv .stars svg { width: 17px; height: 17px; }
+.ck2-lv .menu { display: flex; gap: 1px; }
+.ck2-lv .menu img { width: 20px; height: 20px; }
+.ck2-lv.next { box-shadow: inset 0 0 0 3px ${PAL.ink}, 0 0 0 3px ${PAL.blush}; }
+.ck2-lv:disabled { opacity: .6; cursor: default; background: ${PAL.blush}; }
+.ck2-lv:hover:not(:disabled), .ck2-lv:focus-visible { background: #fff3f2; outline: none; }
+.ck2-mode { display: inline-flex; border-radius: 99px; box-shadow: inset 0 0 0 2px ${PAL.band}; background: ${PAL.paper}; padding: 3px; gap: 2px; }
+.ck2-mode button { border: 0; border-radius: 99px; padding: .3em .9em; font: 600 .86rem var(--font, system-ui); background: transparent; color: ${PAL.inkDeep}; cursor: pointer; }
+.ck2-mode button.on { background: ${PAL.ink}; color: ${PAL.paper}; }
+body.touch .ck2-mode, body.touch .ck2-keys { display: none; }
+.ck2-recipes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.ck2-rc { background: #fffdf8; border-radius: 16px; box-shadow: inset 0 0 0 2px ${PAL.band}; padding: 6px 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 120px; }
+.ck2-rc > img { width: 58px; height: 58px; }
+.ck2-rc b { font-size: .84rem; color: ${PAL.ink}; }
+.ck2-rc .chain { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.ck2-rc .chain span { display: inline-flex; align-items: center; gap: 0; background: ${PAL.paper}; border-radius: 9px; padding: 1px 3px; box-shadow: inset 0 0 0 1.5px ${PAL.band}; }
+.ck2-rc .chain img { width: 24px; height: 24px; }
+.ck2-rc .chain img.st { width: 18px; height: 18px; }
+.ck2-rc .pts { font-size: .7rem; color: ${PAL.frame}; }
+.ck2-twist { font-size: .9rem; line-height: 1.3; max-width: 560px; background: ${PAL.blush}; border-radius: 14px; padding: 6px 14px; }
+.ck2-goal { display: flex; gap: 14px; font-weight: 700; font-size: .95rem; }
+.ck2-goal span { display: inline-flex; align-items: center; gap: 1px; }
+.ck2-goal svg { width: 17px; height: 17px; }
+.ck2-keys { font-size: .74rem; color: ${PAL.frame}; line-height: 1.35; }
+.ck2-small { font-size: .8rem; color: ${PAL.frame}; }
+.ck2-big svg { width: 50px; height: 50px; }
+.ck2-big .s { opacity: 0; transform: scale(.3); }
+.ck2-big .s.on { animation: ck2-star .5s cubic-bezier(.2,1.6,.4,1) forwards; }
+.ck2-big .s.off { animation: ck2-fade .3s forwards; }
+.ck2-stats { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; font-size: .84rem; }
+.ck2-stats span { background: ${PAL.paper}; border-radius: 99px; padding: 2px 10px; box-shadow: inset 0 0 0 2px ${PAL.band}; }
+.ck2-new { background: #e9f3d6; color: ${PAL.oliveDeep}; border-radius: 99px; padding: 2px 12px; font-weight: 700; font-size: .86rem; }
+.ck2-final { font-size: 2.1rem; font-weight: 700; color: ${PAL.ink}; display: flex; align-items: center; gap: 8px; line-height: 1; }
+.ck2-final .ck2-coin { width: 30px; height: 30px; }
+@keyframes ck2-in { from { transform: translateX(60px) scale(.8); opacity: 0; } }
+@keyframes ck2-pop { from { transform: scale(.9); opacity: 0; } }
+@keyframes ck2-star { 0% { opacity: 0; transform: scale(.3) rotate(-30deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes ck2-fade { to { opacity: .35; transform: scale(.85); } }
+@keyframes ck2-blink { to { opacity: .55; } }
+@keyframes ck2-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px) rotate(-1deg); } 75% { transform: translateX(2px) rotate(1deg); } }
+@media (max-height: 520px) {
+  .ck2-clock { width: 50px; height: 50px; font-size: .86rem; }
+  .ck2-clock svg { inset: 3px; width: 44px; height: 44px; }
+  .ck2-score { font-size: 1rem; padding: 4px 10px 4px 6px; min-width: 56px; }
+  .ck2-score small { margin-top: 5px; font-size: .62rem; }
+  .ck2-coin { width: 19px; height: 19px; }
+  .ck2-orders { left: calc(max(10px, env(safe-area-inset-left)) + 60px); right: calc(max(12px, env(safe-area-inset-right)) + 128px); height: 70px; gap: 5px; }
+  .ck2-tk { width: 80px; padding: 7px 3px 3px; border-radius: 11px; gap: 0; }
+  .ck2-tk .dish { width: 32px; height: 32px; }
+  .ck2-tk .nm { display: none; }
+  .ck2-tk .ing { width: 17px; height: 17px; border-radius: 5px; }
+  .ck2-tk .ing img { width: 17px; height: 17px; }
+  .ck2-tk .ing .st { width: 10px; height: 10px; right: -3px; bottom: -3px; }
+  .ck2-banner { top: calc(max(6px, env(safe-area-inset-top)) + 76px); font-size: .86rem; padding: 4px 12px 5px; }
+  .ck2-say { font-size: .74rem; padding: 3px 8px 4px; }
+  .ck2-pop { font-size: 1.05rem; }
+  .ck2-card { width: min(840px, 97vw); height: 95vh; }
+  .ck2-title b { font-size: 1.12rem; }
+  .ck2-title small { font-size: .6rem; }
+  .ck2-body { gap: 5px; }
+  .ck2-btn { font-size: .84rem; padding: .4em 1em; }
+  .ck2-levels { gap: 5px; }
+  .ck2-lv { min-height: 58px; padding: 2px; border-radius: 12px; gap: 0; }
+  .ck2-lv b { font-size: 1rem; }
+  .ck2-lv span { font-size: .62rem; }
+  .ck2-lv .stars svg { width: 12px; height: 12px; }
+  .ck2-lv .menu img { width: 14px; height: 14px; }
+  .ck2-lv em { font-size: .55rem; }
+  .ck2-rc { min-width: 92px; padding: 3px 6px 4px; border-radius: 12px; }
+  .ck2-rc > img { width: 34px; height: 34px; }
+  .ck2-rc b { font-size: .68rem; }
+  .ck2-rc .chain img { width: 17px; height: 17px; }
+  .ck2-rc .chain img.st { width: 13px; height: 13px; }
+  .ck2-rc .pts { display: none; }
+  .ck2-twist { font-size: .72rem; padding: 3px 10px; }
+  .ck2-goal { font-size: .8rem; }
+  .ck2-goal svg { width: 13px; height: 13px; }
+  .ck2-big svg { width: 34px; height: 34px; }
+  .ck2-final { font-size: 1.4rem; }
+  .ck2-stats { font-size: .7rem; gap: 4px; }
+  .ck2-small { font-size: .68rem; }
 }
+`;
 
-export function createUI({ hud, sound }) {
+export function createUI({ sound }) {
   const style = document.createElement('style');
   style.textContent = CSS;
   document.head.appendChild(style);
-  document.body.classList.add('ck-on');
-  const fly = document.createElement('div');
-  fly.className = 'ck-fly';
-  document.body.appendChild(fly);
-  const combo = document.createElement('div');
-  combo.className = 'ck-combo';
-  combo.innerHTML = '<span></span><i></i>';
-  document.body.appendChild(combo);
-  const lvl = document.createElement('div');
-  lvl.className = 'ck-lvl';
-  document.body.appendChild(lvl);
-  let lvlKey = '';
-  function setLevel(name, ch, st) {
-    const key = `${name}|${ch}|${st}`;
-    if (key === lvlKey) return;
-    lvlKey = key;
-    lvl.classList.toggle('on', !!name);
-    if (!name) return;
-    const mark = st === 'fail' ? 'missed' : st === 'done' ? 'done!' : st && st !== 'ok' ? st : '';
-    lvl.innerHTML = `${name}${ch ? `<span class="ck-ch" data-st="${st === 'fail' || st === 'done' ? st : 'ok'}">Challenge: ${ch}${mark ? ` (${mark})` : ''}</span>` : ''}`;
-  }
+  document.body.classList.add('ck2-on');
+  const hudEl = document.createElement('div');
+  hudEl.className = 'ck2-hud';
+  hudEl.innerHTML = `<div class="ck2-clock"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" fill="none" stroke="${PAL.blush}" stroke-width="4"/><circle class="arc" cx="18" cy="18" r="15.5" fill="none" stroke="${PAL.ink}" stroke-width="4" stroke-linecap="round" stroke-dasharray="97.4" stroke-dashoffset="0"/></svg><span>0:00</span></div>
+    <div class="ck2-orders"></div>
+    <div class="ck2-score">${coin}<b>0</b><small></small></div>`;
+  document.body.appendChild(hudEl);
+  const banner = document.createElement('div');
+  banner.className = 'ck2-banner';
+  document.body.appendChild(banner);
+  const $ = (s) => hudEl.querySelector(s);
+  const clock = $('.ck2-clock');
+  const arc = $('.arc');
+  const clockText = $('.ck2-clock span');
+  const scoreB = $('.ck2-score b');
+  const scoreGoal = $('.ck2-score small');
+  const ordersEl = $('.ck2-orders');
+  const tickets = new Map();
+  let bannerT = 0;
   const tap = () => sound?.ui('tap');
   let layer = null;
   let ro = null;
   let redraw = null;
 
-  // ---------------------------------------------------------------- framed card
+  function ingChain(dish) {
+    return DISH[dish].parts
+      .map((p) => {
+        const how = HOW[p];
+        if (!how) return `<span><img alt="" src="${url(p, 48)}"></span>`;
+        const [base, step] = how;
+        const img = how[1] === 'pot' || how[1] === 'jug' ? BREWIMG(p) : `<img alt="" src="${url(base, 48)}">`;
+        return `<span>${img}<img class="st" alt="" src="${url(STEP_ICON[step], 36)}"></span>`;
+      })
+      .join('');
+  }
+  const BREWIMG = (p) => {
+    const need = { soup: ['onion', 'lentils'], 'rice:cooked': ['rice'], stew: ['lamb', 'jameed'], lemonade: ['lemon', 'mint', 'ice'] }[p] || [p];
+    return need.map((n) => `<img alt="" src="${url(n, 48)}">`).join('');
+  };
+
+  // ---------------------------------------------------------------- the play HUD
+  function setPlay(on) {
+    document.body.classList.toggle('ck2-play', on);
+  }
+  function setClock(t, total) {
+    const s = Math.max(0, Math.ceil(t));
+    const txt = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    if (clockText.textContent !== txt) clockText.textContent = txt;
+    arc.setAttribute('stroke-dashoffset', String(97.4 * (1 - t / total)));
+    clock.classList.toggle('late', t < 20);
+  }
+  let lastScore = -1;
+  function setScore(v, goal) {
+    if (v !== lastScore) {
+      if (v > lastScore && lastScore >= 0) {
+        scoreB.classList.add('bump');
+        setTimeout(() => scoreB.classList.remove('bump'), 150);
+      }
+      lastScore = v;
+      scoreB.textContent = String(v);
+      const lit = goal.filter((g) => v >= g).length;
+      const next = goal[lit];
+      scoreGoal.innerHTML = next != null ? `${starSvg(true).replace('<svg', '<svg width="11" height="11"')} ${lit + 1} at ${next}` : 'Three stars!';
+    }
+  }
+  function addOrder(o) {
+    const el = document.createElement('div');
+    el.className = 'ck2-tk';
+    el.innerHTML = `<i class="bar"><b></b></i><img class="dish" alt="" src="${url(`dish:${o.dish}`, 104)}"><span class="nm">${DISH[o.dish].name}</span><div class="ings">${DISH[o.dish].parts
+      .map((p) => {
+        const how = HOW[p];
+        const base = how ? (how[1] === 'pot' || how[1] === 'jug' ? p : how[0]) : p;
+        const st = how ? `<img class="st" alt="" src="${url(STEP_ICON[how[1]], 28)}">` : '';
+        return `<span class="ing"><img alt="" src="${url(base, 40)}">${st}</span>`;
+      })
+      .join('')}</div>`;
+    ordersEl.appendChild(el);
+    tickets.set(o.id, { el, bar: el.querySelector('.bar b') });
+  }
+  function tickOrders(orders) {
+    orders.forEach((o, i) => {
+      const t = tickets.get(o.id);
+      if (!t) return;
+      const k = Math.max(0, o.t / o.total);
+      t.bar.style.width = `${k * 100}%`;
+      t.bar.style.background = k > 0.5 ? '#7cc95a' : k > 0.25 ? '#f4b942' : '#e5484d';
+      t.el.classList.toggle('late', k < 0.2);
+      t.el.classList.toggle('first', i === 0 && orders.length > 1);
+    });
+  }
+  function endOrder(o, kind) {
+    const t = tickets.get(o.id);
+    if (!t) return;
+    tickets.delete(o.id);
+    t.el.classList.remove('late');
+    t.el.classList.add(kind);
+    setTimeout(() => t.el.remove(), 380);
+  }
+  function clearOrders() {
+    for (const t of tickets.values()) t.el.remove();
+    tickets.clear();
+    lastScore = -1;
+  }
+  function say(text, kind = '', ms = 1500) {
+    banner.className = `ck2-banner on ${kind}`;
+    banner.textContent = text;
+    bannerT = ms;
+  }
+  function update(dt) {
+    if (bannerT > 0) {
+      bannerT -= dt * 1000;
+      if (bannerT <= 0) banner.classList.remove('on');
+    }
+  }
+
+  // ---------------------------------------------------------------- framed cards
   function card({ small, title, body, archRatio = 0.3, lift = 0.16, justify = 'center' }) {
     closeCard();
-    document.body.classList.add('ck-cardopen');
+    document.body.classList.add('ck2-cardopen');
     layer = document.createElement('div');
-    layer.className = 'ck-layer';
-    layer.innerHTML = `<div class="ck-card" role="dialog" aria-label="${title.replace(/"/g, '')}"><canvas class="ck-frame"></canvas><div class="ck-title"><small>${small || ''}</small><b>${title}</b></div><div class="ck-body">${body}</div></div>`;
+    layer.className = 'ck2-layer';
+    layer.innerHTML = `<div class="ck2-card" role="dialog" aria-label="${title.replace(/"/g, '')}"><canvas class="ck2-frame"></canvas><div class="ck2-title"><small>${small || ''}</small><b>${title}</b></div><div class="ck2-body">${body}</div></div>`;
     document.body.appendChild(layer);
-    const el = layer.querySelector('.ck-card');
-    const cv = el.querySelector('.ck-frame');
-    const ttl = el.querySelector('.ck-title');
-    const bd = el.querySelector('.ck-body');
+    const el = layer.querySelector('.ck2-card');
+    const cv = el.querySelector('.ck2-frame');
+    const ttl = el.querySelector('.ck2-title');
+    const bd = el.querySelector('.ck2-body');
     redraw = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
@@ -259,7 +312,7 @@ export function createUI({ hud, sound }) {
       drawFrame(c, w, h, { archRatio });
       const L = frameLayout(w, h, { archRatio });
       ttl.style.top = `${L.spring - L.A * 0.5}px`;
-      const side = L.x0 + (L.x1 - L.x0) * 0.04;
+      const side = L.x0 + (L.x1 - L.x0) * 0.03;
       bd.style.left = `${side}px`;
       bd.style.right = `${side}px`;
       bd.style.top = `${L.spring - L.A * lift}px`;
@@ -278,50 +331,55 @@ export function createUI({ hud, sound }) {
     redraw = null;
     layer?.remove();
     layer = null;
-    document.body.classList.remove('ck-cardopen');
+    document.body.classList.remove('ck2-cardopen');
   }
   const on = (el, sel, fn) => el.querySelectorAll(sel).forEach((b) => b.addEventListener('click', (e) => (tap(), fn(b, e))));
 
-  // ---------------------------------------------------------------- screens
-  function showMap({ levels, progress, chefName, onPlay, onShop, onExit }) {
-    const open = (i) => i === 0 || progress.stars[i - 1] > 0;
-    const next = levels.findIndex((_, i) => open(i) && !progress.stars[i]);
-    const total = progress.stars.reduce((a, b) => a + b, 0);
-    const btns = levels
-      .map((lv, i) => {
-        const o = open(i);
-        return `<button class="ck-lv${i === next ? ' next' : ''}" data-lv="${i}" ${o ? '' : 'disabled'} aria-label="Level ${i + 1}: ${lv.name}">
-          ${progress.chall[i] ? '<i class="ck-rib" title="Challenge done"></i>' : ''}<b>${o ? i + 1 : LOCK}</b><span>${lv.name}</span>
-          <span class="ck-stars">${[0, 1, 2].map((k) => starSvg(k < progress.stars[i])).join('')}</span></button>`;
-      })
-      .join('');
+  function showMap({ progress, chef, onPlay, onMode, onExit }) {
+    const total = totalStars(progress);
+    const next = LEVELS.findIndex((_, i) => isOpen(progress, i) && !progress.stars[i]);
+    const btns = LEVELS.map((lv, i) => {
+      const o = isOpen(progress, i);
+      return `<button class="ck2-lv${i === next ? ' next' : ''}" data-lv="${i}" ${o ? '' : 'disabled'} aria-label="Kitchen ${i + 1}: ${lv.name}">
+        <b>${o ? i + 1 : LOCK}</b><span>${lv.name}</span>
+        ${o ? `<span class="menu">${lv.menu.map((d) => `<img alt="" src="${url(`dish:${d}`, 40)}">`).join('')}</span>` : `<em>${NEED[i]} stars to open</em>`}
+        <span class="stars">${[0, 1, 2].map((k) => starSvg(k < progress.stars[i])).join('')}</span></button>`;
+    }).join('');
     const el = card({
-      small: `Chef ${chefName}'s kitchen`,
-      title: 'Pick a shift',
-      body: `<div class="ck-row"><span class="ck-wallet">${coin()} ${progress.wallet}</span><span class="ck-wallet">${starSvg(true).replace('<svg', '<svg width="20" height="20"')} ${total} / ${levels.length * 3}</span></div>
-        <div class="ck-levels">${btns}</div>
-        <div class="ck-row"><button class="ck-btn go" data-a="shop">Kitchen shop</button><button class="ck-btn" data-a="exit">Back to town</button></div>`,
+      small: `Chef ${chef}'s kitchens`,
+      title: "Roji's YumYum Kitchen",
+      archRatio: 0.28,
+      body: `<div class="ck2-row"><span class="ck2-pill">${starSvg(true)} ${total} / ${LEVELS.length * 3}</span>
+          <span class="ck2-mode" role="group" aria-label="Players"><button data-m="solo" class="${progress.mode !== 'duo' ? 'on' : ''}">Cook with a helper</button><button data-m="duo" class="${progress.mode === 'duo' ? 'on' : ''}">Two players</button></span></div>
+        <div class="ck2-levels">${btns}</div>
+        <div class="ck2-row"><button class="ck2-btn" data-a="exit">Back to town</button></div>`,
     });
     on(el, '[data-lv]', (b) => onPlay(Number(b.dataset.lv)));
-    on(el, '[data-a="shop"]', () => onShop());
+    on(el, '[data-m]', (b) => {
+      onMode(b.dataset.m);
+      el.querySelectorAll('[data-m]').forEach((x) => x.classList.toggle('on', x === b));
+    });
     on(el, '[data-a="exit"]', () => onExit());
-    el.querySelector('.next')?.focus({ preventScroll: true });
+    el.querySelector('.next, .ck2-lv:not(:disabled)')?.focus({ preventScroll: true });
   }
 
-  function showIntro({ lv, cfg, menu, fresh, challenge, onStart, onBack }) {
-    const goals = cfg.goal.map((g, k) => `<span>${starSvg(true).repeat(k + 1)}&nbsp;${g}</span>`).join('');
-    const tips = fresh.map((f) => `<div class="ck-new"><img alt="" src="${itemUrl(f.icon, 104)}"><span><b>New!</b> ${f.text}</span></div>`).join('');
+  function showIntro({ i, lv, best, mode, chef, partner, onStart, onBack }) {
+    const goals = lv.stars.map((g, k) => `<span>${starSvg(true).repeat(k + 1)}&nbsp;${g}</span>`).join('');
+    const rcs = lv.menu.map((d) => `<div class="ck2-rc"><img alt="" src="${url(`dish:${d}`, 116)}"><b>${DISH[d].name}</b><div class="chain">${ingChain(d)}</div><span class="pts">${DISH[d].points} coins</span></div>`).join('');
+    const keys =
+      mode === 'duo'
+        ? `${chef}: WASD, E to pick up and put down, Space to chop or wash, Left Shift to dash.<br>${partner}: arrows, Enter, Right Shift to chop or wash, Right Ctrl to dash.`
+        : `WASD or arrows to walk, E to pick up and put down, hold Space to chop or wash, Shift to dash, Tab to swap chefs.`;
     const el = card({
-      small: `Level ${lv + 1}`,
-      title: cfg.name,
-      lift: 0.3,
-      body: `<div class="ck-goal">${goals}</div>
-        <div class="ck-menu">${menu.map((k) => `<img alt="" src="${itemUrl(k, 84)}">`).join('')}</div>
-        ${tips}
-        ${challenge ? `<div class="ck-chal">Challenge: ${challenge} (+25 coins)</div>` : ''}
-        <div class="ck-line ck-small">${cfg.time} seconds &middot; ${cfg.spots} guests at a time</div>
-        <div class="ck-row"><button class="ck-btn go" data-a="go">Open the doors</button><button class="ck-btn" data-a="back">Map</button></div>
-        <div class="ck-keys">Tap or click a station. Tap finished food to serve it, or drag it to a guest. Keys 1 to 8 work the stations, Space serves.</div>`,
+      small: `Kitchen ${i + 1} of ${LEVELS.length} &middot; ${lv.place}`,
+      title: lv.name,
+      lift: 0.32,
+      body: `<div class="ck2-twist">${lv.twist}</div>
+        <div class="ck2-recipes">${rcs}</div>
+        <div class="ck2-goal">${goals}</div>
+        <div class="ck2-small">${Math.floor(lv.time / 60)}:${String(lv.time % 60).padStart(2, '0')} on the clock${best ? ` &middot; your best: ${best}` : ''}${mode === 'duo' ? ' &middot; two players' : ` &middot; ${partner} helps you`}</div>
+        <div class="ck2-row"><button class="ck2-btn go" data-a="go">Start cooking</button><button class="ck2-btn" data-a="back">Kitchens</button></div>
+        <div class="ck2-keys">${keys}</div>`,
     });
     on(el, '[data-a="go"]', () => onStart());
     on(el, '[data-a="back"]', () => onBack());
@@ -331,158 +389,36 @@ export function createUI({ hud, sound }) {
   function showResult(r) {
     const stars = [0, 1, 2].map((k) => starSvg(k < r.stars, `s ${k < r.stars ? 'on' : 'off'}`)).join('');
     const el = card({
-      small: `Level ${r.lv + 1}: ${r.name}`,
+      small: `Kitchen ${r.i + 1}: ${r.name}`,
       title: r.title,
       lift: 0.3,
       justify: 'flex-start',
-      body: `<div class="ck-stars ck-big">${stars}</div>
-        <div class="ck-line">${r.text}</div>
-        <div class="ck-stats"><span>${r.served} served</span><span>${r.tips} in tips</span><span>Best combo x${r.bestCombo}</span>${r.lost ? `<span>${r.lost} left hungry</span>` : ''}</div>
-        ${r.challenge ? `<div class="ck-chal${r.challenge.done ? ' done' : ''}">${r.challenge.done ? `Challenge done: ${r.challenge.text}, +25 coins` : `Challenge missed: ${r.challenge.text}`}</div>` : ''}
-        <div class="ck-row"><span class="ck-wallet">${coin()} ${r.wallet}</span></div>
-        <div class="ck-row">${r.canNext ? '<button class="ck-btn go" data-a="next">Next level</button>' : ''}<button class="ck-btn${r.canNext ? '' : ' go'}" data-a="again">Play again</button><button class="ck-btn" data-a="shop">Kitchen shop</button><button class="ck-btn" data-a="map">Map</button></div>`,
+      body: `<div class="ck2-stars ck2-big">${stars}</div>
+        <div class="ck2-final">${coin}${r.score}</div>
+        ${r.isBest ? '<div class="ck2-new">New best score!</div>' : `<div class="ck2-small">Best: ${r.best}</div>`}
+        <div class="ck2-stats"><span>${r.served} served</span><span>${r.tips} in tips</span><span>Best streak x${r.streak}</span>${r.missed ? `<span>${r.missed} missed</span>` : ''}</div>
+        ${r.unlocked ? `<div class="ck2-new">New kitchen open: ${r.unlocked}</div>` : r.stars < 3 ? `<div class="ck2-small">${r.toNext}</div>` : ''}
+        <div class="ck2-row">${r.canNext ? '<button class="ck2-btn go" data-a="next">Next kitchen</button>' : ''}<button class="ck2-btn${r.canNext ? '' : ' go'}" data-a="again">Play again</button><button class="ck2-btn" data-a="map">Kitchens</button><button class="ck2-btn" data-a="exit">Back to town</button></div>`,
     });
-    el.querySelectorAll('.ck-big .s').forEach((s, i) => (s.style.animationDelay = `${0.25 + i * 0.32}s`));
-    if (r.stars > 0) for (let i = 0; i < r.stars; i++) setTimeout(() => layer && sound?.tone && sound.ctx && !sound.muted && sound.tone(660 * Math.pow(1.26, i), sound.ctx.currentTime, 0.25, { type: 'triangle', gain: 0.06 }), 250 + i * 320);
+    el.querySelectorAll('.ck2-big .s').forEach((s, i) => (s.style.animationDelay = `${0.25 + i * 0.32}s`));
     on(el, '[data-a="next"]', () => r.onNext());
-    on(el, '[data-a="again"]', () => r.onRetry());
-    on(el, '[data-a="shop"]', () => r.onShop());
+    on(el, '[data-a="again"]', () => r.onAgain());
     on(el, '[data-a="map"]', () => r.onMap());
+    on(el, '[data-a="exit"]', () => r.onExit());
     el.querySelector('.go')?.focus({ preventScroll: true });
   }
 
-  function showShop({ upgrades, progress, reached, onBuy, onClose }) {
-    const render = (flash) => {
-      const items = upgrades
-        .map((u) => {
-          const lvl = progress.up[u.id] || 0;
-          const max = lvl >= u.steps.length;
-          const locked = reached < u.from;
-          const st = u.steps[Math.min(lvl, u.steps.length - 1)];
-          const pips = u.steps.map((_, k) => `<i class="${k < lvl ? 'on' : ''}"></i>`).join('');
-          const btn = locked
-            ? `<button class="ck-btn" disabled>Level ${u.from + 1}</button>`
-            : max
-              ? '<button class="ck-btn" disabled>Fitted</button>'
-              : `<button class="ck-btn${progress.wallet >= st.price ? ' go' : ''}" data-buy="${u.id}" ${progress.wallet >= st.price ? '' : 'disabled'}>${coin()} ${st.price}</button>`;
-          return `<div class="ck-up${locked ? ' locked' : ''}${flash === u.id ? ' fit' : ''}"><img alt="" src="${upIcon(u.id)}"><span><b>${u.name}</b><span class="pips">${pips}</span></span><span class="what">${max ? 'All done' : st.text}</span>${btn}</div>`;
-        })
-        .join('');
-      const el = card({
-        small: 'Spend your coins',
-        title: 'Kitchen shop',
-        archRatio: 0.26,
-        body: `<div class="ck-row"><span class="ck-wallet">${coin()} ${progress.wallet}</span></div><div class="ck-shop">${items}</div>
-          <div class="ck-row"><button class="ck-btn go" data-a="close">Done</button></div>`,
-      });
-      on(el, '[data-buy]', (b) => {
-        if (onBuy(b.dataset.buy)) render(b.dataset.buy);
-      });
-      on(el, '[data-a="close"]', () => onClose());
-    };
-    render(null);
-  }
-
-  // ---------------------------------------------------------------- score bar
-  let hudRefs = null;
-  function scoreBar(goal) {
-    const max = goal[2];
-    hud.score(`<span class="ck-hud">${coin()}<b class="ck-coins">0</b><span class="ck-prog"><span class="ck-fill"></span>${goal.map((g, k) => `<i class="ck-st" style="left:${(g / max) * 100}%">${starSvg(false)}</i>`.replace('<svg', `<svg data-k="${k}"`)).join('')}</span><span class="ck-time">0:00</span></span>`);
-    const root = document.querySelector('#arena .a-score');
-    hudRefs = { root, coins: root.querySelector('.ck-coins'), fill: root.querySelector('.ck-fill'), stars: [...root.querySelectorAll('.ck-st')], time: root.querySelector('.ck-time'), goal, lit: 0, last: '', lastT: '' };
-  }
-  function setScore(coins, time, late) {
-    const h = hudRefs;
-    if (!h) return;
-    const c = String(Math.round(coins));
-    if (c !== h.last) {
-      h.last = c;
-      h.coins.textContent = c;
-      h.fill.style.width = `${Math.min(100, (coins / h.goal[2]) * 100)}%`;
-      const lit = h.goal.filter((g) => coins >= g).length;
-      while (h.lit < lit) {
-        const s = h.stars[h.lit];
-        s.innerHTML = starSvg(true);
-        s.classList.add('on');
-        h.lit++;
-      }
-    }
-    const sec = Math.max(0, Math.ceil(time));
-    const tt = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-    if (tt !== h.lastT) {
-      h.lastT = tt;
-      h.time.textContent = tt;
-      h.time.classList.toggle('late', late);
-    }
-  }
-  function bumpCoins() {
-    const el = hudRefs?.coins;
-    if (!el) return;
-    el.classList.add('bump');
-    setTimeout(() => el.classList.remove('bump'), 140);
-  }
-  function clearScore() {
-    hud.score('');
-    hudRefs = null;
-  }
-  // Coins that fly from a point on screen to the coin in the score bar.
-  function flyCoins(from, n, onEach) {
-    const target = hudRefs?.root.querySelector('.ck-coinic');
-    if (!target) return;
-    const r = target.getBoundingClientRect();
-    const tx = r.left + r.width / 2 - 10;
-    const ty = r.top + r.height / 2 - 10;
-    for (let i = 0; i < n; i++) {
-      const el = document.createElement('i');
-      el.className = 'ck-coinic';
-      fly.appendChild(el);
-      const sx = from.x - 10 + (Math.random() - 0.5) * 40;
-      const sy = from.y - 10 + (Math.random() - 0.5) * 20;
-      const mx = sx + (Math.random() - 0.5) * 80;
-      const my = sy - 50 - Math.random() * 40;
-      const a = el.animate(
-        [
-          { transform: `translate(${sx}px, ${sy}px) scale(.4)`, opacity: 0 },
-          { transform: `translate(${mx}px, ${my}px) scale(1.1)`, opacity: 1, offset: 0.3 },
-          { transform: `translate(${tx}px, ${ty}px) scale(.8)`, opacity: 1 },
-        ],
-        { duration: 650 + i * 60, delay: i * 55, easing: 'cubic-bezier(.4,.1,.6,1)', fill: 'both' },
-      );
-      a.onfinish = () => {
-        el.remove();
-        onEach?.(i);
-      };
-    }
-  }
-  function setCombo(n, k) {
-    if (n < 2) {
-      combo.classList.remove('on');
-      return;
-    }
-    combo.classList.add('on');
-    const t = `Combo x${n}`;
-    const span = combo.querySelector('span');
-    if (span.textContent !== t) {
-      span.textContent = t;
-      combo.classList.remove('bump');
-      void combo.offsetWidth;
-      combo.classList.add('bump');
-    }
-    combo.querySelector('i').style.transform = `scaleX(${Math.max(0, Math.min(1, k))})`;
-  }
-
   return {
-    showMap, showIntro, showResult, showShop, closeCard, scoreBar, setScore, bumpCoins, clearScore, flyCoins, setCombo, setLevel,
+    setPlay, setClock, setScore, addOrder, tickOrders, endOrder, clearOrders, say, update, showMap, showIntro, showResult, closeCard,
     get open() {
       return !!layer;
     },
     dispose() {
       closeCard();
       style.remove();
-      fly.remove();
-      combo.remove();
-      lvl.remove();
-      document.body.classList.remove('ck-on', 'ck-play', 'ck-cardopen');
+      hudEl.remove();
+      banner.remove();
+      document.body.classList.remove('ck2-on', 'ck2-play', 'ck2-cardopen');
     },
   };
 }
