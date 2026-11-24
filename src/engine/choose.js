@@ -21,6 +21,12 @@ const CSS = `
 `;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const open = new Set();
+
+// Close every open choice card as if dismissed (a game that ends mid-question).
+export function closeChoices() {
+  for (const done of [...open]) done(null);
+}
 
 export function choose({ title = '', text = '', options = [] } = {}) {
   if (!document.getElementById('choose-style')) {
@@ -36,10 +42,12 @@ export function choose({ title = '', text = '', options = [] } = {}) {
       .map((o) => `<button data-c="${esc(o.id)}">${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`)
       .join('')}</div></div>`;
     const done = (v) => {
+      open.delete(done);
       el.remove();
       window.removeEventListener('keydown', key, true);
       resolve(v);
     };
+    open.add(done);
     const key = (e) => {
       if (e.key === 'Escape') {
         e.stopImmediatePropagation();
