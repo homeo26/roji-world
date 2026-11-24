@@ -98,16 +98,29 @@ export class UI {
         }
       });
     }
+    // Touch buttons act on touch-down. The click the browser sends when the finger lifts would land on
+    // whatever that press just opened (a choice card, a panel), so it is swallowed.
+    const press = (fn) => (e) => {
+      e.preventDefault();
+      const t = performance.now();
+      const eat = (ev) => {
+        window.removeEventListener('click', eat, true);
+        if (performance.now() - t < 800) {
+          ev.stopPropagation();
+          ev.preventDefault();
+        }
+      };
+      window.addEventListener('click', eat, true);
+      setTimeout(() => window.removeEventListener('click', eat, true), 900);
+      fn();
+    };
     $('btn-hands').addEventListener('click', () => h.onHands());
     $('t-hands').innerHTML = svgIcon('hands', 26);
-    $('t-hands').addEventListener('pointerdown', (e) => (e.preventDefault(), h.onHands()));
+    $('t-hands').addEventListener('pointerdown', press(() => h.onHands()));
     $('t-emote').innerHTML = svgIcon('music', 26);
-    $('t-emote').addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      $('emote-wheel').classList.toggle('hidden');
-    });
-    $('t-jump').addEventListener('pointerdown', (e) => (e.preventDefault(), h.onJump()));
-    $('t-action').addEventListener('pointerdown', (e) => (e.preventDefault(), h.onAction('auto')));
+    $('t-emote').addEventListener('pointerdown', press(() => $('emote-wheel').classList.toggle('hidden')));
+    $('t-jump').addEventListener('pointerdown', press(() => h.onJump()));
+    $('t-action').addEventListener('pointerdown', press(() => h.onAction('auto')));
 
     // Panels
     $('journal').addEventListener('click', (e) => {

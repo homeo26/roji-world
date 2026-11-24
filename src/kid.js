@@ -333,6 +333,30 @@ export class Kid {
     nose.position.set(HC.x, HC.y - 0.055, HC.z + 0.298);
     H.add(nose);
 
+    // Grown-ups: a moustache and a beard (look.mustache / look.beard: true or a colour)
+    const facial = L.beard || L.mustache;
+    if (facial) {
+      const fm = mat(typeof facial === 'string' ? facial : L.hair, { rough: 0.8 });
+      const tache = mesh(new THREE.CapsuleGeometry(0.026, 0.1, 4, 8), fm, { cast: false });
+      tache.rotation.z = Math.PI / 2;
+      tache.position.set(HC.x, HC.y - 0.078, HC.z + 0.288);
+      tache.scale.set(1, 1, 0.7);
+      H.add(tache);
+      for (const s of [1, -1]) {
+        const end = mesh(new THREE.SphereGeometry(0.024, 8, 6), fm, { cast: false });
+        end.position.set(HC.x + 0.068 * s, HC.y - 0.094, HC.z + 0.272);
+        H.add(end);
+      }
+      if (L.beard) {
+        const beard = mesh(new THREE.SphereGeometry(R * 1.01, 24, 12, Math.PI * 0.12, Math.PI * 0.76, Math.PI * 0.6, Math.PI * 0.3), fm, { cast: false });
+        beard.position.copy(HC);
+        beard.rotation.y = 0;
+        beard.material.side = THREE.DoubleSide;
+        H.add(beard);
+        this.mouth.position.z += 0.012;
+      }
+    }
+
     // Anchor in front of the chest for carried things (gift box, book, plate)
     this.carryAnchor = new THREE.Group();
     this.carryAnchor.position.set(0, 0.5, 0.3);
@@ -357,6 +381,15 @@ export class Kid {
       H.add(m);
       return m;
     };
+    // Grown-ups only: a bald crown with a horseshoe of short hair round the back and sides
+    if (style === 'bald') {
+      const ring = add(mesh(new THREE.TorusGeometry(0.27, 0.05, 8, 24, Math.PI * 1.25), hair));
+      ring.position.set(HC.x, HC.y + 0.01, HC.z - 0.01);
+      // The arc lies flat round the head with its open part over the forehead
+      ring.rotation.set(Math.PI / 2 - 0.12, 0, Math.PI * 0.875);
+      ring.scale.set(1.12, 1.1, 1);
+      return;
+    }
     const cap = (len = 1.12, r = 0.33) => {
       const m = add(mesh(new THREE.SphereGeometry(r, 32, 16, 0, Math.PI * 2, 0, len), hair));
       m.position.copy(HC);
@@ -539,7 +572,9 @@ export class Kid {
     legL.rotation.set(s * 0.75 * w, 0, 0);
     legR.rotation.set(-s * 0.75 * w, 0, 0);
     B.position.set(0, Math.abs(Math.cos(this.walkPhase)) * 0.07 * w, 0);
-    B.rotation.set(damp(B.rotation.x, 0.1 * w, 8, dt), 0, 0);
+    // Walk lean is kept apart from the body rotation, so a flip or a bow never carries into the next frame
+    this.lean = damp(this.lean || 0, 0.1 * w, 8, dt);
+    B.rotation.set(this.lean, 0, 0);
     const breathe = Math.sin(t * 2.2) * 0.012;
     this.torso.scale.set(1 + breathe * 0.5, 1 + breathe, 1 + breathe * 0.5);
     const swingA = -s * 0.65 * w;

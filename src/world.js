@@ -3,6 +3,21 @@ import { mat, umat, mesh, rng, canvasTexture, roundRect, FONT } from './util.js'
 import { decorateGround } from './engine/ground.js';
 import { PLACES } from './engine/manifest.js';
 
+// Flat strips on the ground (path, roads, the golden trail) overlap at crossings. Instead of tiny height
+// differences, which flicker, they skip the depth write and are drawn in a fixed order on top of the grass.
+const LAYER = { border: 1, curb: 2, path: 3, road: 4, trail: 5 };
+function groundLayer(m) {
+  m.depthWrite = false;
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -2;
+  m.polygonOffsetUnits = -2;
+  return m;
+}
+function layered(m, order) {
+  m.renderOrder = order;
+  return m;
+}
+
 // World frame: y up, ground at y = 0, the camera looks toward -Z.
 // The journey runs in three rows from the front (+Z) to the back (-Z).
 
@@ -192,16 +207,19 @@ export class World {
 
   buildPathMeshes() {
     // Soft darker border, then the sand path on top
-    const border = mesh(this.ribbon(this.samples, 2.9, 0.02), mat('#cfb27e', { rough: 1 }), { cast: false });
-    const path = mesh(this.ribbon(this.samples, 2.35, 0.035), mat('#f3dfb4', { rough: 1 }), { cast: false });
+    const borderMat = groundLayer(mat('#cfb27e', { rough: 1 }));
+    const sandMat = groundLayer(mat('#f3dfb4', { rough: 1 }));
+    const border = layered(mesh(this.ribbon(this.samples, 2.9, 0.02), borderMat, { cast: false }), LAYER.border);
+    const path = layered(mesh(this.ribbon(this.samples, 2.35, 0.035), sandMat, { cast: false }), LAYER.path);
     this.scene.add(border, path);
-    const townBorder = mesh(this.ribbon(this.townSamples, 2.9, 0.021), mat('#cfb27e', { rough: 1 }), { cast: false });
-    const townPath = mesh(this.ribbon(this.townSamples, 2.35, 0.036), mat('#f3dfb4', { rough: 1 }), { cast: false });
+    const townBorder = layered(mesh(this.ribbon(this.townSamples, 2.9, 0.02), borderMat, { cast: false }), LAYER.border);
+    const townPath = layered(mesh(this.ribbon(this.townSamples, 2.35, 0.035), sandMat, { cast: false }), LAYER.path);
     this.scene.add(townBorder, townPath);
 
     // Golden trail that grows as weekends are stamped
     this.trailMat = new THREE.MeshStandardMaterial({ color: '#ffd166', emissive: '#ffb347', emissiveIntensity: 0.55, roughness: 0.5 });
-    this.trail = mesh(this.ribbon(this.samples, 0.55, 0.05), this.trailMat, { cast: false });
+    groundLayer(this.trailMat);
+    this.trail = layered(mesh(this.ribbon(this.samples, 0.55, 0.05), this.trailMat, { cast: false }), LAYER.trail);
     this.trail.geometry.setDrawRange(0, 0);
     this.trailShown = 0;
     this.trailTarget = 0;
@@ -431,8 +449,8 @@ export class World {
     });
     roadTex.wrapS = THREE.RepeatWrapping;
     roadTex.repeat.set(0.25, 1);
-    const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 });
-    const curbMat = mat('#efe6da', { rough: 0.9 });
+    const roadMat = groundLayer(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 }));
+    const curbMat = groundLayer(mat('#efe6da', { rough: 0.9 }));
     this.cityRoads = [];
     CITY_ROADS.forEach((line, i) => {
       const pts = [];
@@ -443,9 +461,9 @@ export class World {
         for (let j = k === 0 ? 0 : 1; j <= n; j++) pts.push(a.clone().lerp(b, j / n));
       }
       this.cityRoads.push(pts);
-      const y = 0.03 + i * 0.0016;
-      this.scene.add(mesh(this.ribbon(pts, 3.9, y), curbMat, { cast: false }));
-      this.scene.add(mesh(this.ribbon(pts, 3.1, y + 0.0008), roadMat, { cast: false }));
+      // All curbs go down first and all asphalt on top, so crossings join cleanly
+      this.scene.add(layered(mesh(this.ribbon(pts, 3.9, 0.03), curbMat, { cast: false }), LAYER.curb));
+      this.scene.add(layered(mesh(this.ribbon(pts, 3.1, 0.032), roadMat, { cast: false }), LAYER.road));
     });
   }
 

@@ -3,7 +3,7 @@ import { mat, umat, mesh, canvasTexture, roundRect } from '../../util.js';
 import { C, kit, colorBake, Atlas, drawSign, signGeo, drawCertificate, drawNote, drawPolaroid, drawWheelBadge, HOMAMA_PHOTO, ROJI_PHOTO, makeNora, freezeKid, makeCone, tree, addFlowers, paintedPlane, paintText, heartPath, licenceProgress } from './kit.js';
 
 // Inside Little Wheels, open at the front like a dollhouse:
-//   reception with the waiting chairs | the theory corner with the quiz computer and Nora | the certificate room
+//   reception with the waiting chairs | the theory corner with the quiz computer and Abu Sanad | the certificate room
 //   with Homama's framed certificate, the wall of student photos and a sofa.
 
 const X0 = -12;
@@ -359,7 +359,7 @@ export function buildDrivingInterior(ctx) {
   stool.add(at(cyl(0.2, 0.2, 0.03, C.ink, 12), 0, 0.02, 0));
   add(at(stool, QX, 0, -3.05));
   colliders.push({ type: 'circle', x: QX, z: -3.05, r: 0.24, h: 0.52 });
-  // Whiteboard with a roundabout lesson, and Nora beside it
+  // Whiteboard with a roundabout lesson, and Abu Sanad beside it
   const WBX = 2.6;
   cells.board = atlas.add((c, w, h) => {
     c.fillStyle = '#ffffff';
@@ -626,15 +626,15 @@ export function buildDrivingInterior(ctx) {
     const p = licenceProgress();
     const lines = roji(api)
       ? [
-          '<b>Nora:</b> Hello Roji! Gentle on the brake, smooth on the turns.',
-          p >= 100 ? '<b>Nora:</b> Licensed driver Roji! I am so proud of you.' : `<b>Nora:</b> Your licence is ${Math.round(p)}% done. A few more lessons!`,
-          '<b>Nora:</b> The ducks always have right of way. Always!',
-          '<b>Nora:</b> Homama got full marks. He talks about you all the time.',
+          '<b>Abu Sanad:</b> Hello Roji! Gentle on the brake, smooth on the turns.',
+          p >= 100 ? '<b>Abu Sanad:</b> Licensed driver Roji! I am so proud of you.' : `<b>Abu Sanad:</b> Your licence is ${Math.round(p)}% done. A few more lessons!`,
+          '<b>Abu Sanad:</b> The ducks always have right of way. Always!',
+          '<b>Abu Sanad:</b> Homama got full marks. He talks about you all the time.',
         ]
       : [
-          '<b>Nora:</b> Hi Homama! Roji is doing wonderfully.',
-          '<b>Nora:</b> Your certificate is on the wall. Roji reads it every visit.',
-          p >= 100 ? '<b>Nora:</b> Roji passed! You two can take turns driving now.' : '<b>Nora:</b> Keep cheering, Homama. It really helps her.',
+          '<b>Abu Sanad:</b> Hi Homama! Roji is doing wonderfully.',
+          '<b>Abu Sanad:</b> Your certificate is on the wall. Roji reads it every visit.',
+          p >= 100 ? '<b>Abu Sanad:</b> Roji passed! You two can take turns driving now.' : '<b>Abu Sanad:</b> Keep cheering, Homama. It really helps her.',
         ];
     return lines[noraI++ % lines.length];
   };
@@ -671,7 +671,7 @@ export function buildDrivingInterior(ctx) {
       api.fx.heartsAt(deskPos, 5);
       api.emote('roji', 'cheer');
       setTimeout(() => api.emote('homama', 'cheer'), 300);
-      api.toast(`<b>${score} out of ${score}!</b> Nora: "A perfect score!" Homama cheers.`, 3600);
+      api.toast(`<b>${score} out of ${score}!</b> Abu Sanad: "A perfect score!" Homama cheers.`, 3600);
     } else {
       api.sound.ui('good');
       api.fx.burst(deskPos, ['#ffd166', '#ffffff'], 30);
@@ -708,7 +708,7 @@ export function buildDrivingInterior(ctx) {
       z: -1.4,
       r: 1.3,
       icon: 'smile',
-      label: 'Talk to Nora',
+      label: 'Talk to Abu Sanad',
       act: (api) => {
         api.emote('player', 'wave');
         api.toast(noraSays(api), 3400);
@@ -724,7 +724,7 @@ export function buildDrivingInterior(ctx) {
         bellT = 0.5;
         tone(api, 1760, 0.6, { type: 'sine', gain: 0.07 });
         tone(api, 2640, 0.4, { type: 'sine', gain: 0.025 });
-        api.toast('<b>Tala:</b> Ding! Welcome to Little Wheels. Nora is in the theory corner.', 3200);
+        api.toast('<b>Tala:</b> Ding! Welcome to Little Wheels. Abu Sanad is in the theory corner.', 3200);
       },
     },
     {

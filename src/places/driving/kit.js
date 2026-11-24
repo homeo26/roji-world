@@ -584,7 +584,7 @@ export function drawCertificate(c, w, h) {
     c.fill();
   }
   star(c, sx, sy, w * 0.06, '#ffd166', '#e0a83a', 3);
-  // Nora's signature
+  // Abu Sanad's signature
   c.strokeStyle = C.blue;
   c.lineWidth = 2.5;
   c.beginPath();
@@ -592,7 +592,7 @@ export function drawCertificate(c, w, h) {
   c.bezierCurveTo(w * 0.16, h * 0.8, w * 0.18, h * 0.9, w * 0.21, h * 0.84);
   c.bezierCurveTo(w * 0.23, h * 0.8, w * 0.25, h * 0.88, w * 0.29, h * 0.84);
   c.stroke();
-  text(c, 'Nora, instructor', w * 0.21, h * 0.9, h * 0.035, '#8a7480', 500);
+  text(c, 'Abu Sanad, instructor', w * 0.21, h * 0.9, h * 0.035, '#8a7480', 500);
 }
 
 // Homama's sticky note next to the certificate
@@ -710,13 +710,14 @@ export function drawBoard(c, w, h, { progress = 0, lessons = 0 } = {}) {
 // ------------------------------------------------------------------ people and animals
 const HC = new THREE.Vector3(0, 0.29, 0); // head centre inside kid.head
 
-export const NORA = { id: 'nora', name: 'Nora', gender: 'girl', skin: '#e3b08e', hair: '#4a2c1a', hairstyle: 'bob', outfit: 'skirt', top: '#21a99a', bottom: '#ffd166', shoes: '#3b2b3f', accent: '#ffd166' };
+export const ABU_SANAD = { id: 'abusanad', name: 'Abu Sanad', gender: 'boy', skin: '#c98f68', hair: '#3a3634', hairstyle: 'short', mustache: '#2b2624', outfit: 'tee-pants', top: '#21a99a', bottom: '#2c3e66', shoes: '#3b2b3f', accent: '#ffd166' };
+export const NORA = ABU_SANAD;
 
-// Nora, the driving instructor: a grown-up with glasses, a sun-yellow scarf and a name badge.
-export function makeNora(makeKid, { scale = 1.14, clipboard = true } = {}) {
-  const kid = makeKid(NORA);
+// Abu Sanad, the driving instructor: a grown-up with glasses, a moustache, a lanyard and a name badge.
+export function makeAbuSanad(makeKid, { scale = 1.18, clipboard = true } = {}) {
+  const kid = makeKid(ABU_SANAD);
   const H = kid.head;
-  const frame = mat('#6b4f7a', { rough: 0.4 });
+  const frame = mat('#3b2b3f', { rough: 0.4 });
   const ringGeo = new THREE.TorusGeometry(0.066, 0.012, 6, 16);
   for (const s of [1, -1]) {
     const ring = mesh(ringGeo, frame, { cast: false });
@@ -726,21 +727,19 @@ export function makeNora(makeKid, { scale = 1.14, clipboard = true } = {}) {
   const bridge = mesh(new THREE.BoxGeometry(0.08, 0.014, 0.014), frame, { cast: false });
   bridge.position.set(0, HC.y - 0.005, HC.z + 0.305);
   H.add(bridge);
-  const scarf = mesh(new THREE.TorusGeometry(0.12, 0.035, 6, 16), mat(C.sun, { rough: 0.6 }));
-  scarf.rotation.x = Math.PI / 2;
-  scarf.position.y = 0.76;
-  kid.body.add(scarf);
-  const knot = mesh(new THREE.SphereGeometry(0.045, 8, 6), mat(C.sun, { rough: 0.6 }));
-  knot.position.set(0.05, 0.72, 0.12);
-  kid.body.add(knot);
-  const badge = mesh(new THREE.BoxGeometry(0.08, 0.1, 0.02), mat('#ffffff', { rough: 0.6 }));
-  badge.position.set(-0.09, 0.6, 0.17);
+  const lanyard = mesh(new THREE.TorusGeometry(0.13, 0.012, 4, 16, Math.PI), mat(C.sun, { rough: 0.6 }));
+  lanyard.rotation.set(0.25, 0, Math.PI);
+  lanyard.position.set(0, 0.74, 0.1);
+  kid.body.add(lanyard);
+  const badge = mesh(new THREE.BoxGeometry(0.09, 0.11, 0.02), mat('#ffffff', { rough: 0.6 }));
+  badge.position.set(0, 0.6, 0.18);
   badge.rotation.x = -0.15;
   kid.body.add(badge);
   if (clipboard) kid.carry(makeClipboard());
   kid.root.scale.setScalar(scale);
   return kid;
 }
+export const makeNora = makeAbuSanad;
 
 export function makeClipboard() {
   const g = new THREE.Group();

@@ -3,10 +3,10 @@ import { Car } from '../car.js';
 import { C, kit, colorBake, Atlas, signPost, makeTrafficLight, lightMats, setLight, makeCone, makeDuck, makeNora, freezeKid, learnerize, tree, addFlowers, paintedPlane, drawBoard, drawWheelBadge, drawLPlate, BOARD, licenceProgress, lessonsDone, heartPath, paintText } from './driving/kit.js';
 import { buildDrivingInterior } from './driving/interior.js';
 
-// Little Wheels Driving School, where Roji is learning to drive with her instructor Nora.
+// Little Wheels Driving School, where Roji is learning to drive with her instructor Abu Sanad.
 // An office (enterable), a practice yard with a roundabout, traffic lights, a stop sign, a zebra crossing
 // and parking bays, the learner car with its L plates, a duck pond and "Roji's progress" board with
-// Homama's driving certificate. The Driving Lesson game starts from Nora by the car.
+// Homama's driving certificate. The Driving Lesson game starts from Abu Sanad by the car.
 
 const WHEEL = 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z M3.6 10.5l6-.5 M14.4 10l6 .5 M12 14.5V21';
 const BOARD_ICON = 'M4 5h16v11H4z M8 16l-2 4 M16 16l2 4 M7 9h5 M7 12h3 M14.5 8.5h2.5v3h-2.5z';
@@ -22,7 +22,7 @@ const CAR_AT = { x: 8.8, z: 6.3 };
 
 const ROJI_LINES = [
   '<b>Homama:</b> You can do it, Roji! I believe in you.',
-  '<b>Homama:</b> Nora says you are a natural. I agree!',
+  '<b>Homama:</b> Abu Sanad says you are a natural. I agree!',
   '<b>Homama:</b> I will cheer for you the whole lesson, Roji.',
   '<b>Homama:</b> Seatbelt, mirrors, big smile. You have got this!',
 ];
@@ -39,7 +39,7 @@ export default {
     tag: 'Roji learns to drive',
     icon: 'wheel',
     color: '#f4a742',
-    text: 'Roji is taking driving lessons with Nora. Homama already has his licence and cheers her on at every turn.',
+    text: 'Roji is taking driving lessons with Abu Sanad. Homama already has his licence and cheers her on at every turn.',
   },
   icons: { wheel: WHEEL, board: BOARD_ICON, duck: DUCK },
 
@@ -356,7 +356,7 @@ export default {
       colliders.push({ type: 'circle', x, z, r: 0.42, h: n * 0.25 + 0.05 });
     });
 
-    // ---------------------------------------------------------------- the learner car and Nora
+    // ---------------------------------------------------------------- the learner car and Abu Sanad
     const car = new Car(C.sun);
     learnerize(car, atlas, cells);
     car.root.position.set(CAR_AT.x, 0, CAR_AT.z);
@@ -498,7 +498,7 @@ export default {
       }
     }
     // The street sign
-    const woodSign = ctx.sign(['Learn to drive with Nora', 'Little Wheels'], { width: 3.0, height: 1.15, accent: C.teal, postHeight: 0.85 });
+    const woodSign = ctx.sign(['Drive with Abu Sanad', 'Little Wheels'], { width: 3.0, height: 1.15, accent: C.teal, postHeight: 0.85 });
     add(at(woodSign, -4.0, 0, 11.0));
     colliders.push({ type: 'box', x: -4.0, z: 10.95, hw: 1.2, hd: 0.15 });
 
@@ -534,7 +534,7 @@ export default {
         icon: 'wheel',
         label: 'Driving lesson',
         act: async (api) => {
-          if (!api.hasArena('drivinglesson')) return api.toast('Nora is still setting out the cones. Back soon!', 2600);
+          if (!api.hasArena('drivinglesson')) return api.toast('Abu Sanad is still setting out the cones. Back soon!', 2600);
           const res = await api.playArena('drivinglesson');
           refreshBoard();
           if (!res || res.quit) return;
