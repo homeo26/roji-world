@@ -50,6 +50,18 @@ body {
   background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(40, 70, 90, 0.22) 100%);
 }
 
+/* Time-of-day colour over the town: warm at sunset, rosy at dawn, blue at night */
+#skytint {
+  --tint: 255, 255, 255;
+  --tint-a: 0;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+  opacity: var(--tint-a);
+  background: linear-gradient(180deg, rgb(var(--tint)) 0%, rgba(var(--tint), 0.55) 70%, rgba(var(--tint), 0.35) 100%);
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -271,6 +283,12 @@ body.playing #hud {
 }
 body.playing #minimap {
   opacity: 1;
+}
+#minimap {
+  transition: opacity 0.6s 1.6s, filter 2s;
+}
+body.night-time #minimap {
+  filter: brightness(0.78) saturate(0.85);
 }
 
 /* ---------------------------------------------------------------- station card */
@@ -1418,4 +1436,58 @@ body.wardrobe-open .card,
 body.wardrobe-open .prompt,
 body.wardrobe-open #dock {
   display: none !important;
+}
+
+/* Time of day clock, under the brand */
+.clock {
+  position: fixed;
+  top: calc(max(14px, env(safe-area-inset-top)) + 64px);
+  left: 14px;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--paper);
+  color: #e8973a;
+  box-shadow: var(--shadow);
+  font: 600 0.85rem var(--font);
+  cursor: pointer;
+}
+body.playing .clock {
+  display: inline-flex;
+}
+.clock .c-time {
+  color: var(--ink);
+}
+.clock .c-phase {
+  color: var(--ink-soft);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+.clock.night {
+  background: #2f3566;
+  color: #ffe27a;
+}
+.clock.night .c-time {
+  color: #fff;
+}
+.clock.night .c-phase {
+  color: #c9cdf2;
+}
+body.arena-on .clock,
+body.wardrobe-open .clock {
+  display: none !important;
+}
+@media (max-height: 520px) {
+  .clock {
+    top: calc(max(8px, env(safe-area-inset-top)) + 50px);
+    left: max(10px, env(safe-area-inset-left));
+    padding: 4px 10px 4px 8px;
+    font-size: 0.78rem;
+  }
+  .clock .c-phase {
+    display: none;
+  }
 }

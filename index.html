@@ -22,6 +22,7 @@
   </head>
   <body>
     <div id="app"></div>
+    <div id="skytint" aria-hidden="true"></div>
     <div id="vignette" aria-hidden="true"></div>
     <div id="fade" aria-hidden="true"></div>
 
@@ -38,11 +39,13 @@
         <button id="btn-swap" class="round face" aria-label="Switch character"></button>
         <button id="btn-wardrobe" class="round" aria-label="Wardrobe" title="Wardrobe (C)"></button>
         <button id="btn-journal" class="round" aria-label="Journey and notes" title="Journey and notes (J)"></button>
+        <button id="btn-full" class="round" aria-label="Full screen" title="Full screen (F)"></button>
         <button id="btn-sound" class="round" aria-label="Sound"></button>
         <button id="btn-help" class="round" aria-label="Help"></button>
       </div>
     </header>
 
+    <button id="clock" class="clock" aria-label="Time of day" title="Time of day"></button>
     <nav id="dock" aria-label="Dances and hand holding"></nav>
     <canvas id="minimap" aria-label="Map"></canvas>
     <button id="prompt" class="prompt hidden"></button>
@@ -57,12 +60,14 @@
       <ul class="keys">
         <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows <span>walk, drive, ride</span></li>
         <li><kbd>Shift</kbd> <span>run</span></li>
-        <li><kbd>Space</kbd> <span>jump, or honk</span></li>
-        <li><kbd>E</kbd> <span>stamp, get in, ride, sit</span></li>
+        <li><kbd>Space</kbd> <span>jump, press again in the air to flip</span></li>
+        <li><kbd>E</kbd> <span>stamp, go inside, get in, ride, sit</span></li>
         <li><kbd>H</kbd> <span>hold hands</span></li>
         <li><kbd>1</kbd> to <kbd>6</kbd> <span>wave, dance and more</span></li>
         <li><kbd>Tab</kbd> <span>switch Roji and Homama</span></li>
         <li><kbd>C</kbd> <kbd>J</kbd> <span>wardrobe, journey</span></li>
+        <li><kbd>F</kbd> <span>full screen</span></li>
+        <li>Mouse wheel, <kbd>+</kbd> <kbd>-</kbd>, or pinch <span>zoom the map</span></li>
         <li>Click or tap the ground <span>walk there</span></li>
       </ul>
       <div class="help-row">

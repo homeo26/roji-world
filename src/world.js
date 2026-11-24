@@ -1,10 +1,29 @@
 import * as THREE from 'three';
-import { mat, mesh, rng, canvasTexture, roundRect, FONT } from './util.js';
+import { mat, umat, mesh, rng, canvasTexture, roundRect, FONT } from './util.js';
+import { decorateGround } from './engine/ground.js';
+import { PLACES } from './engine/manifest.js';
 
 // World frame: y up, ground at y = 0, the camera looks toward -Z.
 // The journey runs in three rows from the front (+Z) to the back (-Z).
 
-export const ISLAND = { cx: -9.5, cz: 0, hx: 40, hz: 23, r: 9 };
+export const ISLAND = { cx: -11, cz: -51, hx: 75, hz: 74, r: 16 };
+
+// City streets, as straight polylines [x, z]. Places from src/engine/manifest.js sit along them.
+export const CITY_ROADS = [
+  [[-14, -11.5], [-14, -24], [-14, -27.8]], // from the journey's last stop up into the city
+  [[-52, -24], [54, -24]], // first street
+  [[-50, -62], [44, -62]], // second street
+  [[-30, -24], [-30, -62]],
+  [[2, -24], [2, -62]],
+  [[-14, -62], [-14, -89.6]], // up to the snow
+  [[-46.3, 8.5], [-58, 7.8], [-68, 7.2]], // town to the zoo
+  [[-52, 8.2], [-52, -24]],
+  [[25.5, 11], [31, 11]], // journey to the east side
+  [[31, 19.2], [31, -24]],
+  [[31, 19.2], [46, 19.2]],
+  [[31, -3.8], [46, -3.8]],
+];
+export const SNOW_LINE = -88; // north of this (more negative z) the ground turns to snow
 
 export const PADS = {
   home: [-25, 17],
@@ -44,7 +63,7 @@ function islandOutline(n = 220, wobble = true) {
     const dx = Math.cos(a);
     const dz = Math.sin(a);
     let lo = 0;
-    let hi = 60;
+    let hi = 140;
     for (let k = 0; k < 30; k++) {
       const mid = (lo + hi) / 2;
       if (islandSdf(ISLAND.cx + dx * mid, ISLAND.cz + dz * mid) < 0) lo = mid;
@@ -85,7 +104,9 @@ export class World {
     this.buildIsland();
     this.buildWater();
     this.buildPathMeshes();
+    this.buildCityRoads();
     this.buildLamps();
+    this.buildLampHalos();
   }
 
   addCollider(c) {
@@ -127,7 +148,7 @@ export class World {
 
   distanceToPath(x, z, includeFuture = true) {
     let best = Infinity;
-    const all = includeFuture ? [this.samples, this.futureSamples, this.townSamples] : [this.samples, this.townSamples];
+    const all = [this.samples, this.townSamples, ...(includeFuture ? [this.futureSamples] : []), ...(this.cityRoads || [])];
     for (const list of all) {
       for (let i = 0; i < list.length; i += 2) {
         const s = list[i];
@@ -273,23 +294,24 @@ export class World {
     });
     lipGeo.rotateX(-Math.PI / 2);
     lipGeo.translate(0, -0.5, 0);
-    const lip = mesh(lipGeo, mat('#86c35c', { rough: 0.95 }), { cast: false });
+    const lipMat = umat('#86c35c', { rough: 0.95 });
+    const lip = mesh(lipGeo, lipMat, { cast: false });
     this.scene.add(lip);
 
     // Painted top surface: mottled grass
-    const X0 = -52;
-    const Z0 = -27;
-    const W = 86;
-    const H = 54;
+    const X0 = ISLAND.cx - ISLAND.hx - 4;
+    const Z0 = ISLAND.cz - ISLAND.hz - 4;
+    const W = ISLAND.hx * 2 + 8;
+    const H = ISLAND.hz * 2 + 8;
     const r = rng(3);
-    const tex = canvasTexture(2048, 1536, (ctx, w, h) => {
+    const tex = canvasTexture(2048, 2048, (ctx, w, h) => {
       ctx.fillStyle = '#9ad06a';
       ctx.fillRect(0, 0, w, h);
       const blobs = [
-        ['rgba(126,190,88,0.35)', 260, 60, 200],
-        ['rgba(176,222,120,0.35)', 220, 40, 160],
-        ['rgba(110,176,84,0.25)', 140, 20, 90],
-        ['rgba(206,232,140,0.25)', 300, 12, 40],
+        ['rgba(126,190,88,0.35)', 420, 40, 140],
+        ['rgba(176,222,120,0.35)', 360, 28, 110],
+        ['rgba(110,176,84,0.25)', 240, 14, 60],
+        ['rgba(206,232,140,0.25)', 500, 8, 28],
       ];
       for (const [col, n, rmin, rr] of blobs) {
         ctx.fillStyle = col;
@@ -300,7 +322,7 @@ export class World {
         }
       }
       // Speckles
-      for (let i = 0; i < 9000; i++) {
+      for (let i = 0; i < 16000; i++) {
         ctx.fillStyle = r() < 0.5 ? 'rgba(90,150,70,0.22)' : 'rgba(230,245,170,0.25)';
         ctx.fillRect(r() * w, r() * h, 2 + r() * 3, 2 + r() * 3);
       }
@@ -314,9 +336,13 @@ export class World {
       uv.setXY(i, (x - X0) / W, 1 - (z - Z0) / H);
     }
     topGeo.rotateX(-Math.PI / 2);
-    const topMesh = mesh(topGeo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }), { cast: false });
+    const topMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    const topMesh = mesh(topGeo, topMat, { cast: false });
     this.scene.add(topMesh);
     this.ground = topMesh;
+    // Places can cut holes (a sunken pool) and paint the ground (snow, a pitch)
+    this.groundFx = decorateGround([topMat, lipMat, body.material]);
+    this.groundFx.addTint(ISLAND.cx, SNOW_LINE - 30, ISLAND.hx + 10, 30, '#f2f6fb', 9);
   }
 
   buildWater() {
@@ -357,9 +383,77 @@ export class World {
     });
   }
 
+  // Soft halos around every street lamp, shown from dusk to dawn (one draw call).
+  buildLampHalos() {
+    const n = this.lampHeads.length;
+    const pos = new Float32Array(n * 3);
+    this.lampHeads.forEach((p, i) => pos.set([p.x, p.y, p.z], i * 3));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const tex = canvasTexture(128, 128, (ctx) => {
+      const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, 'rgba(255,236,180,1)');
+      g.addColorStop(0.25, 'rgba(255,214,140,0.55)');
+      g.addColorStop(1, 'rgba(255,200,120,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 128, 128);
+    });
+    this.haloMat = new THREE.PointsMaterial({ size: 3.2, map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false });
+    this.halos = new THREE.Points(geo, this.haloMat);
+    this.halos.visible = false;
+    this.halos.frustumCulled = false;
+    this.scene.add(this.halos);
+  }
+
+  // Night look for the island. k: 0 day .. 1 full night (lamps on).
+  setGlow(k, water, cloud, cloudI) {
+    this.nightGlow = k;
+    this.lampGlowMat.emissiveIntensity = 1.4 + k * 1.6;
+    if (this.haloMat) {
+      this.haloMat.opacity = k * 0.9;
+      this.halos.visible = k > 0.02;
+    }
+    this.water.material.color.copy(water);
+    this.cloudMat.emissive.copy(cloud);
+    this.cloudMat.emissiveIntensity = cloudI;
+  }
+
+  buildCityRoads() {
+    const roadTex = canvasTexture(256, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#c9c2d4';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 260; i++) {
+        ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(80,70,100,0.06)';
+        ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+      }
+      ctx.fillStyle = '#fffaf0';
+      ctx.fillRect(0, h / 2 - 3, w * 0.45, 6);
+    });
+    roadTex.wrapS = THREE.RepeatWrapping;
+    roadTex.repeat.set(0.25, 1);
+    const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 });
+    const curbMat = mat('#efe6da', { rough: 0.9 });
+    this.cityRoads = [];
+    CITY_ROADS.forEach((line, i) => {
+      const pts = [];
+      for (let k = 0; k < line.length - 1; k++) {
+        const a = new THREE.Vector3(line[k][0], 0, line[k][1]);
+        const b = new THREE.Vector3(line[k + 1][0], 0, line[k + 1][1]);
+        const n = Math.max(1, Math.ceil(a.distanceTo(b) * 3));
+        for (let j = k === 0 ? 0 : 1; j <= n; j++) pts.push(a.clone().lerp(b, j / n));
+      }
+      this.cityRoads.push(pts);
+      const y = 0.03 + i * 0.0016;
+      this.scene.add(mesh(this.ribbon(pts, 3.9, y), curbMat, { cast: false }));
+      this.scene.add(mesh(this.ribbon(pts, 3.1, y + 0.0008), roadMat, { cast: false }));
+    });
+  }
+
   buildLamps() {
     const postMat = mat('#40594d', { rough: 0.5, metal: 0.3 });
     const glow = mat('#fff1c7', { emissive: '#ffd27a', ei: 1.4, rough: 0.3 });
+    this.lampGlowMat = glow;
+    this.lampHeads = [];
     const postGeo = new THREE.CylinderGeometry(0.06, 0.09, 2.2, 8);
     const headGeo = new THREE.SphereGeometry(0.2, 14, 10);
     const capGeo = new THREE.ConeGeometry(0.24, 0.22, 10);
@@ -388,19 +482,68 @@ export class World {
       g.add(post, head, cap, base);
       g.position.set(x, 0, z);
       this.statics.add(g);
+      this.lampHeads.push(new THREE.Vector3(x, 2.32, z));
       this.addCollider({ type: 'circle', x, z, r: 0.2 });
+    }
+    // Street lamps along the city streets
+    for (const pts of this.cityRoads) {
+      for (let i = 20; i < pts.length - 10; i += 48) {
+        const p = pts[i];
+        const q = pts[i + 1];
+        const tl = Math.hypot(q.x - p.x, q.z - p.z) || 1;
+        const x = p.x + (-(q.z - p.z) / tl) * 2.4 * side;
+        const z = p.z + ((q.x - p.x) / tl) * 2.4 * side;
+        side *= -1;
+        if (this.distanceToPath(x, z, false) < 2.2) continue;
+        if (PLACES.some((pl) => !pl.dev && Math.abs(x - pl.slot[0]) < pl.size[0] / 2 + 0.8 && Math.abs(z - pl.slot[1]) < pl.size[1] / 2 + 0.8)) continue;
+        const g = new THREE.Group();
+        const post = mesh(postGeo, postMat);
+        post.position.y = 1.1;
+        const head = mesh(headGeo, glow, { cast: false });
+        head.position.y = 2.32;
+        const cap = mesh(capGeo, postMat);
+        cap.position.y = 2.55;
+        g.add(post, head, cap);
+        g.position.set(x, 0, z);
+        this.statics.add(g);
+        this.lampHeads.push(new THREE.Vector3(x, 2.32, z));
+        this.addCollider({ type: 'circle', x, z, r: 0.2 });
+      }
     }
   }
 
   // ---------------------------------------------------------------- nature
   // keepOut: list of { x, z, r } areas reserved for buildings and stations.
-  scatterNature(keepOut) {
+  // rects: list of { x, z, hw, hd } footprints of places, kept clear too.
+  scatterNature(keepOut, rects = []) {
     const r = rng(11);
     const free = (x, z, pathGap, edge = 1.6) => {
       if (islandSdf(x, z) > -edge) return false;
-      if (this.distanceToPath(x, z) < pathGap) return false;
       for (const k of keepOut) if (Math.hypot(x - k.x, z - k.z) < k.r) return false;
+      for (const k of rects) if (Math.abs(x - k.x) < k.hw && Math.abs(z - k.z) < k.hd) return false;
+      if (this.distanceToPath(x, z) < pathGap) return false;
       return true;
+    };
+    const snowy = (z) => z < SNOW_LINE - 4;
+    // Instanced meshes split into 32 m map tiles, so tiles off screen (and out of the shadow box) are skipped.
+    const chunked = (geo, material, list, write, { cast = true, receive = true, cell = 32 } = {}) => {
+      const cells = new Map();
+      for (const it of list) {
+        const key = Math.floor(it.x / cell) + ',' + Math.floor(it.z / cell);
+        if (!cells.has(key)) cells.set(key, []);
+        cells.get(key).push(it);
+      }
+      const out = [];
+      for (const items of cells.values()) {
+        const im = new THREE.InstancedMesh(geo, material, items.length);
+        items.forEach((it, i) => write(im, i, it));
+        im.castShadow = cast;
+        im.receiveShadow = receive;
+        im.computeBoundingSphere();
+        this.scene.add(im);
+        out.push(im);
+      }
+      return out;
     };
     const B = ISLAND;
     const randPoint = () => [B.cx + (r() * 2 - 1) * B.hx, B.cz + (r() * 2 - 1) * B.hz];
@@ -412,28 +555,29 @@ export class World {
 
     // Trees
     const trees = [];
-    for (let tries = 0; tries < 4000 && trees.length < 78; tries++) {
+    for (let tries = 0; tries < 16000 && trees.length < 330; tries++) {
       const [x, z] = randPoint();
       if (!free(x, z, 3.1, 2.2)) continue;
       if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 2.3)) continue;
       const roll = r();
-      trees.push({ x, z, s: 0.8 + r() * 0.5, kind: roll < 0.55 ? 'round' : roll < 0.85 ? 'pine' : 'blossom', rot: r() * 6.28 });
+      trees.push({ x, z, s: 0.8 + r() * 0.5, kind: snowy(z) ? 'pine' : roll < 0.55 ? 'round' : roll < 0.85 ? 'pine' : 'blossom', rot: r() * 6.28, snow: snowy(z) });
     }
     const trunkGeo = new THREE.CylinderGeometry(0.12, 0.18, 1.3, 7);
     trunkGeo.translate(0, 0.65, 0);
-    const trunks = new THREE.InstancedMesh(trunkGeo, mat('#8b5e3c', { rough: 0.9 }), trees.length);
     const ballGeo = new THREE.IcosahedronGeometry(1, 2);
     const coneGeo = new THREE.ConeGeometry(1, 1.4, 8);
     const balls = [];
     const cones = [];
     const greens = ['#6dbb58', '#5aa84f', '#84c95f', '#77c05a'];
     const pinks = ['#f6a5c0', '#f9bfd2', '#f28db0'];
-    trees.forEach((t, i) => {
+    chunked(trunkGeo, mat('#8b5e3c', { rough: 0.9 }), trees, (im, i, t) => {
       m4.compose(v.set(t.x, 0, t.z), q.setFromEuler(e.set(0, t.rot, 0)), s.set(t.s, t.s * (t.kind === 'pine' ? 0.9 : 1), t.s));
-      trunks.setMatrixAt(i, m4);
+      im.setMatrixAt(i, m4);
+    });
+    trees.forEach((t) => {
       if (t.kind === 'pine') {
         for (let k = 0; k < 3; k++) {
-          cones.push({ x: t.x, y: (1.3 + k * 0.62) * t.s, z: t.z, sc: (0.95 - k * 0.22) * t.s, col: k === 2 ? '#4d9a5f' : '#3f8a55' });
+          cones.push({ x: t.x, y: (1.3 + k * 0.62) * t.s, z: t.z, sc: (0.95 - k * 0.22) * t.s, col: t.snow ? (k === 2 ? '#f7fbff' : k === 1 ? '#dfeef3' : '#5d9a78') : k === 2 ? '#4d9a5f' : '#3f8a55' });
         }
       } else {
         const palette = t.kind === 'blossom' ? pinks : greens;
@@ -444,120 +588,100 @@ export class World {
       }
       this.addCollider({ type: 'circle', x: t.x, z: t.z, r: 0.35 * t.s });
     });
-    trunks.castShadow = true;
-    trunks.receiveShadow = true;
-    const ballIM = new THREE.InstancedMesh(ballGeo, mat('#ffffff', { rough: 0.85, flat: true }), balls.length);
-    balls.forEach((b, i) => {
-      m4.compose(v.set(b.x, b.y, b.z), q.setFromEuler(e.set(r(), r(), r())), s.set(b.sc, b.sc * 0.92, b.sc));
-      ballIM.setMatrixAt(i, m4);
-      ballIM.setColorAt(i, new THREE.Color(b.col));
+    for (const b of balls) b.rot = [r(), r(), r()];
+    chunked(ballGeo, mat('#ffffff', { rough: 0.85, flat: true }), balls, (im, i, b) => {
+      m4.compose(v.set(b.x, b.y, b.z), q.setFromEuler(e.set(...b.rot)), s.set(b.sc, b.sc * 0.92, b.sc));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(b.col));
     });
-    const coneIM = new THREE.InstancedMesh(coneGeo, mat('#ffffff', { rough: 0.85, flat: true }), cones.length);
-    cones.forEach((c, i) => {
+    chunked(coneGeo, mat('#ffffff', { rough: 0.85, flat: true }), cones, (im, i, c) => {
       m4.compose(v.set(c.x, c.y, c.z), q.identity(), s.set(c.sc, c.sc, c.sc));
-      coneIM.setMatrixAt(i, m4);
-      coneIM.setColorAt(i, new THREE.Color(c.col));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(c.col));
     });
-    for (const im of [ballIM, coneIM]) {
-      im.castShadow = true;
-      im.receiveShadow = true;
-    }
-    this.scene.add(trunks, ballIM, coneIM);
-    this.treeCanopy = ballIM;
 
     // Bushes
     const bushes = [];
-    for (let tries = 0; tries < 3000 && bushes.length < 60; tries++) {
+    for (let tries = 0; tries < 12000 && bushes.length < 230; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 2.1, 1.4)) continue;
+      if (!free(x, z, 2.1, 1.4) || snowy(z)) continue;
       bushes.push({ x, z, s: 0.35 + r() * 0.3 });
     }
-    const bushIM = new THREE.InstancedMesh(ballGeo, mat('#ffffff', { rough: 0.9, flat: true }), bushes.length * 2);
+    const bushParts = [];
     bushes.forEach((b, i) => {
-      const col = new THREE.Color(greens[i % greens.length]);
-      m4.compose(v.set(b.x, b.s * 0.55, b.z), q.identity(), s.set(b.s, b.s * 0.8, b.s));
-      bushIM.setMatrixAt(i * 2, m4);
-      bushIM.setColorAt(i * 2, col);
-      m4.compose(v.set(b.x + b.s * 0.7, b.s * 0.4, b.z + b.s * 0.2), q.identity(), s.set(b.s * 0.7, b.s * 0.6, b.s * 0.7));
-      bushIM.setMatrixAt(i * 2 + 1, m4);
-      bushIM.setColorAt(i * 2 + 1, col);
-      this.addCollider({ type: 'circle', x: b.x + b.s * 0.3, z: b.z, r: b.s * 0.9 });
+      const col = greens[i % greens.length];
+      bushParts.push({ x: b.x, z: b.z, y: b.s * 0.55, sc: [b.s, b.s * 0.8, b.s], col });
+      bushParts.push({ x: b.x + b.s * 0.7, z: b.z + b.s * 0.2, y: b.s * 0.4, sc: [b.s * 0.7, b.s * 0.6, b.s * 0.7], col });
+      this.addCollider({ type: 'circle', x: b.x + b.s * 0.3, z: b.z, r: b.s * 0.9, h: b.s * 1.1 });
     });
-    bushIM.castShadow = true;
-    bushIM.receiveShadow = true;
-    this.scene.add(bushIM);
+    chunked(ballGeo, mat('#ffffff', { rough: 0.9, flat: true }), bushParts, (im, i, b) => {
+      m4.compose(v.set(b.x, b.y, b.z), q.identity(), s.set(...b.sc));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(b.col));
+    });
 
     // Flowers
     const flowerCols = ['#ff8fb1', '#ffffff', '#ffd75e', '#c7a6ff', '#ff6b6b', '#ffb36b'];
     const flowers = [];
-    for (let tries = 0; tries < 9000 && flowers.length < 650; tries++) {
+    for (let tries = 0; tries < 36000 && flowers.length < 2200; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 1.75, 0.9)) continue;
+      if (!free(x, z, 1.75, 0.9) || z < SNOW_LINE + 4) continue;
       // Cluster around a few patches
       const cluster = Math.sin(x * 0.35) * Math.cos(z * 0.4) + Math.sin(x * 0.11 + z * 0.17);
       if (cluster < 0.2 && r() > 0.25) continue;
       flowers.push({ x, z, col: flowerCols[Math.floor(r() * flowerCols.length)], h: 0.16 + r() * 0.14 });
     }
-    const headGeo = new THREE.IcosahedronGeometry(0.085, 1);
+    const headGeo = new THREE.IcosahedronGeometry(0.085, 0);
     const stemGeo = new THREE.CylinderGeometry(0.012, 0.015, 1, 4);
     stemGeo.translate(0, 0.5, 0);
-    const headIM = new THREE.InstancedMesh(headGeo, mat('#ffffff', { rough: 0.6, flat: true }), flowers.length);
-    const stemIM = new THREE.InstancedMesh(stemGeo, mat('#4f9a45'), flowers.length);
-    flowers.forEach((f, i) => {
+    chunked(headGeo, mat('#ffffff', { rough: 0.6, flat: true }), flowers, (im, i, f) => {
       m4.compose(v.set(f.x, f.h, f.z), q.identity(), s.set(1, 0.75, 1));
-      headIM.setMatrixAt(i, m4);
-      headIM.setColorAt(i, new THREE.Color(f.col));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(f.col));
+    }, { cast: false });
+    chunked(stemGeo, mat('#4f9a45'), flowers, (im, i, f) => {
       m4.compose(v.set(f.x, 0, f.z), q.identity(), s.set(1, f.h, 1));
-      stemIM.setMatrixAt(i, m4);
-    });
-    headIM.castShadow = false;
-    stemIM.castShadow = false;
-    this.scene.add(headIM, stemIM);
+      im.setMatrixAt(i, m4);
+    }, { cast: false });
     this.flowerSpots = flowers;
 
     // Grass tufts
     const tuftGeo = new THREE.ConeGeometry(0.05, 0.36, 4);
     tuftGeo.translate(0, 0.18, 0);
     const tufts = [];
-    for (let tries = 0; tries < 6000 && tufts.length < 900; tries++) {
+    for (let tries = 0; tries < 20000 && tufts.length < 2600; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 1.5, 0.7)) continue;
+      if (!free(x, z, 1.5, 0.7) || z < SNOW_LINE + 2) continue;
       tufts.push([x, z]);
     }
-    const tuftIM = new THREE.InstancedMesh(tuftGeo, mat('#ffffff', { rough: 1 }), tufts.length * 3);
-    let n = 0;
+    const blades = [];
     for (const [x, z] of tufts) {
-      for (let k = 0; k < 3; k++) {
-        m4.compose(
-          v.set(x + (r() - 0.5) * 0.18, 0, z + (r() - 0.5) * 0.18),
-          q.setFromEuler(e.set((r() - 0.5) * 0.5, 0, (r() - 0.5) * 0.5)),
-          s.setScalar(0.7 + r() * 0.6),
-        );
-        tuftIM.setMatrixAt(n, m4);
-        tuftIM.setColorAt(n, new THREE.Color(r() < 0.5 ? '#6fb04f' : '#88c560'));
-        n++;
-      }
+      for (let k = 0; k < 3; k++) blades.push({ x: x + (r() - 0.5) * 0.18, z: z + (r() - 0.5) * 0.18, rx: (r() - 0.5) * 0.5, rz: (r() - 0.5) * 0.5, sc: 0.7 + r() * 0.6, col: r() < 0.5 ? '#6fb04f' : '#88c560' });
     }
-    this.scene.add(tuftIM);
+    chunked(tuftGeo, mat('#ffffff', { rough: 1 }), blades, (im, i, b) => {
+      m4.compose(v.set(b.x, 0, b.z), q.setFromEuler(e.set(b.rx, 0, b.rz)), s.setScalar(b.sc));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(b.col));
+    }, { cast: false });
 
     // Rocks
     const rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
     const rocks = [];
-    for (let tries = 0; tries < 2000 && rocks.length < 34; tries++) {
+    for (let tries = 0; tries < 8000 && rocks.length < 110; tries++) {
       const [x, z] = randPoint();
       if (!free(x, z, 2.2, 1.0)) continue;
       rocks.push({ x, z, s: 0.35 + r() * 0.7 });
     }
-    const rockIM = new THREE.InstancedMesh(rockGeo, mat('#ffffff', { rough: 0.9, flat: true }), rocks.length);
-    rocks.forEach((k, i) => {
-      m4.compose(v.set(k.x, k.s * 0.22, k.z), q.setFromEuler(e.set(r(), r(), r())), s.set(k.s, k.s * 0.65, k.s));
-      rockIM.setMatrixAt(i, m4);
-      rockIM.setColorAt(i, new THREE.Color(r() < 0.5 ? '#c9c2b3' : '#b5ae9f'));
-      if (k.s > 0.5) this.addCollider({ type: 'circle', x: k.x, z: k.z, r: k.s * 0.45 });
+    for (const k of rocks) {
+      k.rot = [r(), r(), r()];
+      k.col = snowy(k.z) ? '#eef4f8' : r() < 0.5 ? '#c9c2b3' : '#b5ae9f';
+      if (k.s > 0.5) this.addCollider({ type: 'circle', x: k.x, z: k.z, r: k.s * 0.45, h: k.s * 0.55 });
+    }
+    chunked(rockGeo, mat('#ffffff', { rough: 0.9, flat: true }), rocks, (im, i, k) => {
+      m4.compose(v.set(k.x, k.s * 0.22, k.z), q.setFromEuler(e.set(...k.rot)), s.set(k.s, k.s * 0.65, k.s));
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, new THREE.Color(k.col));
     });
-    rockIM.castShadow = true;
-    rockIM.receiveShadow = true;
-    this.scene.add(rockIM);
 
     this.buildClouds(r);
     this.buildButterflies(r);
@@ -566,9 +690,10 @@ export class World {
 
   buildClouds(r) {
     const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, emissive: '#ffffff', emissiveIntensity: 0.25, flatShading: true });
+    this.cloudMat = cloudMat;
     const geo = new THREE.IcosahedronGeometry(1, 1);
     const spots = [
-      [-62, 2.5, 8], [-58, 4, -22], [42, 3, 16], [46, 4.5, -10], [-18, 3.5, 35], [14, 4, 34], [-36, 5, -35], [8, 5.5, -36], [36, 3.5, 34], [-56, 3.5, 30],
+      [-98, 2.5, 8], [-96, 4, -40], [76, 3, 16], [78, 4.5, -30], [-18, 3.5, 35], [14, 4, 34], [-40, 5, -138], [20, 5.5, -138], [40, 3.5, 34], [-62, 3.5, 32], [-98, 4, -100], [78, 4, -96],
     ];
     for (const [x, y, z] of spots) {
       const g = new THREE.Group();
@@ -624,7 +749,7 @@ export class World {
   }
 
   buildSparkles(r) {
-    const n = 260;
+    const n = 520;
     const pos = new Float32Array(n * 3);
     const base = [];
     for (let i = 0; i < n; i++) {
@@ -647,6 +772,8 @@ export class World {
       ctx.fillRect(0, 0, 64, 64);
     });
     const m = new THREE.PointsMaterial({ size: 0.22, map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+    this.sparkleMat = m;
+    this.sparkleTex = tex;
     const pts = new THREE.Points(geo, m);
     pts.frustumCulled = false;
     this.scene.add(pts);
@@ -659,12 +786,34 @@ export class World {
         pos[i * 3 + 2] = z + Math.cos(t * 0.6 + ph) * 0.4;
       }
       geo.attributes.position.needsUpdate = true;
-      m.opacity = 0.55 + Math.sin(t * 1.7) * 0.2;
+      // At night the sparkles turn into bigger, warmer fireflies
+      const nk = this.nightGlow || 0;
+      m.opacity = (0.55 + Math.sin(t * 1.7) * 0.2) * (1 + nk * 0.8);
+      m.size = 0.22 + nk * 0.2;
     });
   }
 
   // A wooden sign board with painted text, facing +Z.
-  sign(lines, { color = '#7b4f2f', width = 2.4, height = 1.1, accent = '#e5484d', postHeight = 1.25 } = {}) {
+  sign(lines, opts) {
+    return makeSign(lines, opts);
+  }
+
+  update(dt, t) {
+    for (const fn of this.animated) fn(dt, t);
+    // Ease the golden trail toward its target
+    if (this.trailShown !== this.trailTarget) {
+      const dir = Math.sign(this.trailTarget - this.trailShown);
+      this.trailShown += dir * Math.max(1, Math.abs(this.trailTarget - this.trailShown) * dt * 2.5);
+      if ((dir > 0 && this.trailShown > this.trailTarget) || (dir < 0 && this.trailShown < this.trailTarget)) this.trailShown = this.trailTarget;
+      this.trail.geometry.setDrawRange(0, Math.max(0, Math.floor(this.trailShown)) * 6);
+    }
+    this.trailMat.emissiveIntensity = 0.45 + Math.sin(t * 2.4) * 0.15;
+  }
+}
+
+// A wooden sign board with painted text, facing +Z. lines: [title] or [small label, title].
+export function makeSign(lines, { color = '#7b4f2f', width = 2.4, height = 1.1, accent = '#e5484d', postHeight = 1.25 } = {}) {
+  {
     const g = new THREE.Group();
     const wood = mat('#9b6a43', { rough: 0.85 });
     for (const sx of [-width * 0.38, width * 0.38]) {
@@ -698,17 +847,5 @@ export class World {
     board.position.y = postHeight + height / 2;
     g.add(board);
     return g;
-  }
-
-  update(dt, t) {
-    for (const fn of this.animated) fn(dt, t);
-    // Ease the golden trail toward its target
-    if (this.trailShown !== this.trailTarget) {
-      const dir = Math.sign(this.trailTarget - this.trailShown);
-      this.trailShown += dir * Math.max(1, Math.abs(this.trailTarget - this.trailShown) * dt * 2.5);
-      if ((dir > 0 && this.trailShown > this.trailTarget) || (dir < 0 && this.trailShown < this.trailTarget)) this.trailShown = this.trailTarget;
-      this.trail.geometry.setDrawRange(0, Math.max(0, Math.floor(this.trailShown)) * 6);
-    }
-    this.trailMat.emissiveIntensity = 0.45 + Math.sin(t * 2.4) * 0.15;
   }
 }

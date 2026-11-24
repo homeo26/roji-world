@@ -3,9 +3,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STOPS } from './config.js';
 import { World, islandSdf, PADS, FUTURE, CAR_SPOT } from './world.js';
-import { Station, BUILDERS } from './stations.js';
+import { Station, BUILDERS, makePony } from './stations.js';
 import { buildYumYum, buildPlaza } from './places.js';
-import { buildInterior } from './interior.js';
 import { Kid } from './kid.js';
 import { Car } from './car.js';
 import { Effects } from './fx.js';
@@ -14,9 +13,19 @@ import { Input } from './input.js';
 import { UI, Minimap } from './ui.js';
 import { loadLooks, saveLooks } from './looks.js';
 import { avatar } from './games/avatar.js';
-import { openGame, isGameOpen } from './games/shell.js';
+import { openGame } from './games/shell.js';
 import { GAMES, gamesAt } from './games/registry.js';
-import { damp, dampAngle, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
+import { damp, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
+import { ICONS } from './icons.js';
+import { Daylight, TIME_CHOICES } from './engine/daylight.js';
+import { choose } from './engine/choose.js';
+import { Physics } from './engine/physics.js';
+import { Spaces } from './engine/spaces.js';
+import { Activities } from './engine/activities.js';
+import { ArenaHost } from './engine/arena.js';
+import { loadProps } from './engine/props.js';
+import { ARENAS } from './engine/manifest.js';
+import { makeActor, stepWalker, stepVertical, tryJump, faceTo, syncKid, airOf, RADIUS } from './engine/movement.js';
 
 const STORE = 'roji-weekends-stamps-v1';
 const PLAYER_KEY = 'roji-weekends-player';
@@ -35,10 +44,9 @@ document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const SKY = new THREE.Color('#a6dde2');
-const INSIDE_DAY = new THREE.Color('#f7dcc8');
 const INSIDE_NIGHT = new THREE.Color('#3b3560');
 scene.background = SKY.clone();
-scene.fog = new THREE.Fog(SKY.clone(), 42, 110);
+scene.fog = new THREE.Fog(SKY.clone(), 42, 120);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.3;
@@ -50,7 +58,8 @@ sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.04;
 sun.shadow.radius = 2;
-const SUN_OFFSET = new THREE.Vector3(-11, 22, 12);
+const DEFAULT_OFFSET = new THREE.Vector3(-11, 22, 12);
+const SUN_OFFSET = DEFAULT_OFFSET.clone(); // follows the sun (or the moon) over the day
 const setShadowBox = (half) => {
   const c = sun.shadow.camera;
   c.left = c.bottom = -half;
@@ -63,10 +72,86 @@ setShadowBox(46);
 scene.add(sun, sun.target);
 const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 260);
 
-// ------------------------------------------------------------------ world
+// ------------------------------------------------------------------ world, physics, the shared game object
 const world = new World(scene);
+const physics = new Physics(world.colliders);
+const fx = new Effects(scene);
+fx.initExtras();
+const tweens = new Tweens();
+const sound = new Sound();
+const looks = loadLooks();
+let playerId = params.get('as') || localStorage.getItem(PLAYER_KEY) || 'roji';
+if (!looks[playerId]) playerId = 'roji';
+const otherId = (id) => (id === 'roji' ? 'homama' : 'roji');
+let started = false;
+let gameOpen = false;
+let wardrobeTarget = null;
+let nightTarget = 0;
+let focus = null;
+let elapsed = 0;
+
+const game = {
+  scene,
+  physics,
+  ground: world.groundFx,
+  looks,
+  sound,
+  fx,
+  actors: {},
+  props: loadProps(),
+  playerId: () => playerId,
+  toast: (html, ms) => ui.toast(html, ms),
+  time: () => elapsed,
+  emote: (a, type) => a?.kid.emote(type),
+  setNight: (k) => (nightTarget = k),
+  setFocus: (spec) => (focus = spec),
+  fade: (fn) => fadeThen(fn),
+  onEnterInterior: (space) => onEnterInterior(space),
+  onExitInterior: (space) => onExitInterior(space),
+  playArena: (id, opts) => playArena(id, opts),
+  openWardrobe: () => openWardrobe(),
+};
+game.activities = new Activities(game);
+const spaces = new Spaces(game);
+game.spaces = spaces;
+
+// Island edge, unless we are inside a building far away
+const islandBounds = (p, r, v, bounce) => {
+  const s = islandSdf(p.x, p.z);
+  const margin = -0.9 - r;
+  if (s <= margin) return;
+  const e = 0.05;
+  let gx = islandSdf(p.x + e, p.z) - islandSdf(p.x - e, p.z);
+  let gz = islandSdf(p.x, p.z + e) - islandSdf(p.x, p.z - e);
+  const gl = Math.hypot(gx, gz) || 1;
+  gx /= gl;
+  gz /= gl;
+  p.x -= gx * (s - margin);
+  p.z -= gz * (s - margin);
+  const into = v.x * gx + v.z * gz;
+  if (into > 0) {
+    v.x -= gx * into * (1 + bounce);
+    v.z -= gz * into * (1 + bounce);
+  }
+};
+physics.bounds = (p, r, v, bounce) => {
+  if (!spaces.inside && p.x < 300) islandBounds(p, r, v, bounce);
+};
+
+// Places and interiors from src/engine/manifest.js (modules that are missing are skipped)
+await spaces.load();
+const hasHome = !!spaces.byId.home;
+
+// ------------------------------------------------------------------ stations: weekends, town places, city places
 const builders = { ...BUILDERS, yumyum: buildYumYum, plaza: buildPlaza };
-const stations = STOPS.map((stop) => new Station(world, scene, stop, builders[stop.id]));
+if (hasHome) builders.home = null;
+const stations = STOPS.map((stop) => new Station(world, scene, stop, builders[stop.id], stop.id === 'home' && hasHome ? { badgeY: 7.6 } : {}));
+for (const sp of spaces.places) {
+  if (sp.id === 'home') continue;
+  const stop = { id: sp.id, kind: 'place', title: sp.id, tag: 'Place', icon: 'star', color: '#21a99a', text: '', ...sp.stop, id: sp.id, kind: 'place' };
+  if (!ICONS[stop.icon]) stop.icon = 'star';
+  stations.push(new Station(world, scene, stop, null, { pad: [sp.pad.x, sp.pad.z], origin: [sp.origin.x, sp.origin.z], badgeY: sp.inst.badgeY ?? 6.5 }));
+}
 const byId = Object.fromEntries(stations.map((s) => [s.stop.id, s]));
 const plazaSign = world.sign(['Play Park'], { width: 2.2, height: 0.8, accent: '#21a99a', postHeight: 0.8 });
 plazaSign.position.set(PADS.plaza[0] + 3.2, 0, PADS.plaza[1] - 1.8);
@@ -76,47 +161,87 @@ world.addCollider({ type: 'box', x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.86
 const keepOut = [];
 for (const s of stations) {
   const big = s.stop.kind === 'place' ? 6.6 : 5.4;
-  keepOut.push({ x: s.origin.x, z: s.origin.z, r: big }, { x: s.pad.x, z: s.pad.z, r: 2.9 }, { x: s.pad.x - 3.3, z: s.pad.z - 2, r: 1.6 });
+  if (!spaces.byId[s.stop.id]) keepOut.push({ x: s.origin.x, z: s.origin.z, r: big });
+  keepOut.push({ x: s.pad.x, z: s.pad.z, r: 2.9 }, { x: s.pad.x - 3.3, z: s.pad.z - 2, r: 1.6 });
 }
 for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { x: fx_, z: fz, r: 2.6 });
 keepOut.push({ x: CAR_SPOT[0], z: CAR_SPOT[1], r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
-world.scatterNature(keepOut);
+const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
+world.scatterNature(keepOut, rects);
 bakeStatic(world.statics, [], mergeGeometries);
-const interior = buildInterior(scene, world);
-const fx = new Effects(scene);
-fx.initExtras();
-const tweens = new Tweens();
-const sound = new Sound();
+
+// ------------------------------------------------------------------ day and night
+const daylight = new Daylight({ override: params.get('time') });
+// Signs, lamps and lit windows glow brighter after dark
+const glowMats = new Map();
+const collectGlow = (root) =>
+  root.traverse((o) => {
+    if (!o.isMesh && !o.isInstancedMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!m?.emissive || glowMats.has(m) || m === world.lampGlowMat) continue;
+      if (m.emissiveIntensity > 0 && (m.emissive.r + m.emissive.g + m.emissive.b > 0.15 || m.emissiveMap)) glowMats.set(m, m.emissiveIntensity);
+    }
+  });
+collectGlow(world.statics);
+for (const st of stations) collectGlow(st.group);
+for (const sp of spaces.places) collectGlow(sp.inst.group);
+const clockEl = document.getElementById('clock');
+const SUN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>';
+const MOON_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+let clockKey = '';
+function updateClock() {
+  const L = daylight.label();
+  const key = L.time + L.phase + L.mode;
+  if (key === clockKey) return;
+  clockKey = key;
+  const fixed = L.mode !== 'live';
+  clockEl.innerHTML = `${L.night ? MOON_ICON : SUN_ICON}<span class="c-time">${L.time}</span><span class="c-phase">${L.phase}${fixed ? (L.mode === 'fast' ? ' · fast' : ' · set') : ''}</span>`;
+  clockEl.classList.toggle('night', L.night);
+  document.body.classList.toggle('night-time', L.night);
+}
+clockEl.addEventListener('click', async () => {
+  sound.ui('tap');
+  const L = daylight.label();
+  const id = await choose({ title: 'Time of day', text: `Roji World follows your clock. It is ${L.time}, ${L.phase.toLowerCase()} here.`, options: TIME_CHOICES });
+  if (!id) return;
+  daylight.setMode(id);
+  clockKey = '';
+  const names = { live: 'Back to your own clock', fast: 'A whole day goes by in four minutes' };
+  ui.toast(names[id] || `Now it is ${TIME_CHOICES.find((c) => c.id === id)?.label.toLowerCase()}`, 2400);
+});
+const skyTintEl = document.getElementById('skytint');
+let skyTintKey = '';
+function setSkyTint(day) {
+  const a = day ? day.tintA : 0;
+  const c = day ? day.tint : null;
+  const key = c ? `${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}|${a.toFixed(2)}` : '|0';
+  if (key === skyTintKey) return;
+  skyTintKey = key;
+  const [rgb, alpha] = key.split('|');
+  if (rgb) skyTintEl.style.setProperty('--tint', rgb);
+  skyTintEl.style.setProperty('--tint-a', alpha);
+}
+const greeting = () => {
+  const h = daylight.state.hour;
+  return h < 5 || h >= 22 ? 'Good night' : h < 12 ? 'Good morning' : h < 17.5 ? 'Good afternoon' : 'Good evening';
+};
 
 // ------------------------------------------------------------------ the two kids
-const looks = loadLooks();
-let playerId = params.get('as') || localStorage.getItem(PLAYER_KEY) || 'roji';
-if (!looks[playerId]) playerId = 'roji';
-const otherId = (id) => (id === 'roji' ? 'homama' : 'roji');
 const headPos = (kid) => kid.head.localToWorld(new THREE.Vector3(0, 0.75, 0));
-function makeActor(id, x, z, yaw) {
+function addActor(id, x, z, yaw) {
   const kid = new Kid(looks[id]);
   scene.add(kid.root);
   kid.onEmoteFx = (type, k) => fx.heartsAt(headPos(k), 4);
-  const a = { id, kid, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), yaw, vy: 0, air: 0, idle: 0, stepSign: 1, speed: 0, turn: 0 };
-  kid.root.position.copy(a.pos);
-  return a;
+  return makeActor(id, kid, x, z, yaw);
 }
 const home = byId.home.pad;
-const actors = {
-  roji: makeActor('roji', home.x + 0.3, home.z + 0.3, Math.PI * 0.75),
-  homama: makeActor('homama', home.x + 1.3, home.z + 0.6, Math.PI * 0.85),
-};
+const actors = game.actors;
+actors.roji = addActor('roji', home.x + 0.3, home.z + 0.3, Math.PI * 0.75);
+actors.homama = addActor('homama', home.x + 1.3, home.z + 0.6, Math.PI * 0.85);
 const P = () => actors[playerId];
 const C = () => actors[otherId(playerId)];
-const RADIUS = 0.34;
 let holding = false;
-let mount = null; // { type: 'car' } or { type: 'pony', ctl, station }
-let activity = null; // movie | sleep | table | dance
-let inside = false;
-let started = false;
-let gameOpen = false;
-let wardrobeTarget = null;
+let mount = null; // { type: 'car' } or { type: 'pony', ctl, walker }
 
 // ------------------------------------------------------------------ car
 const car = new Car('#ff8fb1');
@@ -124,7 +249,7 @@ car.yaw = -0.5;
 car.root.position.set(CAR_SPOT[0], 0, CAR_SPOT[1]);
 car.root.rotation.y = car.yaw;
 scene.add(car.root);
-const carCollider = { type: 'circle', x: CAR_SPOT[0], z: CAR_SPOT[1], r: 1.1, isCar: true };
+const carCollider = { type: 'circle', x: CAR_SPOT[0], z: CAR_SPOT[1], r: 1.1, isCar: true, h: 1.25 };
 world.addCollider(carCollider);
 
 // ------------------------------------------------------------------ beach balls
@@ -173,58 +298,106 @@ const nextStopAfter = (id) => {
   return (later.find((s) => s.unlocked && !stamps.has(s.stop.id)) || later[0])?.stop;
 };
 
-// ------------------------------------------------------------------ routes along the paths
-let waypoints = [];
-const nearestIn = (list, x, z) => {
-  let best = 0;
-  let bd = Infinity;
-  list.forEach((s, i) => {
-    const d = (s.x - x) ** 2 + (s.z - z) ** 2;
-    if (d < bd) {
-      bd = d;
-      best = i;
+// ------------------------------------------------------------------ routes: a graph over every path and street
+const graph = (() => {
+  const nodes = [];
+  const lists = [world.samples, world.townSamples, world.futureSamples, ...world.cityRoads];
+  lists.forEach((list, li) => {
+    let prev = null;
+    for (let i = 0; i < list.length; i += 2) {
+      const n = { x: list[i].x, z: list[i].z, li, adj: [] };
+      nodes.push(n);
+      if (prev) {
+        const d = Math.hypot(n.x - prev.x, n.z - prev.z);
+        n.adj.push([prev, d]);
+        prev.adj.push([n, d]);
+      }
+      prev = n;
     }
   });
-  return { i: best, d: Math.sqrt(bd) };
-};
-const walk = (list, from, to) => {
-  const out = [];
-  const dir = Math.sign(to - from) || 1;
-  for (let i = from; dir > 0 ? i < to : i > to; i += dir * 5) out.push(list[i].clone());
-  return out;
-};
-function travelTo(id) {
-  const st = byId[id];
-  if (!st || inside || activity) return;
-  const p = P().pos;
-  const main = world.samples;
-  const town = world.townSamples;
-  const isTown = st.stop.kind === 'place';
-  const onMain = nearestIn(main, p.x, p.z);
-  const onTown = nearestIn(town, p.x, p.z);
-  const homeMain = 0;
-  const turnMain = nearestIn(main, -24.5, -3.5).i;
-  const townEnd = town.length - 1;
-  if (isTown) {
-    const target = nearestIn(town, st.pad.x, st.pad.z).i;
-    if (onTown.d <= onMain.d + 0.5) waypoints = walk(town, onTown.i, target);
-    else {
-      const viaHome = Math.abs(onMain.i - homeMain) + target;
-      const viaTurn = Math.abs(onMain.i - turnMain) + (townEnd - target);
-      waypoints = viaHome <= viaTurn ? [...walk(main, onMain.i, homeMain), ...walk(town, 0, target)] : [...walk(main, onMain.i, turnMain), ...walk(town, townEnd, target)];
-    }
-  } else {
-    const target = world.padIndex[id];
-    if (onMain.d <= onTown.d + 0.5) waypoints = walk(main, onMain.i, target);
-    else {
-      const viaHome = onTown.i + Math.abs(target - homeMain);
-      const viaTurn = townEnd - onTown.i + Math.abs(target - turnMain);
-      waypoints = viaHome <= viaTurn ? [...walk(town, onTown.i, 0), ...walk(main, homeMain, target)] : [...walk(town, onTown.i, townEnd), ...walk(main, turnMain, target)];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      if (a.li === b.li) continue;
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      if (d < 1.9) {
+        a.adj.push([b, d]);
+        b.adj.push([a, d]);
+      }
     }
   }
-  waypoints.push(st.pad.clone());
+  return nodes;
+})();
+const nearestNode = (x, z) => {
+  let best = null;
+  let bd = Infinity;
+  for (const n of graph) {
+    const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = n;
+    }
+  }
+  return best;
+};
+function route(from, to) {
+  const a = nearestNode(from.x, from.z);
+  const b = nearestNode(to.x, to.z);
+  const dist = new Map([[a, 0]]);
+  const prev = new Map();
+  const open = [a];
+  const done = new Set();
+  while (open.length) {
+    let bi = 0;
+    for (let i = 1; i < open.length; i++) if (dist.get(open[i]) < dist.get(open[bi])) bi = i;
+    const n = open.splice(bi, 1)[0];
+    if (n === b) break;
+    if (done.has(n)) continue;
+    done.add(n);
+    for (const [m, w] of n.adj) {
+      const nd = dist.get(n) + w;
+      if (nd < (dist.get(m) ?? Infinity)) {
+        dist.set(m, nd);
+        prev.set(m, n);
+        open.push(m);
+      }
+    }
+  }
+  const out = [];
+  for (let n = b; n; n = prev.get(n)) out.unshift(new THREE.Vector3(n.x, 0, n.z));
+  return out.filter((_, i) => i % 3 === 0 || i === out.length - 1);
+}
+let waypoints = [];
+let pendingEnter = null;
+function travelTo(id) {
+  const st = byId[id];
+  if (!st || spaces.inside || game.activities.active) return;
+  waypoints = [...route(P().pos, st.pad), st.pad.clone()];
   fx.showMarker(st.pad);
 }
+
+// ------------------------------------------------------------------ games: 3D first, the old 2D ones only where no 3D version exists yet
+const arena = new ArenaHost({
+  renderer,
+  sound,
+  input: null, // set below once Input exists
+  looks,
+  models: { pony: (coat) => makePony(coat) },
+});
+game.arena = arena;
+// On slow phones the games finish loading after the first card shows, so redraw it then
+arena.preload().then(() => {
+  if (currentStation && !spaces.inside) {
+    ui.refreshCard();
+    showStationCard(currentStation);
+  }
+});
+const gamesFor = (placeId) => [
+  ...ARENAS.filter((a) => !a.dev && a.place === placeId && arena.mods[a.id]).map((a) => arena.meta(a.id)),
+  ...gamesAt(placeId).filter((g) => !arena.mods[g.id]),
+];
+const allGames = () => [...ARENAS.filter((a) => !a.dev && arena.mods[a.id]).map((a) => arena.meta(a.id)), ...GAMES.filter((g) => !arena.mods[g.id])];
 
 // ------------------------------------------------------------------ UI
 const ui = new UI({
@@ -232,8 +405,9 @@ const ui = new UI({
   onTravel: (id) => {
     if (!started) return;
     if (mount) dismount();
-    if (inside) {
-      exitHome(() => travelTo(id));
+    if (spaces.inside) {
+      spaces.exit();
+      setTimeout(() => travelTo(id), 500);
       return;
     }
     travelTo(id);
@@ -256,16 +430,14 @@ const ui = new UI({
   onHands: () => toggleHands(),
   onJump: () => jump(),
   onPlay: (id) => playGame(id),
-  onFullscreen: () => goFullscreen(),
-  journalData: () => ({ stations, stamps, gamesAt }),
+  onFullscreen: () => toggleFullscreen(),
+  journalData: () => ({ stations, stamps, gamesAt: gamesFor }),
 });
 ui.setSound(sound.muted);
 ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
 const minimap = new Minimap(document.getElementById('minimap'), world, stations);
-
-function toast(t, ms) {
-  ui.toast(t, ms);
-}
+minimap.places = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, w: s.size.w, d: s.size.d, color: s.stop.color || '#21a99a' }));
+const toast = (t, ms) => ui.toast(t, ms);
 
 // ------------------------------------------------------------------ hotspots
 const horse = byId.horse;
@@ -273,44 +445,45 @@ const gate = new THREE.Vector3(horse.origin.x, 0, horse.origin.z + 3.6);
 const homeSt = byId.home;
 const plaza = byId.plaza;
 const kiosk = new THREE.Vector3(plaza.origin.x - 1.2, 0, plaza.origin.z - 2.6);
-const hot = (pos, r, label, icon, act, when = () => true) => ({ pos, r, label, icon, act, when });
-const outdoorHotspots = [
+const homeDoor = () => spaces.interiors.home?.door || homeSt.door;
+const hot = (pos, r, label, icon, act, when = () => true) => ({
+  get pos() {
+    return pos();
+  },
+  r,
+  label,
+  icon,
+  act,
+  when,
+});
+const danceFloor = new THREE.Vector3(plaza.danceFloor.x, 0, plaza.danceFloor.z);
+const townHotspots = [
   hot(() => car.root.position, 2.6, 'Drive the car', 'car', () => enterCar()),
   hot(() => gate, 1.8, 'Ride the pony', 'horse', () => mountPony()),
-  hot(() => homeSt.door, 1.5, 'Go inside', 'door', () => enterHome()),
+  hot(() => homeDoor(), 1.5, 'Go inside', 'door', () => enterPlace('home'), () => !hasHome || !spaces.interiors.home),
   hot(() => plaza.fountain, 2.6, 'Make a wish', 'star', () => makeWish()),
-  hot(() => kiosk, 1.6, 'Arcade games', 'game', () => ui.openGames('Arcade', GAMES)),
+  hot(() => kiosk, 1.6, 'Arcade games', 'game', () => ui.openGames('Arcade', allGames())),
   {
-    pos: () => new THREE.Vector3(plaza.danceFloor.x, 0, plaza.danceFloor.z),
+    pos: danceFloor,
     inside: (p) => Math.abs(p.x - plaza.danceFloor.x) < plaza.danceFloor.half && Math.abs(p.z - plaza.danceFloor.z) < plaza.danceFloor.half,
     label: 'Dance together',
     icon: 'music',
-    act: () => startActivity('dance'),
+    act: () => startDance(),
     when: () => true,
   },
 ];
-const H = interior.hotspots;
-const indoorHotspots = [
-  hot(() => H.door, 1.3, 'Go outside', 'door', () => exitHome()),
-  hot(() => H.sofa, 1.5, 'Movie night', 'cinema', () => startActivity('movie')),
-  hot(() => H.bed, 1.7, 'Go to sleep', 'moon', () => startActivity('sleep')),
-  hot(() => H.closet, 1.2, 'Wardrobe', 'shirt', () => openWardrobe()),
-  hot(() => H.stove, 1.3, 'Cook something', 'yum', () => playGame('cooking')),
-  hot(() => H.fridge, 1.2, 'Grab a snack', 'heart', () => snack()),
-  hot(() => H.table, 1.4, 'Sit at the table', 'smile', () => startActivity('table')),
-];
 function currentHotspot() {
   const p = P().pos;
-  const list = inside ? indoorHotspots : outdoorHotspots;
+  const list = spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()];
   let best = null;
   let bd = Infinity;
   for (const h of list) {
     if (!h.when()) continue;
-    const hp = h.pos();
     if (h.inside) {
       if (h.inside(p)) return h;
       continue;
     }
+    const hp = h.pos;
     const d = Math.hypot(p.x - hp.x, p.z - hp.z);
     if (d < h.r && d < bd) {
       bd = d;
@@ -327,33 +500,45 @@ function action(act = 'auto') {
   if (!started || gameOpen) return;
   if (act === 'auto' && ui.panelOpen) return;
   if (act === 'auto') {
-    if (activity) return endActivity();
+    if (game.activities.active) return game.activities.end();
     if (mount) return dismount();
+    if (currentHot) return currentHot.act();
     if (currentStation) {
       const s = currentStation.stop;
       if (s.kind === 'start') act = 'inside';
-      else if (s.kind === 'place') act = gamesAt(s.id).length === 1 ? 'game:' + gamesAt(s.id)[0].id : 'games';
-      else if (!currentStation.unlocked) act = 'locked';
+      else if (s.kind === 'place') {
+        const gs = gamesFor(s.id);
+        act = spaces.interiors[s.id] ? 'enter' : gs.length === 1 ? 'game:' + gs[0].id : gs.length ? 'games' : 'none';
+      } else if (!currentStation.unlocked) act = 'locked';
       else act = stamps.has(s.id) ? 'travel-next' : 'stamp';
-    } else if (currentHot) return currentHot.act();
-    else return;
+    } else return;
   }
   const st = currentStation;
+  if (act === 'none') return;
   if (act.startsWith('game:')) return playGame(act.slice(5));
-  if (act === 'games' && st) return ui.openGames(st.stop.title, gamesAt(st.stop.id));
+  if (act === 'games' && st) return ui.openGames(st.stop.title, gamesFor(st.stop.id));
   if (act === 'notes' && st) return ui.openNotes(st.stop.id);
   if (act === 'ride') return mountPony();
-  if (act === 'inside') {
-    waypoints = [homeSt.door.clone()];
-    pendingEnter = true;
-    return;
-  }
+  if (act === 'inside') return enterPlace('home');
+  if (act === 'enter' && st) return enterPlace(st.stop.id);
   if (act === 'travel-next' && st) {
     const next = st.stop.kind === 'start' ? weeks.find((s) => s.unlocked && !stamps.has(s.stop.id))?.stop || weeks[0].stop : nextStopAfter(st.stop.id);
     if (next) travelTo(next.id);
     return;
   }
   if (!st) return;
+  if (act === 'unstamp' && stamps.has(st.stop.id)) {
+    stamps.delete(st.stop.id);
+    save();
+    st.refresh(false);
+    refreshTrail();
+    sound.ui('swoosh');
+    ui.refreshCard();
+    showStationCard(st);
+    ui.updateJourney(stations, stamps, st.stop.id);
+    toast('Stamp taken off. You can collect it again any time.', 2600);
+    return;
+  }
   if (act === 'locked' || !st.unlocked) {
     sound.locked();
     ui.shakeCard();
@@ -379,14 +564,33 @@ function action(act = 'auto') {
     if (open.every((s) => stamps.has(s.stop.id))) setTimeout(() => toast(`<b>All ${open.length} weekends collected!</b> A new adventure unlocks next week.`, 6000), 1200);
   }
 }
-let pendingEnter = false;
+
+// Walk to a building's door, then go in
+function enterPlace(id) {
+  const rec = spaces.interiors[id];
+  if (!rec) {
+    toast('This door opens soon.', 2000);
+    return;
+  }
+  const d = rec.door;
+  if (Math.hypot(P().pos.x - d.x, P().pos.z - d.z) < 1.8) {
+    spaces.enter(id);
+    return;
+  }
+  waypoints = [...route(P().pos, d), d.clone().add(new THREE.Vector3(0, 0, 0.6))];
+  pendingEnter = id;
+}
 
 function showStationCard(st) {
-  ui.showCard(st, { stamped: stamps.has(st.stop.id), nextStop: nextStopAfter(st.stop.id), games: st.unlocked ? gamesAt(st.stop.id) : [], ride: st.stop.id === 'horse' });
+  const id = st.stop.id;
+  const rec = spaces.interiors[id];
+  ui.showCard(st, { stamped: stamps.has(id), nextStop: nextStopAfter(id), games: st.unlocked ? gamesFor(id) : [], ride: id === 'horse', inside: !!rec, insideLocked: rec?.locked() ? rec.lockedLabel : null });
 }
 
 function playGame(id) {
   if (gameOpen) return;
+  // Wait for a 3D game that is still loading; the 2D version is only a fallback if it fails
+  if (arena.has(id)) return playArena(id).then((r) => (r === null && !arena.has(id) && GAMES.some((g) => g.id === id) ? playGame(id) : r));
   gameOpen = true;
   input.enabled = false;
   input.keys.clear();
@@ -401,29 +605,37 @@ function playGame(id) {
       gameOpen = false;
       input.enabled = true;
       sound.setMusicLevel(1);
-      if (result?.win === true) {
-        P().kid.emote('cheer');
-        setTimeout(() => C().kid.emote('heart'), 300);
-      } else if (result) P().kid.emote('wave');
-      if (id === 'drawpad') refreshDrawings();
+      celebrate(result);
     },
   });
 }
 
-function refreshDrawings() {
-  try {
-    const g = JSON.parse(localStorage.getItem('roji-game-drawpad-gallery') || '[]');
-    const urls = g.map((d) => (typeof d === 'string' ? d : d.url || d.dataUrl || d.src)).filter(Boolean);
-    if (urls.length) interior.setDrawings(urls.slice(-2).reverse());
-  } catch {
-    /* no drawings yet */
-  }
+async function playArena(id, opts = {}) {
+  if (gameOpen || arena.active) return null;
+  gameOpen = true;
+  waypoints = [];
+  input.keys.clear();
+  ui.closePanels();
+  ui.hideCard();
+  currentStation = null;
+  sound.setMusicLevel(0.25);
+  const result = await arena.open(id, { me: playerId, ...opts });
+  gameOpen = false;
+  sound.setMusicLevel(1);
+  celebrate(result);
+  return result;
 }
-refreshDrawings();
+
+function celebrate(result) {
+  if (result?.win === true) {
+    P().kid.emote('cheer');
+    setTimeout(() => C().kid.emote('heart'), 300);
+  } else if (result && !result.quit) P().kid.emote('wave');
+}
 
 const EMOTE_KEYS = ['wave', 'dance', 'spin', 'cheer', 'heart', 'bow'];
 function emote(type) {
-  if (!started || mount || activity) return;
+  if (!started || mount || game.activities.active) return;
   waypoints = [];
   P().kid.emote(type);
   const c = C();
@@ -431,7 +643,7 @@ function emote(type) {
 }
 
 function toggleHands() {
-  if (!started || mount || activity) return;
+  if (!started || mount || game.activities.active) return;
   holding = !holding;
   ui.setHands(holding);
   if (holding) toast(`${looks[playerId].name} and ${looks[otherId(playerId)].name} are holding hands`, 2200);
@@ -443,10 +655,11 @@ function toggleHands() {
 
 function swapPlayer() {
   if (!started) return;
-  if (mount || activity) {
+  if (mount || game.activities.active) {
     toast('Get out first, then switch.');
     return;
   }
+  const carried = P().kid.carried;
   playerId = otherId(playerId);
   localStorage.setItem(PLAYER_KEY, playerId);
   waypoints = [];
@@ -454,6 +667,7 @@ function swapPlayer() {
   P().kid.holdSide = 0;
   C().kid.holdSide = 0;
   P().kid.wave();
+  if (carried) void carried;
   toast(`Now playing as <b>${looks[playerId].name}</b>`, 2200);
 }
 
@@ -464,33 +678,35 @@ function jump() {
     sound.honk();
     return;
   }
-  if (activity) return;
+  if (game.activities.active) return;
+  if (mount?.type === 'pony') {
+    if (tryJump(mount.walker, { power: 6, allowDouble: false })) sound.jump();
+    return;
+  }
   const p = P();
-  if (p.air > 0.02) return;
-  p.vy = mount?.type === 'pony' ? 5.2 : 6.6;
-  p.kid.squash = 1.2;
-  sound.jump();
+  const r = tryJump(p);
+  if (!r) return;
+  hop(p, r);
   // The partner hops too when holding hands or close by
   const c = C();
-  if (!mount && c.pos.distanceTo(p.pos) < 3) {
+  if (c.pos.distanceTo(p.pos) < 3.2 && !c.seated) {
     setTimeout(() => {
-      if (c.air < 0.02) {
-        c.vy = 6.2;
-        c.kid.squash = 1.2;
-      }
-    }, holding ? 0 : 150);
+      const rc = tryJump(c);
+      if (rc) hop(c, rc, true);
+    }, holding ? 40 : 160);
   }
 }
-
-function snack() {
-  interior.state.fridgeOpen = 2.2;
-  const treats = ['strawberries', 'a cupcake', 'chocolate milk', 'a cookie', 'watermelon', 'ice cream'];
-  const t = treats[Math.floor(Math.random() * treats.length)];
-  setTimeout(() => {
-    P().kid.emote('cheer');
-    fx.heartsAt(headPos(P().kid), 3);
-    toast(`Yum, ${t}!`, 2200);
-  }, 600);
+// A cute hop: stretch up, a little sparkle, and a sparkly flip on the double jump
+function hop(a, kind, quiet = false) {
+  a.kid.squash = kind === 'double' ? 1.18 : 1.3;
+  if (!quiet) {
+    if (kind === 'double') {
+      if (sound.ctx) sound.tone(660, sound.ctx.currentTime, 0.18, { slideTo: 1320, gain: 0.06, type: 'triangle' });
+      sound.ui('pop');
+    } else sound.jump();
+  }
+  if (kind === 'double') fx.burst(new THREE.Vector3(a.pos.x, a.y + 0.8, a.pos.z), ['#ffd166', '#ffffff', '#ff8fb1', '#b9a6ff'], 18);
+  else fx.puff(a.pos);
 }
 
 const WISHES = [
@@ -511,6 +727,30 @@ function makeWish() {
   });
 }
 
+function startDance() {
+  const p = P();
+  const c = C();
+  const side = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
+  game.activities.start({
+    label: 'Stop dancing',
+    seats: [
+      { who: 'player', x: p.pos.x, z: p.pos.z, yaw: p.yaw, pose: 'stand' },
+      { who: 'partner', x: p.pos.x + side.x, z: p.pos.z + side.z, yaw: p.yaw, pose: 'stand' },
+    ],
+    onEnd: () => {
+      plaza.dancing = false;
+      sound.setParty(false);
+    },
+  });
+  plaza.dancing = true;
+  sound.setParty(true);
+  for (const a of [p, c]) {
+    a.kid.danceLoop = true;
+    a.kid.emote('dance');
+  }
+  toast('Dance party! Move to stop.', 2400);
+}
+
 // ------------------------------------------------------------------ car and pony
 const leftOf = (yaw, d) => new THREE.Vector3(Math.cos(yaw) * d, 0, -Math.sin(yaw) * d);
 function seatKid(a, parent, pos, pose) {
@@ -525,16 +765,16 @@ function seatKid(a, parent, pos, pose) {
 function unseatKid(a, worldPos, yaw) {
   scene.add(a.kid.root);
   a.pos.copy(worldPos).setY(0);
-  resolve(a.pos, RADIUS, a.vel);
+  physics.resolve(a.pos, RADIUS, a.vel);
   a.yaw = yaw;
-  a.air = 0;
+  a.y = 0;
   a.vy = 0;
   a.kid.pose = 'stand';
   a.kid.root.rotation.set(0, yaw, 0);
   a.kid.root.position.copy(a.pos);
 }
 function enterCar() {
-  if (mount || inside) return;
+  if (mount || spaces.inside) return;
   holding = false;
   ui.setHands(false);
   waypoints = [];
@@ -545,7 +785,7 @@ function enterCar() {
   seatKid(c, car.body, new THREE.Vector3(-0.33, 0.66, -0.25), 'sit');
   sound.engine(true);
   sound.honk();
-  toast('Beep beep! Drive with the arrows or the stick. Space honks.', 3000);
+  toast('Beep beep! Point the stick or the arrows where you want to go. Space honks.', 3200);
 }
 function exitCar() {
   const y = car.yaw;
@@ -557,7 +797,7 @@ function exitCar() {
   sound.engine(false);
 }
 function mountPony() {
-  if (mount || inside) return;
+  if (mount || spaces.inside) return;
   const ctl = horse.pony;
   holding = false;
   ui.setHands(false);
@@ -568,7 +808,8 @@ function mountPony() {
   ctl.pony.root.position.set(p.pos.x, 0, p.pos.z);
   ctl.pony.root.rotation.set(0, p.yaw, 0);
   ctl.ridden = true;
-  mount = { type: 'pony', ctl, speed: 0, yaw: p.yaw };
+  const walker = { pos: ctl.pony.root.position, vel: new THREE.Vector3(), y: 0, ground: 0, vy: 0, jumps: 0, flipT: -1, mode: 'walk', surface: null, speed: 0 };
+  mount = { type: 'pony', ctl, walker };
   seatKid(p, ctl.pony.root, new THREE.Vector3(0, 1.1, -0.02), 'ride');
   fx.poof(p.pos);
   sound.arrive();
@@ -578,6 +819,7 @@ function dismountPony() {
   const ctl = mount.ctl;
   const pr = ctl.pony.root;
   const y = pr.rotation.y;
+  pr.position.y = 0;
   unseatKid(P(), pr.position.clone().add(leftOf(y, 1.1)), y);
   fx.poof(pr.position);
   horse.group.attach(pr);
@@ -592,7 +834,7 @@ function dismount() {
   else dismountPony();
 }
 
-// ------------------------------------------------------------------ home
+// ------------------------------------------------------------------ interiors
 const fadeEl = document.getElementById('fade');
 function fadeThen(fn) {
   fadeEl.classList.add('on');
@@ -604,131 +846,35 @@ function fadeThen(fn) {
 function placePair(pos, yaw) {
   const p = P();
   const c = C();
-  p.pos.copy(pos);
-  p.yaw = yaw;
-  c.pos.copy(pos).add(leftOf(yaw, 0.9));
-  c.yaw = yaw;
+  p.pos.set(pos.x, 0, pos.z);
+  c.pos.copy(p.pos).add(leftOf(yaw, 0.9));
   for (const a of [p, c]) {
+    a.yaw = yaw;
+    a.y = 0;
+    a.vy = 0;
     a.vel.set(0, 0, 0);
     a.kid.root.position.copy(a.pos);
   }
   camLook.set(pos.x, 0.9, pos.z);
 }
-function enterHome() {
-  if (inside || mount) return;
-  waypoints = [];
-  fadeThen(() => {
-    inside = true;
-    document.body.classList.add('inside');
-    interior.setInside(true);
-    world.water.visible = false;
-    placePair(interior.spawn, 0);
-    ui.hideCard();
-    setShadowBox(16);
-    toast(`Welcome home! The kitchen, the living room and the bedroom are all yours.`, 3400);
-  });
-}
-function exitHome(after) {
-  if (!inside) return;
-  if (activity) endActivity(true);
-  fadeThen(() => {
-    inside = false;
-    document.body.classList.remove('inside');
-    interior.setInside(false);
-    world.water.visible = true;
-    placePair(homeSt.door.clone().add(new THREE.Vector3(0, 0, 1.4)), 0);
-    setShadowBox(20);
-    after?.();
-  });
-}
-
-// ------------------------------------------------------------------ activities
-let night = 0;
-function sitKid(a, pos, yaw, pose, y) {
-  a.kid.cancelEmote();
-  a.kid.holdSide = 0;
-  a.pos.set(pos.x, 0, pos.z);
-  a.yaw = yaw;
-  a.vel.set(0, 0, 0);
-  a.kid.pose = pose;
-  a.kid.root.position.set(pos.x, y, pos.z);
-  a.kid.root.rotation.set(0, yaw, 0);
-}
-function startActivity(type) {
-  if (activity || mount) return;
-  waypoints = [];
+function onEnterInterior(space) {
+  if (mount) dismount();
   holding = false;
   ui.setHands(false);
-  const p = P();
-  const c = C();
-  activity = type;
-  for (const a of [p, c]) {
-    a.vel.set(0, 0, 0);
-    a.speed = 0;
-  }
-  if (type === 'movie') {
-    sitKid(p, interior.sofaSeats[0], Math.PI, 'sit', 0.2);
-    sitKid(c, interior.sofaSeats[1], Math.PI, 'sit', 0.2);
-    interior.state.movie = true;
-    sound.setMusicLevel(0.25);
-    toast('Movie night! Cosy blanket, popcorn, and the big screen.', 3400);
-    movieHearts = 3;
-  } else if (type === 'sleep') {
-    const [a, b] = interior.bedSpots;
-    sitKid(p, a, 0, 'sleep', a.y);
-    sitKid(c, b, 0, 'sleep', b.y);
-    p.kid.root.rotation.set(-Math.PI / 2, 0.35, 0);
-    c.kid.root.rotation.set(-Math.PI / 2, -0.35, 0);
-    interior.state.sleep = true;
-    interior.setNight(true);
-    sound.setMusicLevel(0.35);
-    toast('Sweet dreams...', 3000);
-  } else if (type === 'table') {
-    const [a, b] = interior.chairs;
-    sitKid(p, a, Math.PI / 2, 'sit', 0.19);
-    sitKid(c, b, -Math.PI / 2, 'sit', 0.19);
-  } else if (type === 'dance') {
-    plaza.dancing = true;
-    sound.setParty(true);
-    c.pos.copy(p.pos).add(leftOf(p.yaw, 1.0));
-    for (const a of [p, c]) {
-      a.kid.danceLoop = true;
-      a.kid.emote('dance');
-    }
-    toast('Dance party! Move to stop.', 2400);
-  }
+  waypoints = [];
+  placePair(space.spawn, space.spawnYaw);
+  document.body.classList.add('inside');
+  world.water.visible = false;
+  ui.hideCard();
+  currentStation = null;
+  setShadowBox(16);
 }
-let movieHearts = 0;
-function endActivity(silent = false) {
-  const type = activity;
-  if (!type) return;
-  activity = null;
-  const p = P();
-  const c = C();
-  for (const a of [p, c]) {
-    a.kid.pose = 'stand';
-    a.kid.danceLoop = false;
-    a.kid.cancelEmote();
-  }
-  if (type === 'movie') {
-    interior.state.movie = false;
-    sound.setMusicLevel(1);
-    placePair(H.sofa.clone(), 0);
-  } else if (type === 'sleep') {
-    interior.state.sleep = false;
-    interior.setNight(false);
-    sound.setMusicLevel(1);
-    placePair(H.bed.clone(), 0);
-    if (!silent) {
-      toast('Good morning!', 2400);
-      setTimeout(() => p.kid.emote('cheer'), 300);
-    }
-  } else if (type === 'table') {
-    placePair(H.table.clone(), 0);
-  } else if (type === 'dance') {
-    plaza.dancing = false;
-    sound.setParty(false);
-  }
+function onExitInterior(space) {
+  placePair(space.returnTo, 0);
+  document.body.classList.remove('inside');
+  world.water.visible = true;
+  nightTarget = 0;
+  setShadowBox(20);
 }
 
 // ------------------------------------------------------------------ wardrobe
@@ -761,10 +907,10 @@ const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const hit = new THREE.Vector3();
 const input = new Input(renderer.domElement, {
   onTap: (x, y) => {
-    if (mount || activity || gameOpen) return;
+    if (mount || game.activities.active || gameOpen) return;
     ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    if (!inside) {
+    if (!spaces.inside) {
       for (const st of stations) {
         if (raycaster.intersectObjects([st.group, st.badge], true).length) {
           travelTo(st.stop.id);
@@ -776,15 +922,16 @@ const input = new Input(renderer.domElement, {
         return;
       }
     }
-    if (raycaster.ray.intersectPlane(groundPlane, hit) && (inside || islandSdf(hit.x, hit.z) < -0.8)) {
+    if (raycaster.ray.intersectPlane(groundPlane, hit) && (spaces.inside || islandSdf(hit.x, hit.z) < -0.8)) {
       waypoints = [hit.clone()];
       fx.showMarker(hit);
     }
   },
   onAction: () => action('auto'),
   onJump: () => jump(),
-  onZoom: (d) => (zoom = clamp(zoom + d, 0.6, 1.6)),
+  onZoom: (d) => (zoom = clamp(zoom + d, 0.55, 1.8)),
   onKey: (k, e) => {
+    if (gameOpen) return;
     if (k === 'escape') {
       if (ui.closeWardrobe()) return;
       ui.closePanels();
@@ -795,6 +942,7 @@ const input = new Input(renderer.domElement, {
       sound.setMuted(!sound.muted);
       ui.setSound(sound.muted);
     }
+    if (k === 'f') toggleFullscreen();
     if (k === 'h') toggleHands();
     if (k === 'tab') {
       e.preventDefault();
@@ -802,81 +950,14 @@ const input = new Input(renderer.domElement, {
     }
     if (k === 'c') openWardrobe();
     if (k === 'j') ui.toggleJournal();
+    if (k === '=' || k === '+') zoom = clamp(zoom - 0.1, 0.55, 1.8);
+    if (k === '-') zoom = clamp(zoom + 0.1, 0.55, 1.8);
     const n = Number(k);
     if (n >= 1 && n <= EMOTE_KEYS.length) emote(EMOTE_KEYS[n - 1]);
   },
 });
 input.attachStick(document.getElementById('stick'), document.getElementById('stick-knob'));
-
-// ------------------------------------------------------------------ collisions
-function resolve(p, r, v, bounce = 0, skipCar = false) {
-  for (const c of world.colliders) {
-    if (skipCar && c.isCar) continue;
-    let dx;
-    let dz;
-    if (c.type === 'circle') {
-      dx = p.x - c.x;
-      dz = p.z - c.z;
-      const min = c.r + r;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= min * min) continue;
-      const d = Math.sqrt(d2) || 1e-4;
-      dx /= d;
-      dz /= d;
-      p.x += dx * (min - d);
-      p.z += dz * (min - d);
-    } else {
-      const qx = clamp(p.x, c.x - c.hw, c.x + c.hw);
-      const qz = clamp(p.z, c.z - c.hd, c.z + c.hd);
-      dx = p.x - qx;
-      dz = p.z - qz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= r * r) continue;
-      if (d2 > 1e-8) {
-        const d = Math.sqrt(d2);
-        dx /= d;
-        dz /= d;
-        p.x += dx * (r - d);
-        p.z += dz * (r - d);
-      } else {
-        const px = c.hw - Math.abs(p.x - c.x) + r;
-        const pz = c.hd - Math.abs(p.z - c.z) + r;
-        if (px < pz) {
-          dx = Math.sign(p.x - c.x) || 1;
-          dz = 0;
-          p.x += dx * px;
-        } else {
-          dx = 0;
-          dz = Math.sign(p.z - c.z) || 1;
-          p.z += dz * pz;
-        }
-      }
-    }
-    const into = v.x * dx + v.z * dz;
-    if (into < 0) {
-      v.x -= dx * into * (1 + bounce);
-      v.z -= dz * into * (1 + bounce);
-    }
-  }
-  if (p.x > 150) return; // inside the house: walls are colliders
-  const s = islandSdf(p.x, p.z);
-  const margin = -0.9 - r;
-  if (s > margin) {
-    const e = 0.05;
-    let gx = islandSdf(p.x + e, p.z) - islandSdf(p.x - e, p.z);
-    let gz = islandSdf(p.x, p.z + e) - islandSdf(p.x, p.z - e);
-    const gl = Math.hypot(gx, gz) || 1;
-    gx /= gl;
-    gz /= gl;
-    p.x -= gx * (s - margin);
-    p.z -= gz * (s - margin);
-    const into = v.x * gx + v.z * gz;
-    if (into > 0) {
-      v.x -= gx * into * (1 + bounce);
-      v.z -= gz * into * (1 + bounce);
-    }
-  }
-}
+arena.input = input;
 
 // ------------------------------------------------------------------ camera
 let zoom = 1;
@@ -885,7 +966,7 @@ const camLook = new THREE.Vector3(P().pos.x, 0.9, P().pos.z);
 const camPos = new THREE.Vector3();
 const followPos = new THREE.Vector3();
 const introPos = new THREE.Vector3();
-const introLook = new THREE.Vector3(-9, 0, 2);
+const introLook = new THREE.Vector3(-9, 0, -2);
 const desiredLook = new THREE.Vector3();
 const lookTmp = new THREE.Vector3();
 const offset = new THREE.Vector3(0, 12, 13.5);
@@ -922,12 +1003,14 @@ function updateCamera(dt, t) {
   const p = P();
   const target = mount?.type === 'car' ? car.root.position : mount?.type === 'pony' ? mount.ctl.pony.root.position : p.pos;
   const vel = mount?.type === 'car' ? new THREE.Vector3(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed) : p.vel;
-  desiredLook.set(target.x + vel.x * 0.22, 0.9, target.z + vel.z * 0.22);
+  const lead = mount?.type === 'car' ? 0.45 : 0.22;
+  desiredLook.set(target.x + vel.x * lead, 0.9 + (mount ? 0 : p.y * 0.5), target.z + vel.z * lead);
   let z = zoom * aspectZoom();
+  const inside = spaces.inside;
   offset.lerp(inside ? OFFSET_IN : OFFSET_OUT, 1 - Math.exp(-4 * dt));
-  if (mount?.type === 'car') z *= 1.25;
+  if (mount?.type === 'car') z *= 1.3;
   if (mount?.type === 'pony') z *= 1.1;
-  if (currentStation && !mount) {
+  if (currentStation && !mount && !spaces.byId[currentStation.stop.id]) {
     const o = currentStation.origin;
     desiredLook.x += (o.x - desiredLook.x) * 0.32;
     desiredLook.z += (o.z + 1 - desiredLook.z) * 0.32;
@@ -935,15 +1018,13 @@ function updateCamera(dt, t) {
     z *= 1.2;
   }
   if (inside) {
-    desiredLook.x = clamp(desiredLook.x, interior.bounds.x0, interior.bounds.x1);
-    desiredLook.z = clamp(desiredLook.z, interior.bounds.z - 1, interior.bounds.z + 1.2);
-    if (activity === 'movie') {
-      desiredLook.set(interior.sofaSeats[0].x + 0.42, 1.2, interior.sofaSeats[0].z - 1.6);
-      z = 0.62;
-    } else if (activity === 'sleep') {
-      desiredLook.set(interior.bedSpots[0].x + 0.5, 0.8, interior.bedSpots[0].z - 0.4);
-      z = 0.62;
-    }
+    const b = inside.bounds;
+    desiredLook.x = clamp(desiredLook.x, Math.min(b.x0 + 3, (b.x0 + b.x1) / 2), Math.max(b.x1 - 3, (b.x0 + b.x1) / 2));
+    desiredLook.z = clamp(desiredLook.z, Math.min(b.z0 + 2, (b.z0 + b.z1) / 2), Math.max(b.z1 - 1.5, (b.z0 + b.z1) / 2));
+  }
+  if (focus) {
+    desiredLook.set(focus.x, focus.y ?? 1, focus.z);
+    z = focus.zoom ?? 0.62;
   }
   if (wardrobeTarget) {
     const a = actors[wardrobeTarget];
@@ -953,15 +1034,14 @@ function updateCamera(dt, t) {
     const panel = document.getElementById('wardrobe');
     const pw = panel.classList.contains('hidden') ? 0 : panel.offsetWidth + 12;
     camera.setViewOffset(window.innerWidth, window.innerHeight, -pw / 2, 0, window.innerWidth, window.innerHeight);
-  }
-  else updateLift(target, dt);
+  } else updateLift(target, dt);
   const rate = wardrobeTarget ? 6 : 4;
   camLook.x = damp(camLook.x, desiredLook.x, rate, dt);
   camLook.y = damp(camLook.y, desiredLook.y, rate, dt);
   camLook.z = damp(camLook.z, desiredLook.z, rate, dt);
   followPos.copy(camLook).addScaledVector(offset, z);
   const a = t * 0.05 + 0.4;
-  introPos.set(introLook.x + Math.sin(a) * 52, 36, introLook.z + Math.cos(a) * 52);
+  introPos.set(introLook.x + Math.sin(a) * 60, 40, introLook.z + Math.cos(a) * 60);
   const k = easeInOut(introBlend);
   camPos.lerpVectors(introPos, followPos, k);
   camera.position.copy(camPos);
@@ -1000,6 +1080,15 @@ async function goFullscreen() {
     /* not supported (iOS): the rotate hint covers it */
   }
 }
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await goFullscreen();
+  } catch {
+    /* not supported */
+  }
+}
+document.addEventListener('fullscreenchange', () => document.body.classList.toggle('is-full', !!document.fullscreenElement));
 
 function start() {
   if (started) return;
@@ -1013,43 +1102,13 @@ function start() {
   setTimeout(() => {
     P().kid.wave();
     setTimeout(() => C().kid.wave(), 300);
-    toast(`Hi ${looks[playerId].name}! Follow the path to <b>Weekend 1</b>. Press H to hold hands.`, 4400);
+    toast(`${greeting()}, ${looks[playerId].name}! Follow the path to <b>Weekend 1</b>. Press H to hold hands.`, 4400);
   }, 2000);
 }
 document.getElementById('start').addEventListener('click', start);
 ui.updateJourney(stations, stamps, null);
 
 // ------------------------------------------------------------------ per-frame movement
-function stepWalker(a, dirX, dirZ, intent, maxSpeed, accel, dt, radius) {
-  const len = Math.hypot(dirX, dirZ) || 1;
-  const k = Math.min(1, intent);
-  a.vel.x = damp(a.vel.x, (dirX / len) * maxSpeed * k, intent > 0.05 ? accel : 9, dt);
-  a.vel.z = damp(a.vel.z, (dirZ / len) * maxSpeed * k, intent > 0.05 ? accel : 9, dt);
-  a.pos.x += a.vel.x * dt;
-  a.pos.z += a.vel.z * dt;
-  resolve(a.pos, radius, a.vel);
-  a.speed = Math.hypot(a.vel.x, a.vel.z);
-}
-function stepJump(a, dt, onLand) {
-  if (a.air > 0 || a.vy > 0) {
-    a.vy -= 20 * dt;
-    a.air += a.vy * dt;
-    if (a.air <= 0) {
-      a.air = 0;
-      if (a.vy < -3) onLand?.();
-      a.vy = 0;
-    }
-  }
-}
-function faceTo(a, dt, targetYaw, rate = 12) {
-  const prev = a.yaw;
-  a.yaw = dampAngle(a.yaw, targetYaw, rate, dt);
-  let turn = a.yaw - prev;
-  if (turn > Math.PI) turn -= Math.PI * 2;
-  if (turn < -Math.PI) turn += Math.PI * 2;
-  a.turn = turn / Math.max(dt, 1e-3);
-}
-
 function updatePlayer(dt, ax) {
   const p = P();
   let dirX = camRight.x * ax.x + camFwd.x * ax.y;
@@ -1057,19 +1116,20 @@ function updatePlayer(dt, ax) {
   let intent = Math.hypot(ax.x, ax.y);
   if (intent > 0.05) {
     waypoints = [];
-    pendingEnter = false;
+    pendingEnter = null;
   } else if (waypoints.length) {
     const w = waypoints[0];
     const dx = w.x - p.pos.x;
     const dz = w.z - p.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d < (waypoints.length > 1 ? 1.0 : 0.3)) {
+    if (d < (waypoints.length > 1 ? 1.2 : 0.3)) {
       waypoints.shift();
       if (!waypoints.length) {
         fx.hideMarker();
         if (pendingEnter) {
-          pendingEnter = false;
-          enterHome();
+          const id = pendingEnter;
+          pendingEnter = null;
+          spaces.enter(id);
         }
       }
     } else {
@@ -1079,37 +1139,28 @@ function updatePlayer(dt, ax) {
     }
   }
 
-  if (activity) {
-    if (intent > 0.3 && !waypoints.length) endActivity();
+  if (game.activities.active) {
+    game.activities.update(dt, elapsed, waypoints.length ? 0 : intent);
     return;
   }
 
   if (mount?.type === 'car') {
-    // Arcade steering: point the stick or keys where you want to go
-    let steer = 0;
-    let throttle = 0;
-    if (intent > 0.05) {
-      const want = Math.atan2(dirX, dirZ);
-      let d = want - car.yaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      steer = -clamp(d * 2.2, -1, 1);
-      throttle = Math.abs(d) > 2.4 && car.speed < 2 ? -0.6 : Math.min(1, intent) * (Math.abs(d) > 1.6 ? 0.45 : 1);
-    }
-    car.drive(dt, { x: steer, y: throttle }, input.running);
+    const want = intent > 0.05 ? Math.atan2(dirX, dirZ) : null;
+    car.steerToward(dt, want, intent, input.running);
     const cp = car.root.position;
     const before = car.speed;
     const v = new THREE.Vector3(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed);
     cp.x += v.x * dt;
     cp.z += v.z * dt;
-    resolve(cp, car.radius, v, 0, true);
+    physics.resolve(cp, car.radius, v, { skip: (c) => c.isCar, feet: 0 });
     const fwd = v.x * Math.sin(car.yaw) + v.z * Math.cos(car.yaw);
-    if (Math.abs(fwd) < Math.abs(before) - 2) {
-      car.speed = fwd * 0.5;
+    if (Math.abs(fwd) < Math.abs(before) - 2.5) {
+      car.speed = fwd * 0.7;
       sound.kick();
     } else car.speed = fwd;
     carCollider.x = cp.x;
     carCollider.z = cp.z;
-    car.update(dt, timer.getElapsed());
+    car.update(dt, elapsed);
     sound.engineSpeed(car.speed);
     p.pos.copy(cp);
     p.speed = Math.abs(car.speed);
@@ -1117,64 +1168,66 @@ function updatePlayer(dt, ax) {
   }
 
   if (mount?.type === 'pony') {
+    const w = mount.walker;
     const pr = mount.ctl.pony.root;
-    const a = { pos: pr.position, vel: p.vel, speed: 0 };
     const run = input.running || waypoints.length > 6;
-    stepWalker(a, dirX, dirZ, intent, run ? 11 : 8, 5, dt, 0.75);
-    p.speed = a.speed;
-    if (a.speed > 0.3) faceTo(p, dt, Math.atan2(p.vel.x, p.vel.z), 6);
+    stepWalker(w, physics, dirX, dirZ, intent, run ? 11 : 8, 5, dt, 0.75);
+    p.speed = w.speed;
+    if (w.speed > 0.3) faceTo(p, dt, Math.atan2(w.vel.x, w.vel.z), 6);
     pr.rotation.y = p.yaw;
-    stepJump(p, dt, () => {
+    if (stepVertical(w, physics, dt, null, 0.75) === 'land') {
       sound.land();
       fx.puff(pr.position);
-    });
-    pr.position.y = p.air;
-    mount.ctl.legs(dt, a.speed);
-    p.pos.copy(pr.position).setY(0);
-    if (a.speed > 6 && Math.random() < dt * 6) fx.puff(pr.position);
+    }
+    pr.position.y = w.y;
+    mount.ctl.legs(dt, w.speed);
+    p.pos.set(pr.position.x, 0, pr.position.z);
+    if (w.speed > 6 && Math.random() < dt * 6) fx.puff(pr.position);
     return;
   }
 
   const run = input.running || waypoints.length > 6;
-  stepWalker(p, dirX, dirZ, intent, run ? 7.2 : 4.6, 12, dt, RADIUS);
+  p.surface = spaces.zoneAt(p.pos.x, p.pos.z);
+  stepWalker(p, physics, dirX, dirZ, intent, run ? 7.2 : 4.6, 12, dt);
+  const water = spaces.waterAt(p.pos.x, p.pos.z);
+  const wasSwim = p.mode === 'swim';
+  if (stepVertical(p, physics, dt, water) === 'land') {
+    p.kid.squash = 0.72;
+    sound.land();
+    if (p.mode === 'swim') fx.burst(new THREE.Vector3(p.pos.x, p.y + 0.1, p.pos.z), ['#ffffff', '#bdefff', '#7fd3ff'], 26);
+    else fx.puff(p.pos);
+  }
+  if (!wasSwim && p.mode === 'swim') fx.burst(new THREE.Vector3(p.pos.x, p.y + 0.1, p.pos.z), ['#ffffff', '#bdefff'], 16);
   p.idle = p.speed > 0.25 ? 0 : p.idle + dt;
   if (p.speed > 0.25) faceTo(p, dt, Math.atan2(p.vel.x, p.vel.z));
-  else if (p.idle > 1.2 && !inside) faceTo(p, dt, 0.3, 3);
-  else if (p.idle > 1.2 && inside) faceTo(p, dt, 0.2, 3);
+  else if (p.idle > 1.2) faceTo(p, dt, spaces.inside ? 0.2 : 0.3, 3);
   else p.turn = 0;
-  stepJump(p, dt, () => {
-    p.kid.squash = 0.8;
-    sound.land();
-    fx.puff(p.pos);
-  });
 }
 
 const tmpV = new THREE.Vector3();
 function updateCompanion(dt) {
   const p = P();
   const c = C();
-  if (activity && activity !== 'dance') return;
-  if (mount?.type === 'car') return;
-  if (activity === 'dance') {
-    c.speed = 0;
-    return;
-  }
+  if (game.activities.active || mount?.type === 'car' || c.seated) return;
   const leader = mount?.type === 'pony' ? mount.ctl.pony.root.position : p.pos;
-  if (holding && !mount) {
+  c.surface = spaces.zoneAt(c.pos.x, c.pos.z);
+  if (holding && !mount && p.mode !== 'swim') {
     // Walk side by side at the player's left, hand in hand
     const target = tmpV.copy(p.pos).add(leftOf(p.yaw, 0.64));
     const before = c.pos.clone();
     const d0 = c.pos.distanceTo(target);
     const pull = d0 > 1.2 ? Math.min(1, (9 * dt) / d0) : 1 - Math.exp(-20 * dt);
     c.pos.lerp(target, pull);
-    resolve(c.pos, RADIUS, c.vel);
+    c.pos.y = 0;
+    physics.resolve(c.pos, RADIUS, c.vel, { feet: c.y });
     const stuck = c.pos.distanceTo(target);
     if (stuck > 0.25 && d0 < 1.2) {
-      // Push the player too so the pair moves as one
       p.pos.addScaledVector(tmpV.subVectors(c.pos, target), 0.85);
-      resolve(p.pos, RADIUS, p.vel);
+      p.pos.y = 0;
+      physics.resolve(p.pos, RADIUS, p.vel, { feet: p.y });
     }
     c.vel.subVectors(c.pos, before).divideScalar(Math.max(dt, 1e-3));
+    c.vel.y = 0;
     c.speed = Math.min(p.speed + 0.01, Math.hypot(c.vel.x, c.vel.z));
     faceTo(c, dt, p.yaw, 14);
     if (d0 < 0.5) {
@@ -1190,7 +1243,7 @@ function updateCompanion(dt) {
   } else {
     p.kid.holdSide = 0;
     c.kid.holdSide = 0;
-    const leadYaw = mount?.type === 'pony' ? p.yaw : p.yaw;
+    const leadYaw = p.yaw;
     const fwd = new THREE.Vector3(Math.sin(leadYaw), 0, Math.cos(leadYaw));
     const target = tmpV.copy(leader).addScaledVector(fwd, mount ? -2.2 : -1.0).add(leftOf(leadYaw, 0.9));
     const dx = target.x - c.pos.x;
@@ -1198,41 +1251,37 @@ function updateCompanion(dt) {
     const d = Math.hypot(dx, dz);
     if (d > 30) {
       fx.poof(c.pos);
-      c.pos.copy(target);
+      c.pos.set(target.x, 0, target.z);
+      c.y = p.y;
       fx.poof(c.pos);
     }
     const near = d < 0.5;
     const maxS = mount ? 9 : d > 4 ? 7.2 : 4.6;
-    stepWalker(c, dx, dz, near ? 0 : clamp((d - 0.4) * 1.5, 0, 1), maxS, 10, dt, RADIUS);
+    stepWalker(c, physics, dx, dz, near ? 0 : clamp((d - 0.4) * 1.5, 0, 1), maxS, 10, dt);
     c.idle = c.speed > 0.25 ? 0 : c.idle + dt;
     if (c.speed > 0.25) faceTo(c, dt, Math.atan2(c.vel.x, c.vel.z));
     else if (c.idle > 1.4) {
-      // Turn toward the player, then to the camera
       const toP = Math.atan2(p.pos.x - c.pos.x, p.pos.z - c.pos.z);
       faceTo(c, dt, c.idle > 4 ? 0.3 : toP, 3);
     } else c.turn = 0;
   }
-  stepJump(c, dt, () => {
-    c.kid.squash = 0.82;
+  // Follow the player up onto ledges they jumped to
+  if (p.y > c.y + 0.3 && c.speed < 0.5 && airOf(c) < 0.02 && c.pos.distanceTo(p.pos) < 2.4 && Math.random() < dt * 2) tryJump(c);
+  if (stepVertical(c, physics, dt, spaces.waterAt(c.pos.x, c.pos.z)) === 'land') {
+    c.kid.squash = 0.78;
     fx.puff(c.pos);
-  });
+  }
 }
 
-function syncKid(a, dt, t) {
+function footsteps(a) {
   const k = a.kid;
-  if (k.pose === 'stand') {
-    k.root.position.set(a.pos.x, a.air, a.pos.z);
-    k.root.rotation.set(0, a.yaw, 0);
+  if (k.pose !== 'stand') return;
+  const s = Math.sign(Math.sin(k.walkPhase));
+  if (s !== a.stepSign && a.speed > 1 && airOf(a) < 0.02) {
+    if (a === P()) sound.step(s > 0);
+    if (a.speed > 3) fx.puff(a.pos);
   }
-  k.update(dt, t, k.pose === 'stand' ? a.speed : 0, a.air, a.turn || 0);
-  if (k.pose === 'stand') {
-    const s = Math.sign(Math.sin(k.walkPhase));
-    if (s !== a.stepSign && a.speed > 1 && a.air === 0) {
-      if (a === P()) sound.step(s > 0);
-      if (a.speed > 3) fx.puff(a.pos);
-    }
-    a.stepSign = s;
-  }
+  a.stepSign = s;
 }
 
 // ------------------------------------------------------------------ loop
@@ -1241,6 +1290,8 @@ timer.connect(document);
 let frameCount = 0;
 let fpsFrames = 0;
 let fpsTime = performance.now();
+let night = 0;
+const insideColor = new THREE.Color();
 // Test hooks for headless checks
 window.__roji = {
   renderer,
@@ -1248,6 +1299,9 @@ window.__roji = {
   camera,
   stations,
   actors,
+  spaces,
+  arena,
+  game,
   get pos() {
     return P().pos;
   },
@@ -1261,20 +1315,39 @@ window.__roji = {
   toggleHands,
   enterCar,
   mountPony,
-  enterHome,
-  exitHome,
-  startActivity,
-  endActivity,
+  enterPlace,
+  enter: (id) => spaces.enter(id),
+  exit: () => spaces.exit(),
+  startDance,
   openWardrobe,
   playGame,
   swapPlayer,
+  jump,
   setZoom: (z) => (zoom = z),
-  state: () => ({ playerId, holding, mount: mount?.type, activity, inside, speed: P().speed, yaw: P().yaw }),
+  hotspots: () => (spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()]).map((h) => ({ label: h.label, x: +h.pos.x.toFixed(1), z: +h.pos.z.toFixed(1) })),
+  state: () => ({ playerId, holding, mount: mount?.type, activity: game.activities.active, inside: spaces.inside?.id || null, speed: P().speed, yaw: P().yaw, y: P().y, mode: P().mode }),
   teleport: (id) => {
-    const p = byId[id].pad;
+    const p = byId[id]?.pad;
+    if (!p) return false;
     P().pos.set(p.x, 0, p.z);
     C().pos.set(p.x + 1, 0, p.z + 0.6);
     camLook.set(p.x, 0.9, p.z);
+    return true;
+  },
+  // Stand next to the hotspot whose label contains `text` and press it
+  act(text) {
+    const list = spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()];
+    const h = list.find((q) => q.when() && q.label && q.label.toLowerCase().includes(text.toLowerCase()));
+    if (!h) return false;
+    const hp = h.pos;
+    P().pos.set(hp.x, 0, hp.z + 0.3);
+    h.act();
+    return h.label;
+  },
+  goto: (x, z) => {
+    P().pos.set(x, 0, z);
+    C().pos.set(x + 1, 0, z + 0.6);
+    camLook.set(x, 0.9, z);
   },
 };
 
@@ -1282,8 +1355,15 @@ function frame() {
   timer.update();
   const dt = Math.min(timer.getDelta(), 1 / 20);
   const t = timer.getElapsed();
+  elapsed = t;
   tweens.update(dt);
-  if (gameOpen) return; // the minigame owns the screen
+  if (arena.active) {
+    renderer.toneMappingExposure = 1;
+    setSkyTint(null);
+    arena.frame(dt, t);
+    return;
+  }
+  if (gameOpen) return; // a 2D minigame owns the screen
 
   camera.getWorldDirection(camFwd);
   camFwd.y = 0;
@@ -1292,44 +1372,50 @@ function frame() {
   const ax = started && !ui.panelOpen ? input.axis() : { x: 0, y: 0 };
   updatePlayer(dt, ax);
   updateCompanion(dt);
-  for (const a of Object.values(actors)) syncKid(a, dt, t);
+  for (const a of Object.values(actors)) {
+    syncKid(a, dt, t);
+    footsteps(a);
+  }
 
   // Beach balls
-  const pushers = [{ p: P().pos, v: P().vel, r: RADIUS, air: P().air }, { p: C().pos, v: C().vel, r: RADIUS, air: C().air }];
-  if (mount?.type === 'car') pushers.push({ p: car.root.position, v: new THREE.Vector3(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed), r: 1.1, air: 0 });
-  for (const b of balls) {
-    for (const k of pushers) {
-      if (mount?.type === 'car' && k.r === RADIUS) continue;
-      const dx = b.m.position.x - k.p.x;
-      const dz = b.m.position.z - k.p.z;
-      const d = Math.hypot(dx, dz);
-      const min = b.r + k.r;
-      if (d < min && k.air < 0.5) {
-        const nx = dx / (d || 1);
-        const nz = dz / (d || 1);
-        b.m.position.x += nx * (min - d);
-        b.m.position.z += nz * (min - d);
-        const push = Math.max(0, k.v.x * nx + k.v.z * nz);
-        b.v.x += nx * (push * 1.3 + 0.8);
-        b.v.z += nz * (push * 1.3 + 0.8);
-        if (push > 1.5) sound.kick();
+  if (!spaces.inside) {
+    const pushers = [{ p: P().pos, v: P().vel, r: RADIUS, air: airOf(P()) }, { p: C().pos, v: C().vel, r: RADIUS, air: airOf(C()) }];
+    if (mount?.type === 'car') pushers.push({ p: car.root.position, v: new THREE.Vector3(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed), r: 1.1, air: 0 });
+    for (const b of balls) {
+      for (const k of pushers) {
+        if (mount?.type === 'car' && k.r === RADIUS) continue;
+        const dx = b.m.position.x - k.p.x;
+        const dz = b.m.position.z - k.p.z;
+        const d = Math.hypot(dx, dz);
+        const min = b.r + k.r;
+        if (d < min && k.air < 0.5) {
+          const nx = dx / (d || 1);
+          const nz = dz / (d || 1);
+          b.m.position.x += nx * (min - d);
+          b.m.position.z += nz * (min - d);
+          const push = Math.max(0, k.v.x * nx + k.v.z * nz);
+          b.v.x += nx * (push * 1.3 + 0.8);
+          b.v.z += nz * (push * 1.3 + 0.8);
+          if (push > 1.5) sound.kick();
+        }
       }
+      b.v.multiplyScalar(Math.exp(-1.1 * dt));
+      b.m.position.x += b.v.x * dt;
+      b.m.position.z += b.v.z * dt;
+      physics.resolve(b.m.position, b.r, b.v, { bounce: 0.6 });
+      b.m.position.y = b.r;
+      const bs = Math.hypot(b.v.x, b.v.z);
+      if (bs > 0.01) b.m.rotateOnWorldAxis(rollAxis.set(b.v.z / bs, 0, -b.v.x / bs), (bs * dt) / b.r);
     }
-    b.v.multiplyScalar(Math.exp(-1.1 * dt));
-    b.m.position.x += b.v.x * dt;
-    b.m.position.z += b.v.z * dt;
-    resolve(b.m.position, b.r, b.v, 0.6);
-    const bs = Math.hypot(b.v.x, b.v.z);
-    if (bs > 0.01) b.m.rotateOnWorldAxis(rollAxis.set(b.v.z / bs, 0, -b.v.x / bs), (bs * dt) / b.r);
   }
   if (!mount) car.update(dt, t);
 
   // Stations, cards and prompts
   let onPad = null;
-  if (!inside) {
+  if (!spaces.inside) {
     for (const st of stations) {
       st.update(dt, t, P().pos);
-      if (st.onPad && started && !mount && !activity) onPad = st;
+      if (st.onPad && started && !mount && !game.activities.active) onPad = st;
     }
   }
   if (onPad !== currentStation) {
@@ -1345,34 +1431,60 @@ function frame() {
   } else if (onPad && frameCount % 30 === 0) showStationCard(onPad);
   if (frameCount % 20 === 0) ui.updateJourney(stations, stamps, onPad?.stop.id);
 
-  currentHot = started && !activity && !mount && !currentStation ? currentHotspot() : null;
+  currentHot = started && !game.activities.active && !mount ? currentHotspot() : null;
   let label = null;
   let icon = 'arrow';
-  if (activity) [label, icon] = [activity === 'sleep' ? 'Wake up' : activity === 'dance' ? 'Stop dancing' : 'Get up', 'arrow'];
+  if (game.activities.active) label = game.activities.label;
   else if (mount) [label, icon] = [mount.type === 'car' ? 'Get out' : 'Get off', mount.type === 'car' ? 'car' : 'horse'];
   else if (currentHot) [label, icon] = [currentHot.label, currentHot.icon];
   ui.setPrompt(started && !gameOpen ? label : null, icon);
   let aLabel = label;
   if (!aLabel && currentStation) {
     const s = currentStation.stop;
-    aLabel = s.kind === 'start' ? 'Go inside' : s.kind === 'place' ? 'Play' : !currentStation.unlocked ? 'Locked' : stamps.has(s.id) ? 'Next' : 'Stamp';
+    const rec = s.kind === 'place' ? spaces.interiors[s.id] : null;
+    aLabel = s.kind === 'start' ? 'Go inside' : s.kind === 'place' ? (rec ? (rec.locked() ? rec.lockedLabel : 'Go inside') : 'Play') : !currentStation.unlocked ? 'Locked' : stamps.has(s.id) ? 'Next' : 'Stamp';
   }
   ui.setActionLabel(aLabel);
 
-  // Movie night hearts, night lighting
-  if (activity === 'movie' && Math.random() < dt * 0.4) fx.heartsAt(headPos(C().kid), 1);
-  night = damp(night, activity === 'sleep' ? 1 : 0, 2, dt);
-  hemi.intensity = 1.35 - night * 1.0;
-  sun.intensity = 2.5 - night * 2.1;
-  const bg = inside ? INSIDE_DAY.clone().lerp(INSIDE_NIGHT, night) : SKY;
-  scene.background.lerp(bg, 1 - Math.exp(-6 * dt));
+  // Time of day outside, cosy light inside; activities (sleep, movie night) can dim either
+  const day = daylight.update(t);
+  night = damp(night, nightTarget, 2, dt);
+  let bg;
+  if (spaces.inside) {
+    const dim = Math.max(night, day.dark * 0.22);
+    hemi.color.set('#fff6ea');
+    hemi.groundColor.set('#7fae74');
+    hemi.intensity = 1.35 - dim * 1.0;
+    sun.color.set('#fff0d8');
+    sun.intensity = 2.5 - dim * 2.1;
+    SUN_OFFSET.copy(DEFAULT_OFFSET);
+    bg = insideColor.set(spaces.inside.inst.background || '#f7dcc8').lerp(INSIDE_NIGHT, Math.max(night, day.dark * 0.55));
+  } else {
+    hemi.color.copy(day.sky);
+    hemi.groundColor.copy(day.ground);
+    hemi.intensity = day.hemiI * (1 - night * 0.6);
+    sun.color.copy(day.sun);
+    sun.intensity = day.sunI * (1 - night * 0.8);
+    if (frameCount === 0) SUN_OFFSET.copy(day.lightOffset);
+    else SUN_OFFSET.lerp(day.lightOffset, 1 - Math.exp(-2.5 * dt));
+    bg = insideColor.copy(day.fog).lerp(INSIDE_NIGHT, night * 0.8);
+    const glow = Math.max(day.glow, night * 0.6);
+    world.setGlow(glow, day.water, day.cloud, day.cloudI);
+    for (const [m, base] of glowMats) m.emissiveIntensity = base * (1 + glow * 1.8);
+  }
+  renderer.toneMappingExposure = spaces.inside ? 1 - day.dark * 0.06 : day.exp;
+  setSkyTint(spaces.inside ? null : day);
+  scene.environmentIntensity = 0.3 * (1 - day.dark * (spaces.inside ? 0.3 : 0.75));
+  if (frameCount === 0) scene.background.copy(bg);
+  else scene.background.lerp(bg, 1 - Math.exp(-6 * dt));
   scene.fog.color.copy(scene.background);
+  if (frameCount % 30 === 0) updateClock();
 
   world.update(dt, t);
-  interior.update(dt, t, inside);
+  spaces.update(dt, t, P().pos);
   fx.update(dt, t);
   updateCamera(dt, t);
-  if (started && !inside && frameCount % 2 === 0) minimap.draw(mount?.type === 'car' ? car.root.position : P().pos, mount?.type === 'car' ? car.yaw : P().yaw, stamps, t, C().pos, car.root.position);
+  if (started && !spaces.inside && frameCount % 2 === 0) minimap.draw(mount?.type === 'car' ? car.root.position : P().pos, mount?.type === 'car' ? car.yaw : P().yaw, stamps, t, C().pos, car.root.position);
   renderer.render(scene, camera);
 
   frameCount++;
@@ -1390,6 +1502,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  arena.resize();
 });
 
 document.body.classList.add('ready');
@@ -1399,4 +1512,3 @@ if (params.has('play')) {
   tweens.list.length = 0;
   setShadowBox(20);
 }
-void isGameOpen;

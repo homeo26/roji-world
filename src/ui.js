@@ -2,7 +2,7 @@ import { svgIcon } from './icons.js';
 import { STOPS } from './config.js';
 import { avatar } from './games/avatar.js';
 import { EMOTES } from './kid.js';
-import { HAIRSTYLES, HAIRSTYLE_NAMES, OUTFITS, OUTFIT_NAMES, PALETTE, DEFAULT_LOOKS } from './looks.js';
+import { HAIRSTYLES, HAIRSTYLE_NAMES, OUTFITS_BY, OUTFIT_NAMES, PALETTE, DEFAULT_LOOKS } from './looks.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -62,6 +62,9 @@ export class UI {
     $('btn-help').addEventListener('click', () => this.toggleHelp());
     $('btn-wardrobe').innerHTML = svgIcon('shirt', 20);
     $('btn-wardrobe').addEventListener('click', () => h.onWardrobe());
+    $('btn-full').innerHTML = svgIcon('expand', 20);
+    $('btn-full').addEventListener('click', () => h.onFullscreen());
+    if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) $('btn-full').hidden = true;
     $('btn-journal').innerHTML = svgIcon('book', 20);
     $('btn-journal').addEventListener('click', () => this.toggleJournal());
     $('btn-swap').addEventListener('click', () => h.onSwap());
@@ -206,6 +209,8 @@ export class UI {
     } else if (stop.week && o.nextStop) {
       btns.push(`<button class="btn" data-act="travel-next">Walk to ${o.nextStop.week ? 'Weekend ' + o.nextStop.week : esc(o.nextStop.title)} ${svgIcon('arrow', 18)}</button>`);
     }
+    if (stop.week && o.stamped) btns.push(`<button class="btn ghost" data-act="unstamp" title="Take the stamp off">Unstamp</button>`);
+    if (o.inside && stop.kind !== 'start') btns.push(`<button class="btn ${o.insideLocked ? '' : 'primary'}" data-act="enter">${svgIcon(o.insideLocked ? 'lock' : 'door', 18)} ${esc(o.insideLocked || 'Go inside')}</button>`);
     if (o.ride) btns.push(`<button class="btn primary" data-act="ride">${svgIcon('horse', 18)} Ride the pony</button>`);
     if (station.unlocked || stop.kind) {
       if (o.games.length === 1) btns.push(`<button class="btn game" data-act="game:${o.games[0].id}">${svgIcon('game', 18)} ${esc(o.games[0].title)}</button>`);
@@ -226,7 +231,7 @@ export class UI {
       <div class="stamp-mark ${o.stamped ? 'on' : ''}"><span>${svgIcon('heart', 22)}</span><b>Stamped</b></div>`;
     this.card.classList.remove('hidden');
     document.body.classList.add('card-open');
-    this.card.animate([{ transform: 'translate(-50%, 24px)', opacity: 0 }, { transform: 'translate(-50%, 0)', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.2,1.3,.4,1)' });
+    this.card.animate([{ translate: '0 24px', opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.2,1.3,.4,1)' });
   }
 
   refreshCard() {
@@ -387,14 +392,14 @@ export class UI {
       `<div class="swatches">${colors.map((c) => `<button class="sw ${L[field] === c ? 'on' : ''}" style="--sw:${c}" data-w="${field}:${c}" aria-label="${field} ${c}"></button>`).join('')}</div>`;
     const chips = (field, items, names) =>
       `<div class="chips">${items.map((v) => `<button class="wchip ${L[field] === v ? 'on' : ''}" data-w="${field}:${v}">${esc(names[v])}</button>`).join('')}</div>`;
-    const styles = [...HAIRSTYLES[L.gender], ...HAIRSTYLES[L.gender === 'girl' ? 'boy' : 'girl']];
+    const styles = HAIRSTYLES[L.gender];
     el.innerHTML = `
       <div class="sheet-head"><h3>${svgIcon('shirt', 22)} Wardrobe</h3><button class="round small" data-w="close:" aria-label="Close">${svgIcon('close', 16)}</button></div>
       <div class="w-tabs">${['roji', 'homama'].map((id) => `<button class="w-tab ${id === editing ? 'on' : ''}" data-w="tab:${id}">${avatar(looks[id], 40)}<span>${esc(looks[id].name)}</span></button>`).join('')}</div>
       <div class="w-scroll">
         <h4>Haircut</h4>${chips('hairstyle', styles, HAIRSTYLE_NAMES)}
         <h4>Hair colour</h4>${sw('hair', PALETTE.hair)}
-        <h4>Outfit</h4>${chips('outfit', OUTFITS, OUTFIT_NAMES)}
+        <h4>Outfit</h4>${chips('outfit', OUTFITS_BY[L.gender], OUTFIT_NAMES)}
         <h4>${L.outfit === 'dress' ? 'Dress colour' : 'Top colour'}</h4>${sw('top', PALETTE.clothes)}
         ${L.outfit === 'dress' ? '' : `<h4>${L.outfit === 'skirt' ? 'Skirt colour' : 'Trousers colour'}</h4>${sw('bottom', PALETTE.clothes)}`}
         <h4>Shoes</h4>${sw('shoes', PALETTE.shoes)}
@@ -439,10 +444,12 @@ export class UI {
 
 // ------------------------------------------------------------------ minimap
 export class Minimap {
+  // Shows the area around the player (the island is too big to show whole at this size).
   constructor(canvas, world, stations) {
     this.canvas = canvas;
     this.world = world;
     this.stations = stations;
+    this.places = []; // [{ x, z, w, d, color }] footprints of city places
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.w = 220;
     this.h = 140;
@@ -451,25 +458,28 @@ export class Minimap {
     canvas.style.width = this.w + 'px';
     canvas.style.height = this.h + 'px';
     this.dpr = dpr;
-    const xs = world.outline.map((p) => p.x);
-    const zs = world.outline.map((p) => p.y);
-    this.x0 = Math.min(...xs) - 1;
-    this.z0 = Math.min(...zs) - 1;
-    const sw = Math.max(...xs) + 1 - this.x0;
-    const sh = Math.max(...zs) + 1 - this.z0;
-    this.s = Math.min((this.w - 14) / sw, (this.h - 14) / sh);
-    this.ox = (this.w - sw * this.s) / 2;
-    this.oy = (this.h - sh * this.s) / 2;
+    this.span = 96; // metres across
+    this.s = this.w / this.span;
+    this.cx = 0;
+    this.cz = 0;
   }
 
   P(x, z) {
-    return [this.ox + (x - this.x0) * this.s, this.oy + (z - this.z0) * this.s];
+    return [this.w / 2 + (x - this.cx) * this.s, this.h / 2 + (z - this.cz) * this.s];
   }
 
   draw(me, yaw, stamps, t, other, car) {
     const ctx = this.canvas.getContext('2d');
+    this.cx = me.x;
+    this.cz = me.z;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect?.(0, 0, this.w, this.h, 18);
+    ctx.clip();
+    ctx.fillStyle = '#7fcad3';
+    ctx.fillRect(0, 0, this.w, this.h);
     ctx.fillStyle = '#9ad06a';
     ctx.strokeStyle = '#d9a066';
     ctx.lineWidth = 3;
@@ -482,6 +492,22 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
+    // Snow at the north end
+    const [, snowY] = this.P(0, -88);
+    if (snowY > 0) {
+      const g = ctx.createLinearGradient(0, snowY, 0, snowY - 10);
+      g.addColorStop(0, 'rgba(242,246,251,0)');
+      g.addColorStop(1, 'rgba(242,246,251,0.95)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, this.w, snowY);
+    }
+    for (const pl of this.places) {
+      const [x, y] = this.P(pl.x - pl.w / 2, pl.z - pl.d / 2);
+      ctx.fillStyle = pl.color + '55';
+      ctx.beginPath();
+      ctx.roundRect?.(x, y, pl.w * this.s, pl.d * this.s, 4);
+      ctx.fill();
+    }
     const line = (pts, style, width, dash = []) => {
       ctx.strokeStyle = style;
       ctx.lineWidth = width;
@@ -497,15 +523,17 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    line(this.world.samples, '#f6e4bd', 4);
-    line(this.world.townSamples, '#f6e4bd', 4);
+    for (const road of this.world.cityRoads || []) line(road, '#d8d2e2', 5);
+    line(this.world.samples, '#f6e4bd', 5);
+    line(this.world.townSamples, '#f6e4bd', 5);
     line(this.world.futureSamples, 'rgba(255,255,255,0.8)', 2, [3, 5]);
-    if (this.world.trailShown > 0) line(this.world.samples.slice(0, Math.floor(this.world.trailShown) + 1), '#ffb347', 2.5);
+    if (this.world.trailShown > 0) line(this.world.samples.slice(0, Math.floor(this.world.trailShown) + 1), '#ffb347', 3);
     for (const st of this.stations) {
       const [x, y] = this.P(st.pad.x, st.pad.z);
+      if (x < -8 || y < -8 || x > this.w + 8 || y > this.h + 8) continue;
       ctx.fillStyle = st.unlocked ? st.stop.color : '#a9a6bf';
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.arc(x, y, 5.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = stamps.has(st.stop.id) ? '#ffd166' : '#ffffff';
@@ -524,7 +552,6 @@ export class Minimap {
       ctx.fill();
     }
     const [rx, ry] = this.P(me.x, me.z);
-    ctx.save();
     ctx.translate(rx, ry);
     ctx.rotate(-yaw + Math.PI);
     ctx.fillStyle = '#ffffff';

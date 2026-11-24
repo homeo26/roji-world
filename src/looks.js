@@ -18,6 +18,8 @@ export const HAIRSTYLE_NAMES = {
 };
 
 export const OUTFITS = ['dress', 'tee-shorts', 'tee-pants', 'overalls', 'hoodie', 'skirt'];
+// Roji is a girl and Homama is a boy: each only sees clothes and haircuts for them.
+export const OUTFITS_BY = { girl: ['dress', 'skirt', 'overalls'], boy: ['tee-shorts', 'tee-pants', 'hoodie'] };
 export const OUTFIT_NAMES = {
   dress: 'Dress',
   'tee-shorts': 'T-shirt and shorts',
@@ -65,12 +67,20 @@ export const DEFAULT_LOOKS = {
 
 const KEY = 'roji-weekends-looks-v1';
 
+// Keep a saved look within its own girl or boy wardrobe.
+function fit(look, base) {
+  const L = { ...base, ...look, gender: base.gender, id: base.id, name: base.name };
+  if (!OUTFITS_BY[L.gender].includes(L.outfit)) L.outfit = base.outfit;
+  if (!HAIRSTYLES[L.gender].includes(L.hairstyle)) L.hairstyle = base.hairstyle;
+  return L;
+}
+
 export function loadLooks() {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
     return {
-      roji: { ...DEFAULT_LOOKS.roji, ...(saved.roji || {}) },
-      homama: { ...DEFAULT_LOOKS.homama, ...(saved.homama || {}) },
+      roji: fit(saved.roji || {}, DEFAULT_LOOKS.roji),
+      homama: fit(saved.homama || {}, DEFAULT_LOOKS.homama),
     };
   } catch {
     return structuredClone(DEFAULT_LOOKS);

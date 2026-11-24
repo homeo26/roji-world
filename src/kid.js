@@ -13,6 +13,66 @@ function shade(hex, k) {
   return '#' + new THREE.Color(hex).multiplyScalar(k).getHexString();
 }
 
+// Hair: soft strands (map) and a glossy shine band near the crown (emissive map), per colour.
+let strandTex = null;
+let shineTex = null;
+function hairTextures() {
+  if (strandTex) return [strandTex, shineTex];
+  const make = (w, h, draw) => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    draw(c.getContext('2d'), w, h);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    return t;
+  };
+  strandTex = make(256, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    let seed = 7;
+    const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 150; i++) {
+      const x = r() * w;
+      const dark = r() < 0.55;
+      ctx.strokeStyle = dark ? `rgba(0,0,0,${0.1 + r() * 0.16})` : `rgba(255,255,255,${0.12 + r() * 0.15})`;
+      ctx.lineWidth = 1 + r() * 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.bezierCurveTo(x + (r() - 0.5) * 14, h * 0.35, x + (r() - 0.5) * 14, h * 0.7, x + (r() - 0.5) * 10, h);
+      ctx.stroke();
+    }
+  });
+  shineTex = make(256, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, w, h);
+    const g = ctx.createLinearGradient(0, h * 0.14, 0, h * 0.42);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.95)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    for (let x = 0; x < w; x += 16) {
+      const wob = Math.sin(x * 0.11) * 5;
+      ctx.fillRect(x + 2, h * 0.14 + wob, 12, h * 0.28);
+    }
+  });
+  return [strandTex, shineTex];
+}
+const hairCache = new Map();
+function hairMat(hex) {
+  if (hairCache.has(hex)) return hairCache.get(hex);
+  const [map, shine] = hairTextures();
+  const c = new THREE.Color(hex);
+  const hsl = {};
+  c.getHSL(hsl);
+  const glow = new THREE.Color().setHSL(hsl.h, Math.min(1, hsl.s * 0.8), Math.min(0.85, hsl.l * 0.6 + 0.3));
+  const m = new THREE.MeshStandardMaterial({ color: c, map, roughness: 0.42, emissive: glow, emissiveMap: shine, emissiveIntensity: 0.32 });
+  hairCache.set(hex, m);
+  return m;
+}
+
 export const EMOTES = {
   wave: { name: 'Wave', duration: 1.8 },
   dance: { name: 'Dance', duration: 3.6 },
@@ -35,7 +95,9 @@ export class Kid {
     this.tailSwing = new THREE.Vector2();
     this.tailVel = new THREE.Vector2();
     this.squash = 1;
-    this.pose = 'stand'; // stand | sit | sleep | ride | drive
+    this.pose = 'stand'; // stand | sit | sleep | ride | drive | swim | ski | bike
+    this.hands = null; // null | carry | type | stir | read | hold | wave2 (arms on top of any pose)
+    this.flip = 0; // 0..1 progress of a forward flip (double jump)
     this.holdSide = 0; // +1 holding with the left hand, -1 with the right
     this.emoteType = null;
     this.emoteTime = 0;
@@ -67,7 +129,7 @@ export class Kid {
   build() {
     const L = this.look;
     const skin = mat(L.skin, { rough: 0.6 });
-    const hair = mat(L.hair, { rough: 0.45 });
+    const hair = hairMat(L.hair);
     const top = mat(L.top, { rough: 0.7 });
     const bottom = mat(L.bottom, { rough: 0.7 });
     const white = mat(WHITE, { rough: 0.7 });
@@ -270,6 +332,22 @@ export class Kid {
     const nose = mesh(new THREE.SphereGeometry(0.018, 8, 6), mat(shade(L.skin, 0.95), { rough: 0.6 }), { cast: false });
     nose.position.set(HC.x, HC.y - 0.055, HC.z + 0.298);
     H.add(nose);
+
+    // Anchor in front of the chest for carried things (gift box, book, plate)
+    this.carryAnchor = new THREE.Group();
+    this.carryAnchor.position.set(0, 0.5, 0.3);
+    B.add(this.carryAnchor);
+    if (this.carried) this.carryAnchor.add(this.carried);
+  }
+
+  // Hold an object in both hands in front of the chest (null to let go). Returns the previous one.
+  carry(obj) {
+    const prev = this.carried || null;
+    if (prev) prev.removeFromParent();
+    this.carried = obj || null;
+    this.hands = obj ? 'carry' : this.hands === 'carry' ? null : this.hands;
+    if (obj) this.carryAnchor.add(obj);
+    return prev;
   }
 
   buildHair(style, hair, accent, HC) {
@@ -494,6 +572,77 @@ export class Kid {
       armL.rotation.set(0, 0, 0.12);
       armR.rotation.set(-0.4, 0, -0.5);
       B.position.y = Math.sin(t * 1.6) * 0.008;
+    } else if (pose === 'swim') {
+      // speed > 0.4: front crawl; otherwise tread water upright
+      this.swimPhase = (this.swimPhase || 0) + dt * (3 + speed * 1.6);
+      const sp = this.swimPhase;
+      const crawl = clamp(speed / 2, 0, 1);
+      this.swimLean = damp(this.swimLean || 0, crawl, 4, dt);
+      const lean = this.swimLean;
+      B.rotation.x = lean * 1.25;
+      B.position.set(0, -0.62 + lean * 0.38 + Math.sin(t * 2.4) * 0.03, -lean * 0.2);
+      legL.rotation.set(Math.sin(sp * 2.2) * (0.25 + lean * 0.3), 0, 0.08);
+      legR.rotation.set(-Math.sin(sp * 2.2) * (0.25 + lean * 0.3), 0, -0.08);
+      if (lean > 0.3) {
+        armL.rotation.set(-sp % (Math.PI * 2), 0, 0.15);
+        armR.rotation.set(-(sp + Math.PI) % (Math.PI * 2), 0, -0.15);
+      } else {
+        armL.rotation.set(-0.3, 0, 1.0 + Math.sin(sp * 1.5) * 0.35);
+        armR.rotation.set(-0.3, 0, -1.0 - Math.sin(sp * 1.5) * 0.35);
+      }
+    } else if (pose === 'ski') {
+      const tuck = clamp(speed / 10, 0, 1);
+      legL.rotation.set(-0.35 - tuck * 0.25, 0, 0.04);
+      legR.rotation.set(-0.35 - tuck * 0.25, 0, -0.04);
+      B.position.y = -0.06 - tuck * 0.05;
+      B.rotation.set(0.22 + tuck * 0.2, 0, clamp(-turnRate * 0.12, -0.35, 0.35));
+      armL.rotation.set(-0.55 + Math.sin(t * 3) * 0.05, 0, 0.35);
+      armR.rotation.set(-0.55 - Math.sin(t * 3) * 0.05, 0, -0.35);
+    } else if (pose === 'bike') {
+      this.pedal = (this.pedal || 0) + dt * (2 + speed * 2.2);
+      legL.rotation.set(-1.15 + Math.sin(this.pedal) * 0.55, 0, 0.06);
+      legR.rotation.set(-1.15 - Math.sin(this.pedal) * 0.55, 0, -0.06);
+      armL.rotation.set(-1.05, 0, 0.1);
+      armR.rotation.set(-1.05, 0, -0.1);
+      B.rotation.set(0.28, 0, clamp(-turnRate * 0.1, -0.3, 0.3));
+    }
+
+    // Tucked legs mid-air
+    if (standing && air > 0.15) {
+      const tk = clamp((air - 0.15) * 2, 0, 1) * 0.7;
+      legL.rotation.x -= tk;
+      legR.rotation.x -= tk * 0.6;
+    }
+
+    // Arm presets that sit on top of any pose
+    if (this.hands) {
+      const h = this.hands;
+      if (h === 'carry') {
+        armL.rotation.set(-1.25, 0, -0.32);
+        armR.rotation.set(-1.25, 0, 0.32);
+      } else if (h === 'type') {
+        armL.rotation.set(-1.35 + Math.max(0, Math.sin(t * 17)) * 0.12, 0, -0.18);
+        armR.rotation.set(-1.35 + Math.max(0, Math.sin(t * 15 + 1)) * 0.12, 0, 0.18);
+      } else if (h === 'stir') {
+        armL.rotation.set(-0.9, 0, -0.15);
+        armR.rotation.set(-1.05 + Math.sin(t * 6) * 0.18, Math.cos(t * 6) * 0.25, 0.1);
+      } else if (h === 'read') {
+        armL.rotation.set(-1.05, 0, -0.42);
+        armR.rotation.set(-1.05, 0, 0.42);
+      } else if (h === 'hold') {
+        armR.rotation.set(-1.2, 0, 0.1);
+      } else if (h === 'wave2') {
+        armL.rotation.set(0, 0, 2.3 + Math.sin(t * 12) * 0.3);
+        armR.rotation.set(0, 0, -2.3 - Math.sin(t * 12 + 1) * 0.3);
+      }
+    }
+
+    // Forward flip around the waist (double jump)
+    if (this.flip > 0) {
+      const a = this.flip * Math.PI * 2;
+      B.rotation.x += a;
+      B.position.y += 0.5 - 0.5 * Math.cos(a);
+      B.position.z -= 0.5 * Math.sin(a);
     }
 
     // Emotes

@@ -26,13 +26,45 @@ export class Input {
     window.addEventListener('blur', () => this.keys.clear());
 
     let down = null;
+    this.pointerSteer = true; // false while a 3D minigame reads the pointer itself
+    // Two-finger pinch zooms the map on phones
+    const touches = new Map();
+    let pinch = 0;
     dom.addEventListener('pointerdown', (e) => {
-      if (!this.enabled) return;
+      if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        pinch = Math.hypot(a.x - b.x, a.y - b.y);
+        down = null;
+        this.joy.active = false;
+        this.joy.x = this.joy.y = 0;
+        joyBase.classList.remove('on');
+        return;
+      }
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2 && pinch > 0 && this.enabled && this.pointerSteer) {
+        const [a, b] = [...touches.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        onZoom((pinch - d) * 0.004);
+        pinch = d;
+      }
+    });
+    const lift = (e) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = 0;
+    };
+    dom.addEventListener('pointerup', lift);
+    dom.addEventListener('pointercancel', lift);
+    dom.addEventListener('pointerdown', (e) => {
+      if (!this.enabled || !this.pointerSteer || touches.size > 1) return;
       dom.setPointerCapture(e.pointerId);
       down = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
     });
     dom.addEventListener('pointermove', (e) => {
-      if (!down || e.pointerId !== down.id) return;
+      if (!down || e.pointerId !== down.id || touches.size > 1) return;
       const dx = e.clientX - down.x;
       const dy = e.clientY - down.y;
       const len = Math.hypot(dx, dy);

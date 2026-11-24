@@ -103,12 +103,13 @@ function drawBadge(ctx, w, stop, state) {
 
 // ------------------------------------------------------------------ Station
 export class Station {
-  constructor(world, scene, stop, builder) {
+  // opts: { pad: [x, z], origin: [x, z], badgeY } for places built by src/engine (no diorama builder).
+  constructor(world, scene, stop, builder, opts = {}) {
     this.stop = stop;
     this.world = world;
-    const [px, pz] = PADS[stop.id];
+    const [px, pz] = opts.pad || PADS[stop.id];
     this.pad = new THREE.Vector3(px, 0, pz);
-    this.origin = new THREE.Vector3(px, 0, pz + DIORAMA_OFFSET);
+    this.origin = opts.origin ? new THREE.Vector3(opts.origin[0], 0, opts.origin[1]) : new THREE.Vector3(px, 0, pz + DIORAMA_OFFSET);
     this.state = 'open';
     this.nearAmount = 0;
 
@@ -134,8 +135,8 @@ export class Station {
     this.group = new THREE.Group();
     this.group.position.copy(this.origin);
     scene.add(this.group);
-    const built = builder(this, scene);
-    this.badgeY = built.badgeY ?? 4;
+    const built = builder ? builder(this, scene) : {};
+    this.badgeY = opts.badgeY ?? built.badgeY ?? 4;
     this.animate = built.update ?? (() => {});
     bakeStatic(this.group, built.dynamic ?? [], mergeGeometries);
 
@@ -590,6 +591,26 @@ function buildPony() {
   horn.position.set(0, 1.47, 0.22);
   root.add(blanket, saddle, horn);
   return { root, legs, head, tail };
+}
+
+// The same saddled pony as the riding stop, for 3D minigames.
+// Returns { root, legs, head, tail, animate(dt, speed) }. Faces +Z; the saddle top is at y = 1.1.
+export function makePony(coat = null) {
+  const p = buildPony();
+  if (coat) p.root.traverse((o) => o.isMesh && o.material.color?.getHexString() === 'b06a32' && (o.material = mat(coat, { rough: 0.7 })));
+  let phase = 0;
+  p.animate = (dt, speed) => {
+    phase += dt * (3 + speed * 1.6);
+    const amp = Math.min(0.85, 0.1 + speed * 0.09);
+    const s = Math.sin(phase);
+    p.legs[0].rotation.x = s * amp;
+    p.legs[3].rotation.x = s * amp;
+    p.legs[1].rotation.x = -s * amp;
+    p.legs[2].rotation.x = -s * amp;
+    p.head.rotation.x = 0.55 + Math.sin(phase * 2) * 0.06 * Math.min(1, speed / 4);
+    p.tail.rotation.x = 0.3 + Math.sin(phase * 1.3) * 0.2;
+  };
+  return p;
 }
 
 export function buildHorse(st) {
