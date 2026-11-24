@@ -2,21 +2,24 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mat, umat, mesh, canvasTexture, roundRect, FONT, rng } from '../../util.js';
+import { PAL, artReady, getArt } from './theme.js';
 
-// Building blocks shared by Roji's YumYum (the diner interior) and the YumYum Kitchen game:
+// Building blocks shared by Roji's YumYum (the restaurant inside and out) and the YumYum Kitchen game:
 // primitives with cached geometry, a colour bake, painted textures, food, kitchen machines and furniture.
 
 export { THREE, mergeGeometries, mat, umat, mesh, canvasTexture, roundRect, FONT, rng };
 
+// Roji's YumYum colours, from Roji's logo card (theme.js): raspberry, cream, light pink, olive and brass.
+// The key names are the old diner ones so every user keeps working: orange is now raspberry, teal olive, mint sage.
 export const COL = {
-  orange: '#ff7a59',
-  red: '#e85d3f',
-  cherry: '#e5484d',
-  cream: '#fff1d6',
-  cream2: '#fff8ec',
+  orange: PAL.ink,
+  red: PAL.inkDeep,
+  cherry: '#d8405f',
+  cream: '#fbf0dc',
+  cream2: PAL.paper,
   white: '#fffaf4',
-  brown: '#6b2e1f',
-  ink: '#3b2b3f',
+  brown: '#7a3b45',
+  ink: '#4a2b3a',
   bun: '#e9a548',
   bunLight: '#f6cd8c',
   seed: '#fff4d6',
@@ -29,21 +32,33 @@ export const COL = {
   fries: '#ffcf4a',
   soda: '#ff9f43',
   shake: '#ff9eb5',
-  teal: '#21a99a',
-  mint: '#7fd8bf',
-  mintPale: '#d8f4ec',
-  pink: '#ff9eb5',
-  hotpink: '#ff6f91',
-  rose: '#ffc2d1',
-  sun: '#ffd166',
+  teal: '#6f7b4d',
+  mint: '#aab78a',
+  mintPale: '#e8ecd8',
+  pink: PAL.rose,
+  hotpink: '#e0607e',
+  rose: '#f4cfcb',
+  sun: '#e2b04f',
   steel: '#d7dde3',
   steelDark: '#9aa3ad',
   iron: '#4b4248',
   wood: '#c98a5a',
-  woodDark: '#a0602e',
-  leaf: '#5cb85c',
+  woodDark: '#8f5a3f',
+  leaf: '#6f7d4c',
   sky: '#a6dde2',
+  // the logo card's own names
+  rasp: PAL.ink,
+  raspDeep: PAL.inkDeep,
+  band: PAL.band,
+  frame: PAL.frame,
+  blush: PAL.blush,
+  olive: PAL.olive,
+  oliveDeep: PAL.oliveDeep,
+  brass: PAL.gold,
+  paper: PAL.paper,
+  lemonade: '#e4ef9a',
 };
+export const BRASS = { metal: 0.55, rough: 0.35 };
 
 // ------------------------------------------------------------------ primitives (geometry cached by size)
 const GEO = new Map();
@@ -155,7 +170,8 @@ export function slimKid(kid, { shadow = true } = {}) {
 }
 
 // Fewer segments for a kid seen small (guests, diners): same shapes, about half the triangles.
-export function lowPolyKid(kid) {
+// sphereMin: the fewest segments around a sphere (8 for people far from the camera).
+export function lowPolyKid(kid, { sphereMin = 10 } = {}) {
   const swap = new Map();
   kid.root.traverse((o) => {
     if (!o.isMesh || o === kid.blob) return;
@@ -164,7 +180,7 @@ export function lowPolyKid(kid) {
     if (!p) return;
     let next = swap.get(geo);
     if (!next) {
-      if (geo.type === 'SphereGeometry' && p.widthSegments > 12) next = new THREE.SphereGeometry(p.radius, Math.max(10, p.widthSegments >> 1), Math.max(7, Math.round(p.heightSegments * 0.55)), p.phiStart, p.phiLength, p.thetaStart, p.thetaLength);
+      if (geo.type === 'SphereGeometry' && p.widthSegments > 12) next = new THREE.SphereGeometry(p.radius, Math.max(sphereMin, p.widthSegments >> 1), Math.max(sphereMin - 3, Math.round(p.heightSegments * 0.55)), p.phiStart, p.phiLength, p.thetaStart, p.thetaLength);
       else if (geo.type === 'TorusGeometry' && p.tubularSegments > 16) next = new THREE.TorusGeometry(p.radius, p.tube, Math.min(p.radialSegments, 6), p.tubularSegments >> 1, p.arc);
       else if (geo.type === 'LatheGeometry' && p.segments > 16) next = new THREE.LatheGeometry(p.points, p.segments >> 1, p.phiStart, p.phiLength);
       else if (geo.type === 'CylinderGeometry' && p.radialSegments > 12) next = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments >> 1, p.heightSegments, p.openEnded, p.thetaStart, p.thetaLength);
@@ -239,6 +255,30 @@ export class Atlas {
     this.row = Math.max(this.row, h);
     this.tex.needsUpdate = true;
     return { u0: x / this.W, u1: (x + w) / this.W, v0: 1 - (y + h) / this.H, v1: 1 - y / this.H };
+  }
+  // Like add, but drawn again once Roji's logo images are in (for anything showing the logo or its corners).
+  addThemed(w, h, draw) {
+    const r = this.add(w, h, draw);
+    if (!getArt()) {
+      const x = Math.round(r.u0 * this.W);
+      const y = Math.round((1 - r.v1) * this.H);
+      artReady.then(() => {
+        const c = this.ctx;
+        c.save();
+        c.translate(x, y);
+        c.beginPath();
+        c.rect(0, 0, w, h);
+        c.clip();
+        c.clearRect(0, 0, w, h);
+        draw(c, w, h);
+        c.restore();
+        this.tex.needsUpdate = true;
+      });
+    }
+    return r;
+  }
+  themedPlane(w, h, pw, ph, draw) {
+    return mesh(this.fit(new THREE.PlaneGeometry(w, h), this.addThemed(pw, ph, draw)), this.material, { cast: false });
   }
   fit(geo, r) {
     const uv = geo.attributes.uv;
@@ -509,6 +549,85 @@ export function drawCake(ctx, cx, cy, s) {
   ell(ctx, cx + s * 0.08, cy - s * 0.32, s * 0.07, s * 0.065);
   ctx.fill();
 }
+// Spanish latte in a glass: coffee under milk, centred at (cx, cy), about s tall.
+export function drawLatte(ctx, cx, cy, s) {
+  const top = cy - s * 0.3;
+  const bot = cy + s * 0.38;
+  const tw = s * 0.24;
+  const bw = s * 0.2;
+  const glass = new Path2D();
+  glass.moveTo(cx - tw, top);
+  glass.lineTo(cx + tw, top);
+  glass.lineTo(cx + bw, bot);
+  glass.quadraticCurveTo(cx, bot + s * 0.04, cx - bw, bot);
+  glass.closePath();
+  ctx.save();
+  ctx.clip(glass);
+  ctx.fillStyle = '#e9d3b4';
+  ctx.fillRect(cx - s, top, 2 * s, s);
+  ctx.fillStyle = '#8a5434';
+  ctx.fillRect(cx - s, cy + s * 0.1, 2 * s, s);
+  ctx.fillStyle = '#fbf2e2';
+  ctx.fillRect(cx - s, top, 2 * s, s * 0.12);
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(255,255,255,.8)';
+  ctx.lineWidth = s * 0.03;
+  ctx.stroke(glass);
+  ctx.fillStyle = '#ffffff';
+  ell(ctx, cx + s * 0.12, cy + s * 0.48, s * 0.3, s * 0.05);
+  ctx.fill();
+  ctx.fillStyle = COL.rasp;
+  heartPath(ctx, cx, top + s * 0.06, s * 0.1);
+  ctx.fill();
+}
+// Mint lemonade: a tall glass with lemon and mint, centred at (cx, cy), about s tall.
+export function drawLemonade(ctx, cx, cy, s) {
+  drawCup(ctx, cx, cy, s, COL.lemonade);
+  ctx.fillStyle = '#ffe14d';
+  ell(ctx, cx - s * 0.22, cy - s * 0.3, s * 0.1, s * 0.1);
+  ctx.fill();
+  ctx.fillStyle = '#fff6b0';
+  ell(ctx, cx - s * 0.22, cy - s * 0.3, s * 0.06, s * 0.06);
+  ctx.fill();
+  ctx.fillStyle = '#5fae5a';
+  ell(ctx, cx + s * 0.08, cy - s * 0.34, s * 0.07, s * 0.035, -0.6);
+  ctx.fill();
+  ell(ctx, cx + s * 0.16, cy - s * 0.32, s * 0.06, s * 0.03, 0.5);
+  ctx.fill();
+}
+// A slice of layer cake (pecan: caramel; German: chocolate), centred at (cx, cy), about s across.
+export function drawLayerCake(ctx, cx, cy, s, { sponge = '#d9a86a', cream = '#fff3dc', top = '#a8693c', nut = '#7a4a2a' } = {}) {
+  ctx.fillStyle = '#ffffff';
+  ell(ctx, cx, cy + s * 0.3, s * 0.42, s * 0.1);
+  ctx.fill();
+  const layer = (y0, h, c) => {
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.moveTo(cx - s * 0.32, cy + y0 * s);
+    ctx.lineTo(cx + s * 0.32, cy + (y0 - 0.12) * s);
+    ctx.lineTo(cx + s * 0.32, cy + (y0 - 0.12 + h) * s);
+    ctx.lineTo(cx - s * 0.32, cy + (y0 + h) * s);
+    ctx.closePath();
+    ctx.fill();
+  };
+  layer(0.16, 0.12, sponge);
+  layer(0.1, 0.06, cream);
+  layer(-0.04, 0.14, sponge);
+  layer(-0.1, 0.06, top);
+  ctx.fillStyle = top;
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.34, cy - s * 0.1);
+  ctx.lineTo(cx + s * 0.08, cy - s * 0.34);
+  ctx.lineTo(cx + s * 0.34, cy - s * 0.22);
+  ctx.lineTo(cx - s * 0.32, cy - s * 0.04);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = nut;
+  for (const [dx, dy] of [[-0.14, -0.13], [0.0, -0.2], [0.14, -0.24], [0.08, -0.16]]) {
+    ell(ctx, cx + dx * s, cy + dy * s, s * 0.045, s * 0.03, 0.4);
+    ctx.fill();
+  }
+}
 export function drawCoin(ctx, x, y, r) {
   ctx.fillStyle = '#e2a52e';
   ell(ctx, x, y + r * 0.12, r, r);
@@ -529,6 +648,10 @@ export const ICON_DRAW = {
   shawarma: (c, cx, cy, s) => drawShawarma(c, cx, cy, s),
   mansaf: (c, cx, cy, s) => drawMansaf(c, cx, cy, s),
   cake: (c, cx, cy, s) => drawCake(c, cx, cy, s),
+  latte: (c, cx, cy, s) => drawLatte(c, cx, cy, s),
+  lemonade: (c, cx, cy, s) => drawLemonade(c, cx, cy + s * 0.04, s * 0.86),
+  pecan: (c, cx, cy, s) => drawLayerCake(c, cx, cy, s),
+  german: (c, cx, cy, s) => drawLayerCake(c, cx, cy, s, { sponge: '#6b3f2a', cream: '#e9d2a8', top: '#4a2a1e', nut: '#c9a06a' }),
 };
 
 // ------------------------------------------------------------------ 3D food (shared geometry, chunky game scale)
@@ -889,10 +1012,10 @@ export function makeToppingBin(kind, atlas) {
 export function makeTrash(atlas) {
   const g = new THREE.Group();
   g.add(at(cyl(0.16, 0.13, 0.34, COL.teal, 20), 0, 0.17, 0));
-  g.add(at(tor(0.16, 0.012, '#178b7f'), 0, 0.34, 0));
+  g.add(at(tor(0.16, 0.012, COL.oliveDeep), 0, 0.34, 0));
   g.children[1].rotation.x = Math.PI / 2;
   const lid = new THREE.Group();
-  lid.add(at(cyl(0.17, 0.17, 0.03, '#178b7f', 20), 0, 0, 0.17));
+  lid.add(at(cyl(0.17, 0.17, 0.03, COL.oliveDeep, 20), 0, 0, 0.17));
   lid.add(at(sph(0.03, COL.white, undefined, 10), 0, 0.03, 0.17));
   lid.position.set(0, 0.355, -0.17);
   g.add(lid);
@@ -903,12 +1026,12 @@ export function makeTrash(atlas) {
 // ------------------------------------------------------------------ furniture
 export function makeStool(seat = COL.cherry) {
   const g = new THREE.Group();
-  g.add(at(cyl(0.2, 0.22, 0.04, COL.steelDark, 18, { metal: 0.5, rough: 0.3 }), 0, 0.02, 0));
-  g.add(at(cyl(0.035, 0.035, 0.6, COL.steel, 10, { metal: 0.5, rough: 0.3 }), 0, 0.32, 0));
-  g.add(at(tor(0.13, 0.012, COL.steel, { metal: 0.5, rough: 0.3 }), 0, 0.26, 0));
+  g.add(at(cyl(0.2, 0.22, 0.04, COL.brass, 18, BRASS), 0, 0.02, 0));
+  g.add(at(cyl(0.035, 0.035, 0.6, COL.brass, 10, BRASS), 0, 0.32, 0));
+  g.add(at(tor(0.13, 0.012, COL.brass, BRASS, Math.PI * 2, 16), 0, 0.26, 0));
   g.children[2].rotation.x = Math.PI / 2;
   g.add(at(cyl(0.2, 0.19, 0.1, seat, 20, { rough: 0.45 }), 0, 0.66, 0));
-  g.add(at(cyl(0.205, 0.205, 0.025, COL.steel, 20, { metal: 0.5, rough: 0.3 }), 0, 0.6, 0));
+  g.add(at(cyl(0.205, 0.205, 0.025, COL.brass, 20, BRASS), 0, 0.6, 0));
   return g;
 }
 
@@ -925,21 +1048,21 @@ export function makeBench(len = 1.3, color = COL.cherry, trim = COL.white) {
   return g;
 }
 
-export function makeDinerTable(w = 0.9, d = 1.3, top = '#ffffff', edge = COL.steel) {
+export function makeDinerTable(w = 0.9, d = 1.3, top = COL.cream, edge = COL.brass) {
   const g = new THREE.Group();
   g.add(at(rbox(w, 0.05, d, top, 0.02, { rough: 0.35 }), 0, 0.75, 0));
-  g.add(at(box(w + 0.02, 0.03, d + 0.02, edge, { metal: 0.5, rough: 0.3 }), 0, 0.725, 0));
-  g.add(at(cyl(0.05, 0.05, 0.7, COL.steelDark, 10, { metal: 0.5, rough: 0.3 }), 0, 0.37, 0));
-  g.add(at(cyl(0.26, 0.3, 0.04, COL.steelDark, 18, { metal: 0.5, rough: 0.3 }), 0, 0.02, 0));
+  g.add(at(box(w + 0.02, 0.03, d + 0.02, edge, BRASS), 0, 0.725, 0));
+  g.add(at(cyl(0.05, 0.05, 0.7, COL.brass, 10, BRASS), 0, 0.37, 0));
+  g.add(at(cyl(0.26, 0.3, 0.04, COL.brass, 18, BRASS), 0, 0.02, 0));
   return g;
 }
 
-export function makeRoundTable(r = 0.45, top = '#ffffff') {
+export function makeRoundTable(r = 0.45, top = COL.cream) {
   const g = new THREE.Group();
   g.add(at(cyl(r, r, 0.05, top, 28, { rough: 0.35 }), 0, 0.75, 0));
-  g.add(at(rot(tor(r, 0.02, COL.steel, { metal: 0.5, rough: 0.3 }, Math.PI * 2, 32), Math.PI / 2, 0, 0), 0, 0.75, 0));
-  g.add(at(cyl(0.045, 0.045, 0.7, COL.steelDark, 10, { metal: 0.5, rough: 0.3 }), 0, 0.37, 0));
-  g.add(at(cyl(0.24, 0.27, 0.04, COL.steelDark, 18, { metal: 0.5, rough: 0.3 }), 0, 0.02, 0));
+  g.add(at(rot(tor(r, 0.02, COL.brass, BRASS, Math.PI * 2, 24), Math.PI / 2, 0, 0), 0, 0.75, 0));
+  g.add(at(cyl(0.045, 0.045, 0.7, COL.brass, 10, BRASS), 0, 0.37, 0));
+  g.add(at(cyl(0.24, 0.27, 0.04, COL.brass, 18, BRASS), 0, 0.02, 0));
   return g;
 }
 
@@ -947,7 +1070,7 @@ export function makeChair(color = COL.mint) {
   const g = new THREE.Group();
   g.add(at(rbox(0.42, 0.07, 0.42, color, 0.03, { rough: 0.45 }), 0, 0.45, 0));
   g.add(at(rbox(0.42, 0.4, 0.06, color, 0.03, { rough: 0.45 }), 0, 0.72, -0.19));
-  for (const [x, z] of [[-0.17, -0.17], [0.17, -0.17], [-0.17, 0.17], [0.17, 0.17]]) g.add(at(cyl(0.018, 0.018, 0.44, COL.steel, 6, { metal: 0.5, rough: 0.3 }), x, 0.22, z));
+  for (const [x, z] of [[-0.17, -0.17], [0.17, -0.17], [-0.17, 0.17], [0.17, 0.17]]) g.add(at(cyl(0.018, 0.018, 0.44, COL.brass, 6, BRASS), x, 0.22, z));
   return g;
 }
 
@@ -968,10 +1091,10 @@ export function makeJukebox(atlas) {
     g.add(t);
     return t;
   };
-  band(0.42, 0.035, 1.1, '#ff6f91');
+  band(0.42, 0.035, 1.1, COL.hotpink);
   band(0.34, 0.03, 1.1, COL.sun);
-  band(0.26, 0.025, 1.1, '#7fe0d0');
-  const glass = mesh(new THREE.CircleGeometry(0.22, 24, 0, Math.PI), umat('#3b2b55', { emissive: '#6a4c9c', ei: 0.4, rough: 0.2 }), { cast: false });
+  band(0.26, 0.025, 1.1, '#c3d39a');
+  const glass = mesh(new THREE.CircleGeometry(0.22, 24, 0, Math.PI), umat('#4a2b3a', { emissive: '#8a3d5c', ei: 0.4, rough: 0.2 }), { cast: false });
   glass.position.set(0, 1.1, 0.252);
   g.add(glass);
   const record = new THREE.Group();
@@ -980,7 +1103,7 @@ export function makeJukebox(atlas) {
   record.rotation.x = Math.PI / 2;
   record.position.set(0, 1.16, 0.23);
   g.add(record);
-  for (const [x, c] of [[-0.3, '#ff6f91'], [0.3, '#7fe0d0']]) {
+  for (const [x, c] of [[-0.3, COL.hotpink], [0.3, '#c3d39a']]) {
     const m = umat(c, { emissive: c, ei: 0.8 });
     lights.push(m);
     g.add(at(mesh(new THREE.BoxGeometry(0.08, 0.9, 0.04), m, { cast: false }), x, 0.55, 0.26));
@@ -989,7 +1112,7 @@ export function makeJukebox(atlas) {
     g.add(
       at(
         atlas.plane(0.44, 0.36, 220, 180, (c, w, h) => {
-          c.fillStyle = '#fff3dc';
+          c.fillStyle = COL.paper;
           roundRect(c, 4, 4, w - 8, h - 8, 16);
           c.fill();
           c.fillStyle = COL.red;
@@ -1005,7 +1128,8 @@ export function makeJukebox(atlas) {
         0.255,
       ),
     );
-  g.add(at(rbox(0.96, 0.08, 0.54, '#7a4320', 0.03), 0, 0.04, 0));
+  g.add(at(rbox(0.96, 0.08, 0.54, '#6e4330', 0.03), 0, 0.04, 0));
+  for (const s of [-1, 1]) g.add(at(box(0.04, 1.05, 0.04, COL.brass, BRASS), s * 0.46, 0.55, 0.25));
   return { group: g, lights, record };
 }
 
@@ -1015,7 +1139,7 @@ export function makeRegister() {
   g.add(at(rbox(0.46, 0.16, 0.38, COL.mint, 0.04), 0, 0.08, 0));
   const keys = new THREE.Group();
   keys.add(at(rot(rbox(0.38, 0.05, 0.2, COL.white, 0.02), -0.35, 0, 0), 0, 0.18, 0.06));
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) keys.add(at(rot(box(0.05, 0.02, 0.035, [COL.orange, COL.sun, COL.pink][i]), -0.35, 0, 0), -0.12 + j * 0.08, 0.21 - i * 0.022, 0.03 + i * 0.05));
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) keys.add(at(rot(box(0.05, 0.02, 0.035, [COL.rasp, COL.sun, COL.pink][i]), -0.35, 0, 0), -0.12 + j * 0.08, 0.21 - i * 0.022, 0.03 + i * 0.05));
   g.add(keys);
   g.add(at(rbox(0.36, 0.2, 0.12, COL.mint, 0.04), 0, 0.3, -0.12));
   g.add(at(box(0.08, 0.1, 0.06, COL.mint), 0, 0.17, -0.12));
@@ -1026,9 +1150,9 @@ export function makeRegister() {
   g.add(scr);
   const show = (text) => {
     const c = screen.image.getContext('2d');
-    c.fillStyle = '#2b4a45';
+    c.fillStyle = '#3d4433';
     c.fillRect(0, 0, 256, 112);
-    c.fillStyle = '#9ff5d8';
+    c.fillStyle = '#f3f0c0';
     c.font = `700 70px ${FONT}`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
@@ -1076,6 +1200,58 @@ export function windowMesh(w, h, frame = COL.white) {
   g.add(at(box(0.04, h, 0.03, frame), 0, 0, 0.07));
   g.add(at(box(w, 0.04, 0.03, frame), 0, 0, 0.07));
   g.add(at(rbox(w + 0.3, 0.06, 0.16, frame, 0.02), 0, -h / 2 - 0.1, 0.06));
+  return g;
+}
+
+// A brass lantern with warm glass, about 0.55 m tall times s, base at y = 0. glass: its glowing material.
+export function makeLantern(s = 1, glass = mat('#fff0d0', { emissive: '#ffe1a8', ei: 0.55, rough: 0.25 })) {
+  const g = new THREE.Group();
+  const B = mat(COL.brass, BRASS);
+  g.add(at(cyl(0.11 * s, 0.07 * s, 0.07 * s, B, 6), 0, 0.035 * s, 0));
+  g.add(at(mesh(cg(`lanternGlass${s}`, () => new THREE.CylinderGeometry(0.12 * s, 0.12 * s, 0.26 * s, 6)), glass, { cast: false }), 0, 0.2 * s, 0));
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    g.add(at(box(0.018 * s, 0.27 * s, 0.018 * s, B), Math.cos(a) * 0.12 * s, 0.2 * s, Math.sin(a) * 0.12 * s));
+  }
+  g.add(at(cyl(0.02 * s, 0.14 * s, 0.13 * s, B, 6), 0, 0.4 * s, 0));
+  g.add(at(sph(0.035 * s, B, undefined, 8), 0, 0.48 * s, 0));
+  g.add(at(tor(0.035 * s, 0.008 * s, B, undefined, Math.PI * 2, 12), 0, 0.53 * s, 0));
+  g.userData.glass = glass;
+  return g;
+}
+
+// A brass Arabic coffee pot (dallah), spout toward +X, base at y = 0, about 1.1 m tall times s.
+export function makeDallah(s = 1) {
+  const g = new THREE.Group();
+  const B = mat(COL.brass, BRASS);
+  g.add(lathe('dallah', [[0, 0], [0.3, 0], [0.33, 0.05], [0.31, 0.14], [0.25, 0.3], [0.2, 0.44], [0.16, 0.58], [0.17, 0.66], [0.23, 0.7], [0.24, 0.74], [0.2, 0.76], [0.15, 0.86], [0.08, 0.96], [0.05, 1.0], [0, 1.02]], B, undefined, 16));
+  g.add(at(sph(0.06, B, undefined, 8), 0, 1.06, 0));
+  g.add(at(rot(tor(0.3, 0.02, mat(COL.raspDeep, BRASS), undefined, Math.PI * 2, 18), Math.PI / 2, 0, 0), 0, 0.12, 0));
+  const spout = new THREE.CatmullRomCurve3([new THREE.Vector3(0.22, 0.28, 0), new THREE.Vector3(0.38, 0.46, 0), new THREE.Vector3(0.46, 0.7, 0), new THREE.Vector3(0.6, 0.86, 0)]);
+  g.add(mesh(cg('dallahSpout', () => new THREE.TubeGeometry(spout, 12, 0.045, 7)), B));
+  g.add(at(rot(cyl(0.02, 0.06, 0.12, B, 8), 0, 0, -0.9), 0.64, 0.89, 0));
+  const handle = mesh(cg('dallahHandle', () => new THREE.TorusGeometry(0.22, 0.03, 6, 12, Math.PI * 1.1)), B);
+  handle.rotation.z = Math.PI / 2 - 0.1;
+  g.add(at(handle, -0.2, 0.5, 0));
+  g.userData.spout = new THREE.Vector3(0.7, 0.93, 0);
+  g.scale.setScalar(s);
+  return g;
+}
+
+// An olive tree in a pot, about h tall, base at y = 0.
+export function makeOliveTree(h = 1.2, pot = COL.rasp, seed = 3) {
+  const r = rng(seed);
+  const g = new THREE.Group();
+  g.add(at(cyl(0.24, 0.18, 0.36, pot, 12), 0, 0.18, 0));
+  g.add(at(cyl(0.25, 0.25, 0.05, COL.cream, 12), 0, 0.36, 0));
+  g.add(at(cyl(0.21, 0.21, 0.03, '#7a5a3e', 10), 0, 0.37, 0));
+  g.add(at(rot(cyl(0.035, 0.05, h * 0.5, '#8a6a4c', 6), 0, 0, 0.12), 0.03, 0.36 + h * 0.25, 0));
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + r();
+    const y = 0.36 + h * (0.5 + r() * 0.35);
+    g.add(at(sph(0.14 + r() * 0.07, i % 2 ? '#8b9466' : '#76804f', { rough: 0.9 }, 8), Math.cos(a) * 0.2, y, Math.sin(a) * 0.18));
+  }
+  for (let i = 0; i < 5; i++) g.add(at(sph(0.022, '#4b4a3a', undefined, 6), (r() - 0.5) * 0.4, 0.36 + h * (0.55 + r() * 0.3), 0.18 + r() * 0.05));
   return g;
 }
 

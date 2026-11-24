@@ -80,10 +80,10 @@ export const STOPS = [
     id: 'yumyum',
     kind: 'place',
     title: "Roji's YumYum",
-    tag: 'Restaurant',
+    tag: 'Food and more',
     icon: 'yum',
-    color: '#ff7a59',
-    text: 'Burgers, fries and milkshakes. Put on the apron and run the kitchen.',
+    color: '#cf4569',
+    text: "Shawarma, burgers, Spanish latte and Roji's cakes. Put on the apron and run the kitchen.",
   },
   {
     id: 'plaza',
