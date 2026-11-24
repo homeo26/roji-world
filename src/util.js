@@ -136,13 +136,15 @@ export function bakeStatic(group, dynamic = [], mergeGeometries) {
     if (Array.isArray(o.material) || o.material.transparent) return;
     if (o.children.some((c) => skip.has(c) || !c.isMesh)) return;
     const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+    const vc = !!(o.material.vertexColors && g.attributes.color);
+    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', ...(vc ? ['color'] : [])].includes(name)) g.deleteAttribute(name);
     if (!g.attributes.uv || !g.attributes.normal) return;
+    if (vc && g.attributes.color.itemSize !== 3) return;
     g.clearGroups();
     g.morphAttributes = {};
     rel.multiplyMatrices(inv, o.matrixWorld);
     g.applyMatrix4(rel);
-    const key = o.material.uuid + (o.castShadow ? 'c' : '') + (o.receiveShadow ? 'r' : '');
+    const key = o.material.uuid + (o.castShadow ? 'c' : '') + (o.receiveShadow ? 'r' : '') + (vc ? 'v' : '');
     if (!buckets.has(key)) buckets.set(key, { material: o.material, cast: o.castShadow, receive: o.receiveShadow, list: [] });
     buckets.get(key).list.push(g);
     victims.push(o);

@@ -27,20 +27,28 @@ function hairBack(style, c) {
   }
 }
 
+// Hair volume behind the face, slightly larger than the head, so the crown is never bare.
+function hairBase(style, c, girl) {
+  return girl ? `<ellipse cx="50" cy="50" rx="34" ry="32" fill="${c}"/>` : `<ellipse cx="50" cy="51" rx="32.5" ry="30.5" fill="${c}"/>`;
+}
+
+// Front hair drawn over the face. Every cap peaks above the top of the head (y = 25).
 function hairFront(style, c) {
-  const cap = `<path d="M19 56 C17 24 83 24 81 56 C76 42 64 36 50 37 C36 36 24 42 19 56 Z" fill="${c}"/>`;
+  const hi = shade(c, 1.35);
+  const shine = `<path d="M30 34 C38 27 50 25 60 27" fill="none" stroke="${hi}" stroke-width="3" stroke-linecap="round" opacity=".55"/>`;
+  const cap = `<path d="M17 58 C13 11 87 11 83 58 C79 46 71 40 63 41 C59 47 54 48 50 44 C46 48 41 47 37 41 C29 40 21 46 17 58 Z" fill="${c}"/>` + shine;
   switch (style) {
     case 'short':
-      return `<path d="M20 54 C18 22 82 22 80 54 C74 44 66 40 58 42 L54 36 L48 42 C38 40 26 44 20 54 Z" fill="${c}"/>`;
+      return `<path d="M18 56 C13 13 87 13 82 56 C77 46 68 41 60 42 L56 37 L50 43 C40 41 26 45 18 56 Z" fill="${c}"/>` + shine;
     case 'curly': {
-      let s = `<path d="M21 54 C19 26 81 26 79 54 C72 44 28 44 21 54 Z" fill="${c}"/>`;
+      let s = `<path d="M19 56 C14 14 86 14 81 56 C72 44 28 44 19 56 Z" fill="${c}"/>`;
       for (const [x, y, r] of [[24, 40, 9], [34, 30, 10], [48, 26, 10], [62, 28, 10], [74, 36, 9], [80, 48, 7], [20, 50, 7]]) s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
       return s;
     }
     case 'spiky':
-      return `<path d="M20 56 L18 38 L28 40 L28 24 L38 32 L44 18 L52 30 L60 18 L64 32 L74 24 L72 40 L82 38 L80 56 C72 44 28 44 20 56 Z" fill="${c}"/>`;
+      return `<path d="M19 56 C15 22 85 22 81 56 C72 44 28 44 19 56 Z" fill="${c}"/><path d="M20 50 L18 34 L28 37 L27 20 L38 29 L44 14 L52 27 L60 14 L64 29 L74 20 L72 37 L82 34 L80 50 Z" fill="${c}"/>`;
     case 'sidepart':
-      return `<path d="M19 56 C16 24 84 22 81 56 C80 46 74 40 66 38 C54 36 40 40 30 50 C26 52 22 54 19 56 Z" fill="${c}"/>`;
+      return `<path d="M18 57 C13 12 87 12 82 57 C80 46 74 40 66 38 C54 36 40 40 30 50 C26 52 22 54 18 57 Z" fill="${c}"/>` + shine;
     default:
       return cap + `<path d="M26 46 C30 52 36 52 40 46 C44 52 52 52 56 46 C60 52 68 52 74 46 L74 40 L26 40 Z" fill="${c}"/>`;
   }
@@ -55,6 +63,7 @@ export function avatar(look, size = 64) {
   const bow = look.gender === 'girl' ? `<g transform="translate(30 30) rotate(-20)"><ellipse cx="-6" cy="0" rx="7" ry="5" fill="${look.accent || '#ff7fa3'}"/><ellipse cx="6" cy="0" rx="7" ry="5" fill="${look.accent || '#ff7fa3'}"/><circle r="3" fill="${shade(look.accent || '#ff7fa3', 0.8)}"/></g>` : '';
   return `<svg class="avatar" width="${size}" height="${size}" viewBox="0 0 100 100" aria-label="${look.name || ''}" role="img">
     ${hairBack(style, hair)}
+    ${hairBase(style, hair, look.gender === 'girl')}
     <path d="M22 100 C24 84 36 80 50 80 C64 80 76 84 78 100 Z" fill="${top}"/>
     <path d="M40 81 L50 90 L60 81" fill="none" stroke="#fffaf4" stroke-width="4" stroke-linejoin="round"/>
     <circle cx="50" cy="55" r="30" fill="${skin}"/>

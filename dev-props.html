@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Roji World - props</title>
+    <link rel="icon" href="data:," />
+    <link rel="preload" href="./fonts/fredoka-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body class="ready">
+    <!-- dev-props.html?set=food|gift|all | ?ids=mansaf,teddy | ?box&k=0,0.5,1 | &kids=0 | &zoom=1.2 | &spin -->
+    <div id="app"></div>
+    <script type="module" src="./src/dev/props-view.js"></script>
+  </body>
+</html>

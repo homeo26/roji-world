@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Roji World - dev harness</title>
+    <link rel="icon" href="data:," />
+    <link rel="preload" href="./fonts/fredoka-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body class="ready">
+    <!-- dev.html?place=<id> | ?interior=<id> | ?arena=<id>, plus &as=homama, &enter, &nomusic -->
+    <div id="app"></div>
+    <div id="fade" aria-hidden="true"></div>
+    <button id="prompt" class="prompt hidden"></button>
+    <div id="card" class="card hidden" role="dialog"></div>
+    <div id="toast" role="status"></div>
+    <div id="joy" aria-hidden="true"><div id="joy-knob"></div></div>
+    <div id="touch">
+      <div id="stick"><div id="stick-knob"></div></div>
+      <div id="tbuttons">
+        <button id="t-emote" class="tbtn" aria-label="Dance"></button>
+        <button id="t-hands" class="tbtn" aria-label="Hold hands"></button>
+        <button id="t-jump" class="tbtn" aria-label="Jump">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6" /></svg>
+        </button>
+        <button id="t-action" class="tbtn big idle" aria-label="Action"><b>A</b><span></span></button>
+      </div>
+    </div>
+    <script type="module" src="./src/dev/harness.js"></script>
+  </body>
+</html>

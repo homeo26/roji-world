@@ -129,6 +129,29 @@ export class Car {
     this.turnRate = turn;
   }
 
+  // Point-and-go: turn toward wantYaw (world yaw the stick points at) and roll forward.
+  // Slows in sharp turns instead of stopping, so a U-turn is a smooth arc. intent 0..1.
+  steerToward(dt, wantYaw, intent, boost = false) {
+    const max = boost ? 12.5 : 8.5;
+    let target = 0;
+    if (wantYaw !== null && intent > 0.05) {
+      const d = Math.atan2(Math.sin(wantYaw - this.yaw), Math.cos(wantYaw - this.yaw));
+      const grip = clamp(0.4 + Math.abs(this.speed) / 3, 0, 1);
+      const rate = 2.9 - 0.9 * clamp(Math.abs(this.speed) / max, 0, 1);
+      const turn = clamp(d * 3.4, -rate, rate) * grip;
+      this.yaw += turn * dt;
+      this.turnRate = turn;
+      this.steer = damp(this.steer, clamp(d, -0.6, 0.6), 10, dt);
+      target = max * Math.min(1, intent) * clamp(Math.cos(d) * 1.15, 0.28, 1);
+    } else {
+      this.turnRate = 0;
+      this.steer = damp(this.steer, 0, 8, dt);
+    }
+    const dv = target - this.speed;
+    this.speed += clamp(dv, -11 * dt, (target > 0 ? 5.5 : 0) * dt);
+    if (Math.abs(this.speed) < 0.02 && target === 0) this.speed = 0;
+  }
+
   update(dt, t) {
     for (const w of this.wheels) {
       w.spin.rotation.x += (this.speed * dt) / 0.34;
