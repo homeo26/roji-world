@@ -20,6 +20,7 @@ export const PLACES = [
   { id: 'picnic', module: '../places/picnic.js', slot: [46, -14], size: [22, 18] },
   { id: 'odeh', module: '../places/odeh.js', slot: [-71, -45], size: [24, 30] },
   { id: 'harbour', module: '../places/harbour.js', slot: [84, 8], size: [30, 12] },
+  { id: 'park', module: '../places/park.js', slot: [86, -34], size: [34, 54] },
   { id: 'example', module: '../places/example.js', slot: [0, 0], size: [14, 10], dev: true },
 ];
 
@@ -59,6 +60,8 @@ export const ARENAS = [
   { id: 'coding', module: '../arena/coding.js', place: 'tech' },
   { id: 'fishing', module: '../arena/fishing.js', place: 'harbour' },
   { id: 'giraffes', module: '../arena/giraffes.js', place: 'zoo' },
+  { id: 'coaster', module: '../arena/coaster.js', place: 'park' },
+  { id: 'parkgames', module: '../arena/parkgames.js', place: 'park' },
   { id: 'example', module: '../arena/example.js', place: 'example', dev: true },
 ];
 
