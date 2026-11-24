@@ -94,6 +94,17 @@ export default {
     const vc = vcMat({ roughness: 0.9 });
     const vcFlat = vcMat({ roughness: 0.85, flatShading: true });
     const r = rng(42);
+    // Each run sets a new line of gates (Play again moves to the next course); each course keeps its own best time
+    const COURSES = [
+      { name: 'Sunny run', seed: 0, side: 1, best: 'best' },
+      { name: 'Pine run', seed: 7, side: -1 },
+      { name: 'Comet run', seed: 19, side: 1, tight: true },
+    ];
+    const courseN = (ctx.load('course', 0) || 0) % COURSES.length;
+    ctx.save('course', courseN + 1);
+    const course = COURSES[courseN];
+    const bestKey = course.best || 'best-' + courseN;
+    const rg = course.seed ? rng(course.seed) : r;
     const me = ctx.me;
     const them = ctx.partner;
     const look = ctx.looks;
@@ -199,10 +210,10 @@ export default {
 
     // ---------------------------------------------------------- gates and obstacles
     const gates = [];
-    let side = 1;
-    for (let s = 46; s < L - 24; s += 31 + r() * 4) {
+    let side = course.side;
+    for (let s = 46; s < L - 24; s += (course.tight ? 27 : 31) + rg() * 4) {
       if (RAMPS.some((rp) => s > rp.s - 16 && s < rp.s + rp.len + 10)) continue;
-      gates.push({ s, u: side * (2.6 + r() * 1.0), color: side > 0 ? '#ef5b6f' : '#4a8ef0', shake: 0 });
+      gates.push({ s, u: side * (2.6 + rg() * 1.0), color: side > 0 ? '#ef5b6f' : '#4a8ef0', shake: 0 });
       side = -side;
     }
     const GATE_HALF = 2.5;
@@ -794,9 +805,9 @@ export default {
       const win = pt <= ct;
       const behind = pt - ct;
       const medal = win ? 'Gold' : behind < 3 ? 'Silver' : 'Bronze';
-      const prevBest = ctx.load('best', null);
+      const prevBest = ctx.load(bestKey, null);
       const newBest = prevBest === null || pt < prevBest;
-      if (newBest) ctx.save('best', pt);
+      if (newBest) ctx.save(bestKey, pt);
       const myName = look[me].name;
       const theirName = look[them].name;
       const lines = [
@@ -807,7 +818,7 @@ export default {
       ctx.finish({
         win: medal === 'Bronze' ? false : true,
         title: `${medal} medal!`,
-        text: `${win ? `${myName} wins the race!` : `${theirName} wins this time.`}<br>${lines.join('<br>')}`,
+        text: `${course.name}: ${win ? `${myName} wins the race!` : `${theirName} wins this time.`}<br>${lines.join('<br>')}<br>Next: ${COURSES[(courseN + 1) % COURSES.length].name}`,
       });
     };
 
@@ -952,7 +963,8 @@ export default {
     // Start: show both racers at the gate, count down, go
     for (const rc of racers) pose(rc, 0.016, 0);
     placeCam(0.016, true);
-    msg('Get ready!', 900);
+    hud.title('Ski Race', course.name);
+    msg(course.name, 900);
     setTimeout(async () => {
       if (disposed) return;
       await hud.countdown(3);

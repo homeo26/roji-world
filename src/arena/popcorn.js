@@ -4,9 +4,15 @@ import { popcornMachine, bucket, kernelGeo, drawPoster, wallpaper, KERNEL_COLORS
 // Popcorn Catch: in the cinema lobby the big popcorn machine pops kernels high into the air.
 // Walk left and right with the striped bucket to catch them before the movie starts.
 // Fluffy +1, golden +5, burnt -3. Catches in a row build a combo (x2 from 6, x3 from 15).
+// Every play is a different show (Play again moves to the next one), each with its own goal and best.
 
 const GAME_TIME = 45;
-const GOAL = 60;
+const SHOWS = [
+  { id: 'matinee', name: 'Matinee', text: 'Fill the bucket!', gold: 0.1, burnt: 0, extra: 0, goal: 60, best: 'best' },
+  { id: 'golden', name: 'Golden hour', text: 'Golden popcorn everywhere!', gold: 0.2, burnt: 0, extra: 0, goal: 85 },
+  { id: 'burnt', name: 'Burnt batch', text: 'Dodge the burnt ones!', gold: 0.1, burnt: 0.12, extra: 0.1, goal: 55 },
+  { id: 'double', name: 'Double feature', text: 'Twice the popcorn!', gold: 0.1, burnt: 0.02, extra: 0.35, goal: 80 },
+];
 const RANGE = 4.3; // how far left and right the kid can walk
 const G = 6.5; // popcorn floats down slowly
 const MAX = 40; // kernels in the air per kind
@@ -19,6 +25,11 @@ export default {
 
   async start(ctx) {
     const { THREE, scene, camera, util, hud, input, sound, fx, FONT } = ctx;
+    const showN = (ctx.load('show', 0) || 0) % SHOWS.length;
+    ctx.save('show', showN + 1);
+    const show = SHOWS[showN];
+    const GOAL = show.goal;
+    const bestKey = show.best || 'best-' + show.id;
     const { damp, clamp, lerp } = util;
     const P = Math.PI;
     const k = kit();
@@ -284,7 +295,7 @@ export default {
     let shake = 0;
     let lastSec = GAME_TIME;
     let endT = 0;
-    let best = ctx.load('best', 0) || 0;
+    let best = ctx.load(bestKey, 0) || 0;
     let x = 0;
     let vx = 0;
     let yaw = 0;
@@ -314,7 +325,7 @@ export default {
     function spawn() {
       const prog = 1 - timeLeft / GAME_TIME;
       const roll = Math.random();
-      const kind = roll < 0.1 ? 'gold' : roll < 0.22 + prog * 0.1 ? 'burnt' : 'plain';
+      const kind = roll < show.gold ? 'gold' : roll < show.gold + 0.12 + show.burnt + prog * 0.1 ? 'burnt' : 'plain';
       const live = flying.filter((f) => f.kind === kind).length;
       if (live >= kinds[kind].instanceMatrix.count) return;
       const p = mouth.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 0, 0));
@@ -369,7 +380,7 @@ export default {
       const isBest = score > best;
       if (isBest) {
         best = score;
-        ctx.save('best', best);
+        ctx.save(bestKey, best);
       }
       if (win) kid.emote('cheer');
       const comboText = maxCombo >= 3 ? ` Longest combo: ${maxCombo}.` : '';
@@ -377,7 +388,7 @@ export default {
       ctx.finish({
         win,
         title: win ? 'Bucket full!' : 'Not quite full',
-        text: win ? `${score} points. ${meName} and ${partnerName} have popcorn for the whole movie.${comboText}${bestText}` : `${score} of ${GOAL} points. One more try before the movie?${comboText}${bestText}`,
+        text: `${show.name}: ` + (win ? `${score} points. ${meName} and ${partnerName} have popcorn for the whole movie.${comboText}${bestText}` : `${score} of ${GOAL} points. One more try before the movie?${comboText}${bestText}`) + `<br>Next show: ${SHOWS[(showN + 1) % SHOWS.length].name}`,
       });
     }
 
@@ -387,7 +398,8 @@ export default {
     showScore();
     camera.position.copy(camPos);
     camera.lookAt(look);
-    hud.message('Fill the bucket!', 1500);
+    hud.title('Popcorn Catch', show.name);
+    hud.message(show.text, 1500);
     setTimeout(async () => {
       if (phase !== 'intro') return;
       await hud.countdown(3);
@@ -442,7 +454,7 @@ export default {
             if (spawnT <= 0) {
               const prog = 1 - timeLeft / GAME_TIME;
               spawn();
-              if (Math.random() < 0.1 + prog * 0.15) spawn();
+              if (Math.random() < 0.1 + show.extra + prog * 0.15) spawn();
               spawnT = lerp(0.8, 0.45, prog) * (0.75 + Math.random() * 0.5);
             }
           }

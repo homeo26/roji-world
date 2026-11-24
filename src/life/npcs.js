@@ -415,7 +415,8 @@ class People {
       this.game.sound.ui?.('pop');
       const greetLines = linesFor(rec.prof.greet, me);
       const greet = this.pick(rec, 'greet', greetLines.length ? greetLines : LINES.greet);
-      const ids = rec.prof.actions(me, rec.puppet.seated).filter((id) => ACTIONS[id]);
+      // A drink to hold needs free hands
+      const ids = rec.prof.actions(me, rec.puppet.seated).filter((id) => ACTIONS[id] && !(id === 'latte' && P.kid.carried));
       const options = ids.map((id) => {
         const l = actionLabel(id, rec.prof, rec);
         return { id, label: l.label, sub: l.sub };

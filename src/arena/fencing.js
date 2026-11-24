@@ -615,14 +615,16 @@ export default {
       const tanH = vt * camera.aspect;
       const sep = Math.abs(them.x - me.x);
       let mid = clamp((me.x + them.x) / 2, -HALF + 1.2, HALF - 1.2);
-      let dist = clamp(Math.max((sep + 3.2) / 2 / tanH, 2.4 / 2 / vt), 4.0, 9);
+      // Wide phone screens: step back a little and look level so the wall scoreboard stays in frame
+      const wide = camera.aspect > 1.8;
+      let dist = clamp(Math.max((sep + 3.2) / 2 / tanH, 2.4 / 2 / vt), wide ? 4.5 : 4.0, 9);
       if (phase === 'point' && scorer) {
         mid = damp(mid, scorer.x, 1, Math.min(phaseT, 0.8));
-        dist *= 0.86;
+        dist *= wide ? 0.94 : 0.86;
       }
       if (phase === 'over') dist = clamp((sep + 3.6) / 2 / tanH, 4.6, 9);
       const want = new THREE.Vector3(mid, 1.3, dist);
-      const look = new THREE.Vector3(mid, 0.88, 0);
+      const look = new THREE.Vector3(mid, wide ? 1.2 : 0.88, 0);
       if (phase === 'intro') {
         const k = easeInOut(clamp(phaseT / 2.8, 0, 1));
         want.lerpVectors(new THREE.Vector3(0, 2.8, 9.5), want, k);

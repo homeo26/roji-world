@@ -61,7 +61,10 @@ export default {
     env.sun.position.set(-3, 7, 6);
     env.hemi.intensity = 1.6;
     const pmrem = new THREE.PMREMGenerator(renderer);
-    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmrem.fromScene(roomEnv, 0.04);
+    roomEnv.dispose();
+    const envTex = envRT.texture;
     scene.environment = envTex;
     scene.environmentIntensity = 0.35;
     const room = new THREE.Group();
@@ -843,7 +846,7 @@ export default {
         renderer.domElement.style.cursor = '';
         hud.hint('');
         scene.environment = null;
-        envTex.dispose();
+        envRT.dispose();
         pmrem.dispose();
         lineTex.dispose();
       },

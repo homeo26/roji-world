@@ -93,10 +93,13 @@ export const ACTIONS = {
     S.faceTo(rec);
     const bunch = await S.models.flowers();
     if (!s.live()) return;
-    const prev = P.kid.carry(bunch);
-    await S.wait(0.8);
-    P.kid.carry(prev || null);
-    if (!s.live()) return;
+    // Hands already full (a lunch box, a rose): the bouquet goes straight over. Swapping it in and out
+    // would make the owner of that thing think it was put down.
+    const free = !P.kid.carried;
+    if (free) P.kid.carry(bunch);
+    await S.wait(free ? 0.8 : 0.3);
+    if (free && P.kid.carried === bunch) P.kid.carry(null);
+    if (!s.live()) return bunch.removeFromParent();
     S.give(bunch, rec, 3.6);
     await S.wait(0.5);
     rec.puppet.play('happy', 1.2);
@@ -217,10 +220,11 @@ export const ACTIONS = {
     const P = S.player;
     const cup = await S.models.latte();
     if (!s.live()) return;
-    const prev = P.kid.carry(cup);
+    const free = !P.kid.carried;
+    if (free) P.kid.carry(cup);
     await S.approach(rec, 0.85);
-    P.kid.carry(prev || null);
-    if (!s.live()) return;
+    if (free && P.kid.carried === cup) P.kid.carry(null);
+    if (!s.live()) return cup.removeFromParent();
     S.faceTo(rec);
     S.give(cup, rec, 3.2);
     await S.wait(0.5);
@@ -238,7 +242,7 @@ export const ACTIONS = {
     await S.wait(1.4);
     if (!s.live()) return;
     const cup = await S.models.latte();
-    const prev = P.kid.carry(cup);
+    const prev = P.kid.carry(cup); // only offered with free hands (see interact)
     S.sparkles.burst(cup.getWorldPosition(S.v1).setY(P.y + 1.0), ['#c8875a', '#fff3c4', '#ffffff'], 6, 0.9);
     S.game.sound.ui?.('coin');
     await S.wait(3.5);
