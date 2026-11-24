@@ -328,6 +328,9 @@ export class Giraffe {
     }
     this.mouthAnchor = at(new THREE.Object3D(), 0, -0.07, 0.44);
     H.add(this.mouthAnchor);
+    // Top of the head, between the ossicones (height chart, crown)
+    this.crownAnchor = at(new THREE.Object3D(), 0, 0.49, -0.03);
+    H.add(this.crownAnchor);
   }
 
   buildBowTie(seg) {
@@ -456,7 +459,10 @@ export class Giraffe {
     // Walking
     let want = 0;
     const prevYaw = this.yaw;
-    if (this.dest) {
+    if (this.manual) {
+      // Leaf Catch drives position and yaw itself; the speed only sets the leg gait
+      this.speed = damp(this.speed, this.manual.speed || 0, 8, dt);
+    } else if (this.dest) {
       const dx = this.dest.x - this.pos.x;
       const dz = this.dest.z - this.pos.z;
       const d = Math.hypot(dx, dz);
@@ -468,14 +474,16 @@ export class Giraffe {
         want = this.destSpeed * clamp(d / 0.8, 0.22, 1) * Math.max(0.12, Math.cos(diff));
       }
     } else if (this.faceYaw !== null) this.yaw = dampAngle(this.yaw, this.faceYaw, 2.2, dt);
-    this.speed = damp(this.speed, want, 4, dt);
-    this.pos.x += Math.sin(this.yaw) * this.speed * dt;
-    this.pos.z += Math.cos(this.yaw) * this.speed * dt;
+    if (!this.manual) {
+      this.speed = damp(this.speed, want, 4, dt);
+      this.pos.x += Math.sin(this.yaw) * this.speed * dt;
+      this.pos.z += Math.cos(this.yaw) * this.speed * dt;
+    }
     let turn = this.yaw - prevYaw;
     if (turn > Math.PI) turn -= Math.PI * 2;
     if (turn < -Math.PI) turn += Math.PI * 2;
     this.turn = turn / Math.max(dt, 1e-3);
-    for (const ob of this.obstacles) {
+    for (const ob of this.manual ? [] : this.obstacles) {
       const dx = this.pos.x - ob.x;
       const dz = this.pos.z - ob.z;
       const d = Math.hypot(dx, dz);
@@ -493,8 +501,10 @@ export class Giraffe {
       }
     }
     const b = this.bounds;
-    this.pos.x = clamp(this.pos.x, b.x0, b.x1);
-    this.pos.z = clamp(this.pos.z, b.z0, b.z1);
+    if (b && !this.manual) {
+      this.pos.x = clamp(this.pos.x, b.x0, b.x1);
+      this.pos.z = clamp(this.pos.z, b.z0, b.z1);
+    }
     this.gait += dt * ((this.speed * 3.3) / this.cfg.scale + Math.min(2.5, Math.abs(this.turn)) * 1.6);
     if (this.speed > 0.1) this.A.lean += Math.sin(this.gait * 2) * 0.035;
 
@@ -575,7 +585,7 @@ export class Giraffe {
       const prev = this.beh?.name;
       this.beh = this.pick(env, prev);
       this.onStart(this.beh, env);
-      if (prev && this.cfg.id === 'jouri' && ['tongue', 'sneeze', 'dance', 'hop', 'wiggle'].includes(prev)) env?.onSilly?.(prev);
+      if (prev && this.cfg.id === 'jouri' && ['tongue', 'sneeze', 'dance', 'hop', 'wiggle', 'hide'].includes(prev)) env?.onSilly?.(prev);
     }
     const b = this.beh;
     b.t += dt;
@@ -588,7 +598,7 @@ export class Giraffe {
     const near = env?.playerNear ?? 99;
     const list = jodi
       ? [['stand', 4], ['nod', near < 8 ? 3 : 0.4], ['stroll', 2.2], ['graze', 1.4]]
-      : [['bob', 2], ['tongue', 2], ['wiggle', 2], ['hop', 2], ['dance', 1.6], ['sneeze', 1.3], ['chase', 1.6], ['wander', 2], ['visit', env?.atFence && near > 2.4 ? 4 : 0]];
+      : [['bob', 2], ['tongue', 2], ['wiggle', 2], ['hop', 2], ['dance', 1.6], ['sneeze', 1.3], ['chase', 1.6], ['wander', 2], ['hide', env?.tree ? 1.1 : 0], ['visit', env?.atFence && near > 2.4 ? 4 : 0]];
     const pool = list.filter(([n, w]) => n !== prev && w > 0);
     let sum = pool.reduce((a, [, w]) => a + w, 0) * Math.random();
     for (const [n, w] of pool) {
@@ -599,8 +609,9 @@ export class Giraffe {
   }
 
   onStart(b, env) {
-    const DUR = { stand: 4 + Math.random() * 3, nod: 2.6, stroll: 14, graze: 16, bob: 4, tongue: 3.2, wiggle: 3.6, hop: 2.6, dance: 5.2, sneeze: 2.6, chase: 9, wander: 12, visit: 14, sigh: 3 };
+    const DUR = { stand: 4 + Math.random() * 3, nod: 2.6, stroll: 14, graze: 16, bob: 4, tongue: 3.2, wiggle: 3.6, hop: 2.6, dance: 5.2, sneeze: 2.6, chase: 9, wander: 12, visit: 14, sigh: 3, hide: 15 };
     b.dur = DUR[b.name] ?? 4;
+    if (b.name === 'hide' && env?.tree) this.goTo(env.tree.x + 0.27, env.tree.z - 1.12, this.cfg.walk * 1.4);
     if (b.name === 'stroll' || b.name === 'wander') {
       const p = env?.randomSpot?.() || { x: this.pos.x, z: this.pos.z };
       this.goTo(p.x, p.z, this.cfg.walk);
@@ -779,6 +790,32 @@ const BEHAVIOURS = {
     g.A.pitch += Math.sin(g.gait * 2) * 0.06;
     g.T.tail = 0.5;
     if (g.arrived) b.t = Math.max(b.t, b.dur - 0.3);
+  },
+  // Jouri "hides" behind the skinny acacia trunk: head behind it, eyes shut, peeking now and then
+  hide(g, b, dt, t, env) {
+    if (!g.arrived) {
+      g.T.ear = -0.05;
+      g.T.lid = 0;
+      if (b.t > 8) b.t = b.dur;
+      return;
+    }
+    if (b.at === undefined) b.at = b.t;
+    const k = b.t - b.at;
+    g.faceYaw = 0;
+    const peek = k % 2.4 > 1.7;
+    const side = Math.floor(k / 2.4) % 2 ? 1 : -1;
+    g.T.lean = 0.42;
+    g.T.roll = 0;
+    g.T.twist = 0;
+    g.T.lid = peek ? 0.1 : 0.96;
+    g.T.wink = peek ? 1 : 0;
+    g.T.ear = 0.7;
+    g.A.yaw = peek ? side * 0.42 : 0;
+    g.A.roll = peek ? side * 0.18 : 0;
+    g.T.tongue = peek && k % 2.4 > 2.0 ? 0.8 : 0;
+    g.T.tail = 0.9;
+    g.A.squash = -0.025;
+    if (k > 7.5) b.t = b.dur;
   },
   visit(g, b, dt, t, env) {
     if (!g.arrived) {
