@@ -123,6 +123,25 @@ export function buildStudy(R) {
     const g = new THREE.Group();
     g.add(at(rbox(0.68, 0.43, 0.04, dark, 0.02), 0, 0, 0));
     g.add(at(new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.38), new THREE.MeshBasicMaterial({ map: s.tex })), 0, 0, 0.022));
+    if (i === 0) {
+      // A sticky note on the monitor
+      const sticky = (ctx, w, h) => {
+        ctx.fillStyle = '#fff1a8';
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#4a3423';
+        ctx.textAlign = 'center';
+        ctx.font = `600 15px ${FONT}`;
+        ctx.fillText('Roji home', w / 2, 30);
+        ctx.fillText('at 6!', w / 2, 52);
+        ctx.fillStyle = '#ef5b6f';
+        ctx.beginPath();
+        ctx.moveTo(w / 2, 86);
+        ctx.bezierCurveTo(w / 2 - 14, 76, w / 2 - 8, 64, w / 2, 71);
+        ctx.bezierCurveTo(w / 2 + 8, 64, w / 2 + 14, 76, w / 2, 86);
+        ctx.fill();
+      };
+      g.add(rot(at(R.atlas.panel(0.11, 0.11, 96, 96, sticky), -0.27, 0.15, 0.03), 0, 0, 0.1));
+    }
     g.position.set(HDX + side * 0.36, 1.45, ZB + 0.2);
     g.rotation.y = -side * 0.16;
     add(g);
@@ -245,6 +264,23 @@ export function buildStudy(R) {
   heart.add(rot(at(tor(0.03, 0.013, '#e5484d', undefined, P, 5, 10), -0.03, 0.27, 0.01), 0, 0.5, -0.3));
   heart.position.set(RDX + 0.6, DT, -4.3);
   add(heart);
+  // A tiny photo of the two of them on Roji's desk
+  const tiny = (ctx, w, h) => {
+    ctx.fillStyle = '#ffe9f0';
+    ctx.fillRect(0, 0, w, h);
+    for (const [x, c] of [[w * 0.35, '#ef5b6f'], [w * 0.65, '#3f7bf0']]) {
+      ctx.fillStyle = c;
+      ctx.fillRect(x - 7, h * 0.6, 14, h * 0.3);
+      ctx.fillStyle = '#ffd9c2';
+      ctx.beginPath();
+      ctx.arc(x, h * 0.48, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ff6b8a';
+    ctx.fillRect(w / 2 - 3, h * 0.3, 6, 6);
+  };
+  add(rot(at(rbox(0.13, 0.16, 0.015, '#f4c24f', 0.005), RDX + 0.3, DT + 0.08, -4.5), -0.2, -0.2, 0));
+  add(rot(at(R.atlas.panel(0.1, 0.13, 64, 80, tiny), RDX + 0.3, DT + 0.08, -4.49), -0.2, -0.2, 0));
   // Pink desk lamp
   add(at(cyl(0.07, 0.08, 0.03, '#ff8fb1', 12), RDX - 0.15, DT + 0.015, -4.48));
   add(rot(at(cyl(0.012, 0.012, 0.36, '#ff8fb1', 6), RDX - 0.15, DT + 0.19, -4.42), 0.35, 0, 0));
@@ -388,7 +424,7 @@ export function buildStudy(R) {
     if (!spec) return;
     st.lineT = 0;
     st.line = 0;
-    a.toast(LINES[0], 3600);
+    a.toast(R.cat?.spot === 'laptop' ? 'Mishmish is fast asleep on Homama\'s laptop. He types around her, very carefully.' : LINES[0], 3600);
     book.position.set(0, 0.1, 0.02);
     book.rotation.set(-0.7, 0, 0);
     a.roji.kid.carryAnchor.add(book);

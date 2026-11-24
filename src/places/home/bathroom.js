@@ -1,4 +1,4 @@
-import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, sprite, bake } from './kit.js';
+import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, sprite, bake, FONT, roundRect } from './kit.js';
 import { rng } from '../../util.js';
 
 // Bathroom: a clawfoot bubble bath with a rubber duck, a sink with a round mirror, the toilet, towels.
@@ -76,7 +76,7 @@ export function buildBathroom(R) {
   R.col({ type: 'box', x: TBX, z: TBZ, hw: 1.0, hd: 0.55, h: 0.64 });
 
   // Bubbles (always a few, a mountain during a bubble bath)
-  const bubbleGeo = new THREE.SphereGeometry(1, 12, 9);
+  const bubbleGeo = new THREE.SphereGeometry(1, 8, 6);
   const bubbles = [];
   for (let i = 0; i < 70; i++) {
     const a = r() * P * 2;
@@ -125,13 +125,70 @@ export function buildBathroom(R) {
   add(at(cyl(0.02, 0.025, 0.16, chrome, 8), SKX, 0.95, ZB + 0.15));
   add(rot(at(cyl(0.015, 0.015, 0.12, chrome, 6), SKX, 1.02, ZB + 0.2), P / 2, 0, 0));
   add(at(cyl(0.04, 0.035, 0.1, '#c7a6ff', 10), SKX - 0.22, 0.92, ZB + 0.2));
-  for (const [dx, col] of [[-0.012, '#ff8fb1'], [0.012, '#6fb8ff']]) add(rot(at(cyl(0.008, 0.008, 0.2, col, 5), SKX - 0.22 + dx, 1.02, ZB + 0.2), 0, 0, dx * 12));
+  // His and her toothbrushes, leaning toward each other in the same cup
+  for (const [dx, col] of [[-0.028, '#ff8fb1'], [0.028, '#6fb8ff']]) {
+    const tb = new THREE.Group();
+    tb.add(at(cyl(0.008, 0.008, 0.2, col, 5), 0, 0.1, 0), at(box(0.018, 0.04, 0.014, '#ffffff'), 0, 0.2, 0.006));
+    tb.position.set(SKX - 0.22 + dx, 0.92, ZB + 0.2);
+    tb.rotation.z = dx > 0 ? 0.3 : -0.3;
+    add(tb);
+  }
   add(at(rbox(0.1, 0.03, 0.06, '#ffe6f0', 0.012), SKX + 0.2, 0.89, ZB + 0.2));
   add(at(tor(0.36, 0.035, gold, undefined, P * 2, 8, 28), SKX, 1.68, ZB + 0.05));
   add(at(R.atlas.wrap(new THREE.CircleGeometry(0.36, 28), 128, 128, mirrorTex()), SKX, 1.68, ZB + 0.04));
   add(at(rbox(0.7, 0.04, 0.14, '#ffffff', 0.01), SKX, 1.22, ZB + 0.08));
   for (const [dx, col, h] of [[-0.22, '#ff9eb5', 0.16], [-0.08, '#9fd6e3', 0.12], [0.08, '#ffd166', 0.14], [0.22, '#c7a6ff', 0.1]]) add(at(cyl(0.035, 0.04, h, col, 10), SKX + dx, 1.24 + h / 2, ZB + 0.08));
   R.col({ type: 'circle', x: SKX, z: ZB + 0.32, r: 0.32 });
+  // A sticky note on the mirror: a different one every visit
+  const noteCanvas = document.createElement('canvas');
+  noteCanvas.width = noteCanvas.height = 128;
+  const noteTex = new THREE.CanvasTexture(noteCanvas);
+  noteTex.colorSpace = THREE.SRGBColorSpace;
+  const note = R.dyn(add(rot(at(new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.17), umat('#ffffff', { rough: 0.9, map: noteTex })), SKX + 0.27, 1.5, ZB + 0.06), 0, 0, 0.12)));
+  void note;
+  const MIRROR = [
+    ['You look', 'beautiful', 'today. - H'],
+    ['Smile!', 'I love you.', '- H'],
+    ['Good morning,', 'sunshine!', '- H'],
+    ['Floss!', 'Doctor\'s', 'orders. - R'],
+    ['Hi gorgeous.', 'Yes, you.', '- H'],
+    ['You are', 'my favourite', 'person. - H'],
+  ];
+  const drawNote = () => {
+    const i = api.load('mirrorNote', 0) % MIRROR.length;
+    api.save('mirrorNote', i + 1);
+    const c = noteCanvas.getContext('2d');
+    c.fillStyle = ['#ffd6e0', '#fff1a8', '#d6f0ff'][i % 3];
+    c.fillRect(0, 0, 128, 128);
+    c.fillStyle = 'rgba(0,0,0,0.06)';
+    c.fillRect(0, 0, 128, 16);
+    c.fillStyle = '#4a3423';
+    c.textAlign = 'center';
+    c.font = `600 18px ${FONT}`;
+    MIRROR[i].forEach((l, j) => c.fillText(l, 64, 46 + j * 28));
+    noteTex.needsUpdate = true;
+  };
+  drawNote();
+  R.onEnter(drawNote);
+  // Easter egg: a little mosaic over the tub, with a heart hidden in the tiles
+  const mosaic = (ctx, w, h) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    const n = 10;
+    const m = 6;
+    const sz = w / n;
+    const heart = ['0000000000', '0001001000', '0011111100', '0011111100', '0001111000', '0000110000'];
+    for (let j = 0; j < m; j++) {
+      for (let i = 0; i < n; i++) {
+        const pink = heart[j][i] === '1';
+        ctx.fillStyle = pink ? ((i + j) % 2 ? '#ffb8cc' : '#ff9eb5') : (i * 3 + j * 5) % 7 === 0 ? '#9fd6e3' : (i + j) % 2 ? '#d5eef3' : '#e8f7fa';
+        roundRect(ctx, i * sz + 1.5, j * (h / m) + 1.5, sz - 3, h / m - 3, 3);
+        ctx.fill();
+      }
+    }
+  };
+  add(at(rbox(0.54, 0.34, 0.02, '#ffffff', 0.01), TBX + 1.0, 1.02, ZB + 0.01));
+  add(at(R.atlas.panel(0.5, 0.3, 160, 96, mosaic), TBX + 1.0, 1.02, ZB + 0.025));
 
   // ---------------------------------------------------------------- toilet
   add(at(cyl(0.13, 0.16, 0.36, porcelain, 16), TOX, 0.18, ZB + 0.45)).scale.set(1, 1, 1.25);

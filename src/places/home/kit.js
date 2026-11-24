@@ -17,8 +17,10 @@ export function mat(color, o = {}) {
 // Merge every plain-coloured, non-glowing static mesh under `group` into a few meshes with vertex
 // colours (one per roughness, metalness and shadow setting). Colours stay exact, draw calls drop a lot.
 // skip: objects (and their children) to leave alone. Returns the merged meshes.
+// single: put everything in one mesh (one draw call) whatever its roughness or shadow settings;
+// used for small moving parts and the cut-away walls. cast: shadow casting for that one mesh.
 const vcMats = new Map();
-export function colorBake(group, skip = []) {
+export function colorBake(group, skip = [], { single = false, cast = true } = {}) {
   group.updateMatrixWorld(true);
   const skipSet = new Set();
   for (const d of skip) d.traverse((o) => skipSet.add(o));
@@ -46,10 +48,10 @@ export function colorBake(group, skip = []) {
       col[i * 3 + 2] = m.color.b;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    const rough = m.roughness < 0.45 ? 0.3 : m.roughness < 0.72 ? 0.6 : 0.85;
-    const metal = m.metalness > 0.3 ? 0.55 : 0;
-    const key = `${rough}|${metal}|${m.flatShading ? 1 : 0}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}`;
-    if (!buckets.has(key)) buckets.set(key, { rough, metal, flat: m.flatShading, cast: o.castShadow, receive: o.receiveShadow, list: [] });
+    const rough = single ? 0.6 : m.roughness < 0.45 ? 0.3 : m.roughness < 0.72 ? 0.6 : 0.85;
+    const metal = !single && m.metalness > 0.3 ? 0.55 : 0;
+    const key = single ? 'one' : `${rough}|${metal}|${m.flatShading ? 1 : 0}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}`;
+    if (!buckets.has(key)) buckets.set(key, { rough, metal, flat: single ? false : m.flatShading, cast: single ? cast : o.castShadow, receive: single ? true : o.receiveShadow, list: [] });
     buckets.get(key).list.push(g);
     victims.push(o);
   });
@@ -68,16 +70,27 @@ export function colorBake(group, skip = []) {
   }
   return out;
 }
-// For a moving group: merge its fixed parts in place
-export const bake = (group, keep = []) => (colorBake(group, keep), group);
+// For a moving group: merge its fixed parts in place, into one mesh
+export const bake = (group, keep = []) => (colorBake(group, keep, { single: true }), group);
 
 export const M = (c, o) => (typeof c === 'string' ? mat(c, o) : c);
 // Small things do not cast shadows (fewer shadow draw calls)
 const sm = (geo, c, o, size) => mesh(geo, M(c, o), { cast: size >= 0.28 });
 export const box = (w, h, d, c, o) => sm(new THREE.BoxGeometry(w, h, d), c, o, Math.max(w, h, d));
-export const rbox = (w, h, d, c, r = 0.06, o) => sm(new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.002, h / 2 - 0.002, d / 2 - 0.002)), c, o, Math.max(w, h, d));
-export const cyl = (rt, rb, h, c, seg = 16, o) => sm(new THREE.CylinderGeometry(rt, rb, h, seg), c, o, Math.max(rt * 2, rb * 2, h));
-export const sph = (r, c, o, seg = 14) => sm(new THREE.SphereGeometry(r, seg, Math.max(6, Math.round(seg * 0.7))), c, o, r * 2);
+// Fewer segments on small pieces: they look the same from the camera and cost far fewer triangles
+const rcache = new Map();
+export const rbox = (w, h, d, c, r = 0.06, o) => {
+  const rr = Math.min(r, w / 2 - 0.002, h / 2 - 0.002, d / 2 - 0.002);
+  const seg = Math.max(w, h, d) < 0.7 || rr < 0.025 ? 1 : 2;
+  const key = `${w}|${h}|${d}|${rr}|${seg}`;
+  if (!rcache.has(key)) rcache.set(key, new RoundedBoxGeometry(w, h, d, seg, rr));
+  return sm(rcache.get(key), c, o, Math.max(w, h, d));
+};
+export const cyl = (rt, rb, h, c, seg = 16, o) => sm(new THREE.CylinderGeometry(rt, rb, h, Math.max(rt, rb) < 0.06 ? Math.min(seg, 8) : seg), c, o, Math.max(rt * 2, rb * 2, h));
+export const sph = (r, c, o, seg = 14) => {
+  const s2 = r < 0.04 ? Math.min(seg, 8) : r < 0.1 ? Math.min(seg, 10) : seg;
+  return sm(new THREE.SphereGeometry(r, s2, Math.max(6, Math.round(s2 * 0.7))), c, o, r * 2);
+};
 export const tor = (r, t, c, o, arc = Math.PI * 2, rs = 8, ts = 20) => sm(new THREE.TorusGeometry(r, t, rs, ts, arc), c, o, r * 2);
 export const at = (o, x, y, z) => (o.position.set(x, y, z), o);
 export const rot = (o, x, y, z) => (o.rotation.set(x, y, z), o);
@@ -260,9 +273,22 @@ export function starGeo(R, r, depth = 0.03) {
   return g;
 }
 
+// The classic parametric heart with fewer points (util.heartShape uses 48)
+function lowHeart(size, n) {
+  const s = new THREE.Shape();
+  for (let i = 0; i <= n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    if (i === 0) s.moveTo((x / 34) * size, ((y + 4) / 30) * size);
+    else s.lineTo((x / 34) * size, ((y + 4) / 30) * size);
+  }
+  return s;
+}
+
 // A heart centred on the origin, facing +Z.
 export function heartGeo(size, depth = 0.04) {
-  const g = new THREE.ExtrudeGeometry(heartShape(size), { depth, bevelEnabled: true, bevelSize: depth * 0.35, bevelThickness: depth * 0.35, bevelSegments: 2 });
+  const g = new THREE.ExtrudeGeometry(lowHeart(size, size < 0.2 ? 20 : 32), { depth, bevelEnabled: true, bevelSize: depth * 0.35, bevelThickness: depth * 0.35, bevelSegments: size < 0.2 ? 1 : 2 });
   g.computeBoundingBox();
   const b = g.boundingBox;
   g.translate(-(b.min.x + b.max.x) / 2, -(b.min.y + b.max.y) / 2, -depth / 2);

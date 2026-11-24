@@ -1,8 +1,11 @@
-import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, texMat, pattern, pillowGeo, labelDraw, bake, FONT } from './kit.js';
+import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, texMat, pattern, pillowGeo, labelDraw, bake, sprite, FONT } from './kit.js';
 import { makeQuilt } from './quilt.js';
+import { makeYap } from './yap.js';
 import { rng } from '../../util.js';
 
-// Living room: TV with a cartoon, the cosy sofa with blankets, drawings on the wall, Mishmish's bed.
+// Living room: TV with a cartoon, the cosy sofa with blankets, drawings on the wall, Mishmish's bed,
+// and a record player to dance to. Built in its own coordinates (the back wall at ZB); things on the
+// wall go on the cutaway wall (R.hang).
 
 const LX = -6.0;
 const SZ = 0.9; // sofa centre z
@@ -175,7 +178,7 @@ export function buildLiving(R) {
     add(at(sph(0.03, '#f4c24f', { metal: 0.5, rough: 0.3 }, 8), LX + s * 0.58, 0.28, ZB + 0.56));
   }
   R.col({ type: 'box', x: LX, z: ZB + 0.27, hw: 1.2, hd: 0.27, h: 0.55 });
-  add(at(rbox(2.1, 1.22, 0.08, '#2a2533', 0.04), LX, 1.45, ZB + 0.06));
+  R.hang(at(rbox(2.1, 1.22, 0.08, '#2a2533', 0.04), LX, 1.45, ZB + 0.06));
   const tvCanvas = document.createElement('canvas');
   tvCanvas.width = 256;
   tvCanvas.height = 144;
@@ -183,7 +186,7 @@ export function buildLiving(R) {
   tvTex.colorSpace = THREE.SRGBColorSpace;
   const tvCtx = tvCanvas.getContext('2d');
   drawTv(tvCtx, 256, 144, 0, false);
-  const screen = R.dyn(add(at(new THREE.Mesh(new THREE.PlaneGeometry(1.96, 1.08), new THREE.MeshBasicMaterial({ map: tvTex })), LX, 1.45, ZB + 0.105)));
+  const screen = R.dyn(R.hang(at(new THREE.Mesh(new THREE.PlaneGeometry(1.96, 1.08), new THREE.MeshBasicMaterial({ map: tvTex })), LX, 1.45, ZB + 0.105)));
   // Speaker, plant and a photo on the cabinet
   add(at(cyl(0.11, 0.09, 0.16, '#e07a55', 12), LX - 0.95, 0.63, ZB + 0.25));
   for (let k = 0; k < 5; k++) add(at(sph(0.08, '#5aa84f', { rough: 0.8 }, 8), LX - 0.95 + Math.cos(k * 1.3) * 0.06, 0.78 + (k % 2) * 0.06, ZB + 0.25 + Math.sin(k * 1.3) * 0.05)).scale.set(0.7, 1.3, 0.7);
@@ -193,9 +196,9 @@ export function buildLiving(R) {
   // Picture frames with the two latest drawings
   const frames = [];
   for (const [i, x] of [[0, LX - 2.2], [1, LX + 2.2]]) {
-    add(at(rbox(0.92, 0.74, 0.05, mat('#f4c24f', { metal: 0.3, rough: 0.4 }), 0.02), x, 1.75, ZB + 0.03));
+    R.hang(at(rbox(0.92, 0.74, 0.05, mat('#f4c24f', { metal: 0.3, rough: 0.4 }), 0.02), x, 1.75, ZB + 0.03));
     const m = umat('#ffffff', { rough: 0.8, map: placeholderDrawing(i) });
-    add(at(mesh(new THREE.PlaneGeometry(0.78, 0.6), m, { cast: false }), x, 1.75, ZB + 0.06));
+    R.hang(at(mesh(new THREE.PlaneGeometry(0.78, 0.6), m, { cast: false }), x, 1.75, ZB + 0.06));
     frames.push(m);
   }
   const loadDrawings = () => {
@@ -230,7 +233,7 @@ export function buildLiving(R) {
     const k = i / 24;
     const x = -9.3 + k * 6.6;
     const y = 2.9 - Math.sin(((k * 3) % 1) * P) * 0.25;
-    add(at(mesh(bulbGeo, bulbs[i % 2], { cast: false }), x, y, ZB + 0.1));
+    R.hang(at(mesh(bulbGeo, bulbs[i % 2], { cast: false }), x, y, ZB + 0.1));
   }
 
   // ---------------------------------------------------------------- sofa (faces the TV)
@@ -348,18 +351,21 @@ export function buildLiving(R) {
     leaf.rotation.set(0.3 * Math.sin(a), -a, 0.5 * Math.cos(a));
   }
   R.col({ type: 'circle', x: -2.95, z: ZB + 0.55, r: 0.34 });
-  const bx = -9.33;
-  add(at(box(0.34, 1.3, 1.1, wood), bx, 0.65, -2.7));
+  const bx = -10.53;
+  add(at(box(0.34, 1.3, 1.1, wood), bx, 0.65, 0.7));
   for (let s = 0; s < 3; s++) {
-    let z = -3.2;
-    while (z < -2.25) {
+    let z = 0.2;
+    while (z < 1.15) {
       const bw = 0.06 + r() * 0.05;
       const bh = 0.24 + r() * 0.1;
       add(at(box(0.24, bh, bw, ['#ef5b6f', '#6fb8ff', '#ffd166', '#7fd3a7', '#c7a6ff', '#ffffff'][Math.floor(r() * 6)]), bx + 0.06, 0.12 + s * 0.4 + bh / 2, z + bw / 2));
       z += bw + 0.01;
     }
   }
-  R.col({ type: 'box', x: bx, z: -2.7, hw: 0.2, hd: 0.56 });
+  R.col({ type: 'box', x: bx, z: 0.7, hw: 0.2, hd: 0.56 });
+  // A little photo of the two of them on top of the bookcase
+  add(rot(at(rbox(0.2, 0.26, 0.03, '#ffffff', 0.01), bx, 1.43, 0.85), -0.1, P / 2, 0));
+  add(rot(at(rbox(0.15, 0.2, 0.01, '#ffd0dc', 0.005), bx + 0.016, 1.43, 0.85), -0.1, P / 2, 0));
 
   // Mishmish's bed with a fish toy, and her yarn ball
   add(at(tor(0.28, 0.1, '#ff9eb5', { rough: 0.95 }, P * 2, 8, 20), -8.55, 0.1, 0.75)).rotation.x = P / 2;
@@ -377,12 +383,87 @@ export function buildLiving(R) {
   ball.position.set(-8.0, 0.09, 1.45);
   add(bake(ball));
 
-  // Doormat and a low shoe bench by the front
-  const matDraw = labelDraw(['Home sweet home'], { bg: '#e9a86a', border: '#c67a3e', color: '#6b3d1f', radius: 30, under: '#e2b685' });
-  add(rot(at(R.atlas.panel(1.2, 0.52, 512, 220, matDraw), LX, 0.01, 4.2), -P / 2, 0, 0));
-  add(at(rbox(0.9, 0.3, 0.34, wood, 0.03), -8.3, 0.15, 4.25));
-  for (const [dx, c] of [[-0.25, '#ef5b6f'], [-0.12, '#ef5b6f'], [0.12, '#3f7bf0'], [0.25, '#3f7bf0']]) add(at(sph(0.06, c, undefined, 8), -8.3 + dx, 0.34, 4.22)).scale.set(0.8, 0.6, 1.5);
-  R.col({ type: 'box', x: -8.3, z: 4.25, hw: 0.46, hd: 0.18, h: 0.3 });
+  void labelDraw;
+
+  // ---------------------------------------------------------------- record player and a little dance floor
+  const RPX = -10.47; // cabinet against the outer wall
+  const RPZ = -2.9;
+  const DX = -9.1; // dance rug centre
+  const DZ = -1.9;
+  add(at(rbox(0.46, 0.6, 1.0, '#d9a8b0', 0.03), RPX, 0.3, RPZ));
+  for (const dz of [-0.24, 0.24]) {
+    add(at(rbox(0.02, 0.46, 0.42, '#efc6cc', 0.02), RPX + 0.23, 0.3, RPZ + dz));
+    add(at(sph(0.025, '#f4c24f', { metal: 0.5 }, 8), RPX + 0.25, 0.3, RPZ + dz + (dz < 0 ? 0.15 : -0.15)));
+  }
+  R.col({ type: 'box', x: RPX, z: RPZ, hw: 0.25, hd: 0.52, h: 0.62 });
+  add(at(rbox(0.4, 0.09, 0.44, wood, 0.02), RPX, 0.645, RPZ));
+  const platter = R.dyn(new THREE.Group());
+  platter.add(at(cyl(0.16, 0.16, 0.012, '#26222e', 28), 0, 0, 0));
+  for (const rr of [0.13, 0.1, 0.07]) platter.add(at(tor(rr, 0.002, '#3b3542', undefined, P * 2, 3, 28), 0, 0.007, 0)).rotation.x = P / 2;
+  platter.add(at(cyl(0.05, 0.05, 0.014, '#ff8fb1', 16), 0, 0.002, 0));
+  platter.add(at(box(0.03, 0.016, 0.012, '#ffffff'), 0.03, 0.004, 0));
+  platter.position.set(RPX, 0.7, RPZ - 0.04);
+  add(bake(platter));
+  const arm = R.dyn(new THREE.Group());
+  arm.add(at(cyl(0.025, 0.03, 0.04, '#cfd8e3', 10), 0, 0.02, 0));
+  arm.add(rot(at(cyl(0.006, 0.006, 0.2, '#cfd8e3', 5), 0, 0.045, -0.1), P / 2, 0, 0));
+  arm.add(at(box(0.025, 0.015, 0.04, '#3b3542'), 0, 0.045, -0.2));
+  arm.position.set(RPX - 0.13, 0.69, RPZ + 0.16);
+  add(bake(arm));
+  // A stack of records leaning on the cabinet, and a little speaker
+  for (let k = 0; k < 3; k++) add(rot(at(box(0.3, 0.3, 0.012, ['#ef5b6f', '#ffd166', '#6fb8ff'][k], { rough: 0.6 }), RPX + 0.05, 0.15, RPZ + 0.6 + k * 0.016), 0, P / 2, 0.12 - k * 0.02));
+  add(at(rbox(0.16, 0.24, 0.16, '#3b3542', 0.03), RPX, 0.72, RPZ + 0.38));
+  add(at(cyl(0.05, 0.05, 0.01, '#8d96a3', 12), RPX + 0.082, 0.74, RPZ + 0.38)).rotation.z = P / 2;
+  const noteTex = canvasTexture(64, 64, (ctx) => {
+    ctx.fillStyle = '#ef5b6f';
+    ctx.beginPath();
+    ctx.ellipse(22, 46, 11, 8, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(30, 10, 5, 36);
+    ctx.beginPath();
+    ctx.moveTo(35, 10);
+    ctx.quadraticCurveTo(56, 16, 50, 32);
+    ctx.quadraticCurveTo(50, 20, 35, 20);
+    ctx.fill();
+  });
+  const notesFx = [];
+  for (let i = 0; i < 5; i++) {
+    const n = R.dyn(add(sprite(noteTex, { scale: 0.16 })));
+    n.visible = false;
+    notesFx.push({ s: n, ph: i / 5 });
+  }
+  const danceRug = (ctx, w) => {
+    ctx.fillStyle = '#fff1f4';
+    ctx.fillRect(0, 0, w, w);
+    ctx.fillStyle = '#ffd6e0';
+    for (let k = 0; k < 12; k++) {
+      ctx.beginPath();
+      ctx.moveTo(w / 2, w / 2);
+      ctx.arc(w / 2, w / 2, w / 2, (k / 12) * Math.PI * 2, ((k + 0.5) / 12) * Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = '#ef8a99';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(w / 2, w / 2, w * 0.46, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#ef8a99';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, w / 2 + 22);
+    ctx.bezierCurveTo(w / 2 - 34, w / 2 - 2, w / 2 - 20, w / 2 - 30, w / 2, w / 2 - 12);
+    ctx.bezierCurveTo(w / 2 + 20, w / 2 - 30, w / 2 + 34, w / 2 - 2, w / 2, w / 2 + 22);
+    ctx.fill();
+  };
+  add(rot(at(R.atlas.wrap(new THREE.CircleGeometry(1.1, 36), 256, 256, danceRug), DX, 0.009, DZ), -P / 2, 0, 0));
+  // Big plant in the front corner and a floor cushion
+  add(at(cyl(0.3, 0.24, 0.5, '#ffffff', 14), -1.85, 0.25, 3.1));
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * P * 2;
+    const leaf = add(at(sph(0.26, i % 2 ? '#4f9a45' : '#5aa84f', { rough: 0.8 }, 10), -1.85 + Math.cos(a) * 0.28, 0.9 + (i % 3) * 0.22, 3.1 + Math.sin(a) * 0.2));
+    leaf.scale.set(0.9, 0.22, 0.55);
+    leaf.rotation.set(0.3 * Math.sin(a), -a, 0.5 * Math.cos(a));
+  }
+  R.col({ type: 'circle', x: -1.85, z: 3.1, r: 0.32 });
 
   // ---------------------------------------------------------------- activities
   function movie(a) {
@@ -464,9 +545,101 @@ export function buildLiving(R) {
     a.toast('Mishmish chases the yarn ball!', 2400);
   }
 
+  // ---------------------------------------------------------------- dancing to the record player
+  // A slow waltz on the rug: they turn round each other, Homama twirls Roji now and then
+  const WALTZ = [76, 79, 84, 83, 79, 76, 77, 81, 84, 84, 81, 77, 79, 83, 86, 86, 83, 79, 76, 79, 72, 72, 0, 0];
+  const BASS = [48, 48, 41, 41, 43, 43, 48, 48];
+  const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+  function dance(a) {
+    st.danceT = 0;
+    st.beat = -1;
+    st.twirl = 0;
+    const spec = R.start('dance', {
+      label: 'Stop dancing',
+      seats: [
+        { who: 'roji', x: DX - 0.3, z: DZ, yaw: P / 2, pose: 'stand', hands: 'carry' },
+        { who: 'homama', x: DX + 0.3, z: DZ, yaw: -P / 2, pose: 'stand', hands: 'carry' },
+      ],
+      focus: { x: DX, z: DZ + 0.3, y: 1.0, zoom: 0.55 },
+      night: 0.35,
+      music: 0.1,
+      exit: { x: DX - 0.5, z: DZ + 1.3 },
+      update(dt, t) {
+        st.danceT += dt;
+        const T = st.danceT;
+        // Turn slowly back and forth, so the camera mostly sees them side by side
+        const ang = Math.sin(T * 0.4) * 0.95;
+        const rr = 0.29;
+        const rx = DX - Math.cos(ang) * rr;
+        const rz = DZ + Math.sin(ang) * rr;
+        const hx = DX + Math.cos(ang) * rr;
+        const hz = DZ - Math.sin(ang) * rr;
+        R.place(a.roji, rx, rz, { yaw: Math.atan2(hx - rx, hz - rz) });
+        R.place(a.homama, hx, hz, { yaw: Math.atan2(rx - hx, rz - hz) });
+        for (const [k, w] of [[a.roji, 0], [a.homama, 1]]) {
+          k.kid.body.rotation.z += Math.sin(T * 2.6 + w * P) * 0.07;
+          k.kid.body.position.y += Math.abs(Math.sin(T * 2.6)) * 0.03;
+        }
+        // Twirl every few bars
+        if (Math.floor(T / 7.2) > st.twirl) {
+          st.twirl = Math.floor(T / 7.2);
+          a.roji.kid.hands = null;
+          a.emote('roji', 'spin');
+          a.fx.heartsAt(R.headPos(a.roji), 3);
+          R.later(1.5, () => R.is('dance') && (a.roji.kid.hands = 'carry'));
+          if (st.twirl === 1) a.toast(`<b>Homama:</b> May I have this dance? Oh wait, I already do.`, 3000);
+          if (st.twirl === 2) a.toast(`<b>Roji:</b> You are getting better at this!`, 2600);
+        }
+        // The waltz: three beats a bar
+        const beat = Math.floor(T / 0.62);
+        if (beat !== st.beat) {
+          st.beat = beat;
+          const i = beat % WALTZ.length;
+          const bar = Math.floor(i / 3) % BASS.length;
+          R.sound((s, t0) => {
+            if (WALTZ[i]) s.tone(midi(WALTZ[i]), t0, 0.55, { type: 'triangle', gain: 0.035, attack: 0.02 });
+            if (i % 3 === 0) s.tone(midi(BASS[bar]), t0, 0.6, { type: 'sine', gain: 0.06 });
+            else s.tone(midi(BASS[bar] + 16), t0, 0.25, { type: 'sine', gain: 0.012 });
+          });
+        }
+        platter.rotation.y -= dt * 3.5;
+        for (const n of notesFx) {
+          const k = (T * 0.35 + n.ph) % 1;
+          n.s.visible = true;
+          n.s.position.set(RPX + 0.1 + k * 0.6 + Math.sin(k * 7 + n.ph * 9) * 0.12, 0.85 + k * 1.5, RPZ + Math.cos(n.ph * 9) * 0.3);
+          n.s.material.opacity = Math.sin(k * P);
+        }
+      },
+      onEnd() {
+        for (const n of notesFx) n.s.visible = false;
+        arm.rotation.y = 0;
+      },
+    });
+    if (!spec) return;
+    arm.rotation.y = 0.5;
+    a.sound.ui('pop');
+    a.toast('The record starts to spin. A slow dance together.', 2600);
+  }
+
+  // ---------------------------------------------------------------- yap time on the sofa
+  const yap = makeYap(R, {
+    sit: {
+      roji: { x: LX - 0.48, z: SZ - 0.04, y: 0.19, yaw: P - 1.62, leanX: 0.16 },
+      homama: { x: LX + 0.48, z: SZ - 0.04, y: 0.19, yaw: P + 1.62, leanX: 0.14 },
+    },
+    stand: {
+      roji: { x: LX - 0.28, z: SZ + 1.05, yaw: P / 2 },
+      homama: { x: LX + 0.28, z: SZ + 1.05, yaw: -P / 2 },
+    },
+    focus: { x: LX, z: SZ + 0.45, y: 1.0, zoom: 0.52 },
+    exit: { x: LX - 0.7, z: SZ + 1.45 },
+  });
+
   R.hot(
-    { x: LX, z: SZ + 1.15, r: 1.3, label: 'Movie night', icon: 'cinema', act: movie },
+    { x: LX, z: SZ + 1.15, r: 1.25, label: 'Movie night', icon: 'cinema', act: movie },
     { x: LX - 2.6, z: 2.4, r: 1.2, label: 'Play with Mishmish', icon: 'paw', act: play },
+    { x: LX + 1.75, z: SZ + 0.9, r: 1.1, label: yap.label, icon: 'chat', act: (a) => yap.begin(a) },
+    { x: DX, z: DZ + 1.25, r: 1.2, label: 'Dance to the record player', icon: 'music', act: dance },
   );
 
   R.upd((dt, t) => {
