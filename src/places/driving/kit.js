@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { mat, mesh, canvasTexture, roundRect, heartShape, FONT } from '../../util.js';
+import { mat, mesh, canvasTexture, roundRect, heartShape, bakeStatic, FONT } from '../../util.js';
 
 // Models, paintings and helpers shared by Little Wheels Driving School, its office and the Driving Lesson game.
 
@@ -47,6 +47,18 @@ const readNum = (key, fb) => {
 };
 export const licenceProgress = () => Math.max(0, Math.min(100, readNum('licence', 0)));
 export const lessonsDone = () => readNum('lessons', 0);
+// The course of eight lessons: { stars: [8], best: [8], done: [8] } for Roji ('course') or Homama ('hcourse')
+export const LESSON_COUNT = 8;
+export const COURSE_TITLES = ['First drive', 'Roundabout traffic', 'School zone', 'Parking', 'Rainy day', 'Night drive', 'Hill and bridge', 'The driving test'];
+export function courseState(key = 'course') {
+  try {
+    const v = JSON.parse(localStorage.getItem(`roji-arena-drivinglesson-${key}`) || 'null');
+    if (v && Array.isArray(v.stars)) return v;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
 
 // ------------------------------------------------------------------ primitives (geometry cache per build)
 export function kit() {
@@ -249,7 +261,7 @@ function duckIcon(c, x, y, s, color = '#ffd166') {
 }
 
 // Road signs. Shapes match the geometries in signGeo(): octagon, circle, up and down triangles, square.
-export const SIGN_SHAPE = { stop: 'oct', giveway: 'down', roundabout: 'circle', speed20: 'circle', noentry: 'circle', zebra: 'square', parking: 'square', duck: 'up', lights: 'up', school: 'up' };
+export const SIGN_SHAPE = { stop: 'oct', giveway: 'down', roundabout: 'circle', speed20: 'circle', noentry: 'circle', oncoming: 'circle', zebra: 'square', parking: 'square', duck: 'up', lights: 'up', school: 'up', narrow: 'up', hill: 'up', bump: 'up', animal: 'up' };
 export function drawSign(c, kind, w, h) {
   const shape = SIGN_SHAPE[kind];
   c.fillStyle = '#ffffff';
@@ -298,6 +310,28 @@ export function drawSign(c, kind, w, h) {
       c.arc(w / 2, h / 2, w * 0.44, 0, Math.PI * 2);
       c.stroke();
       text(c, '20', w / 2, h / 2 + 6, h * 0.42, C.ink);
+    } else if (kind === 'oncoming') {
+      // Give way to oncoming traffic: your arrow (black, up) and theirs (red, down)
+      c.fillStyle = '#ffffff';
+      c.fill();
+      c.lineWidth = w * 0.1;
+      c.strokeStyle = '#e5484d';
+      c.beginPath();
+      c.arc(w / 2, h / 2, w * 0.44, 0, Math.PI * 2);
+      c.stroke();
+      const arrow = (x, up, col) => {
+        c.fillStyle = col;
+        c.fillRect(x - w * 0.035, up ? h * 0.4 : h * 0.3, w * 0.07, h * 0.3);
+        const tip = up ? h * 0.27 : h * 0.73;
+        const base = up ? h * 0.41 : h * 0.59;
+        c.beginPath();
+        c.moveTo(x, tip);
+        c.lineTo(x + w * 0.1, base);
+        c.lineTo(x - w * 0.1, base);
+        c.fill();
+      };
+      arrow(w * 0.38, true, C.ink);
+      arrow(w * 0.62, false, '#e5484d');
     } else {
       c.fillStyle = '#e5484d';
       c.fill();
@@ -325,6 +359,62 @@ export function drawSign(c, kind, w, h) {
         c.arc(w / 2, h * (0.33 + i * 0.12), w * 0.04, 0, Math.PI * 2);
         c.fill();
       });
+    } else if (kind === 'narrow') {
+      c.fillStyle = C.ink;
+      for (const s of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(w * (0.5 + s * 0.15), h * 0.66);
+        c.lineTo(w * (0.5 + s * 0.15), h * 0.56);
+        c.lineTo(w * (0.5 + s * 0.06), h * 0.46);
+        c.lineTo(w * (0.5 + s * 0.06), h * 0.32);
+        c.lineTo(w * (0.5 + s * 0.11), h * 0.32);
+        c.lineTo(w * (0.5 + s * 0.11), h * 0.44);
+        c.lineTo(w * (0.5 + s * 0.2), h * 0.54);
+        c.lineTo(w * (0.5 + s * 0.2), h * 0.66);
+        c.fill();
+      }
+    } else if (kind === 'hill') {
+      c.fillStyle = C.ink;
+      c.beginPath();
+      c.moveTo(w * 0.3, h * 0.64);
+      c.lineTo(w * 0.7, h * 0.64);
+      c.lineTo(w * 0.7, h * 0.38);
+      c.closePath();
+      c.fill();
+      text(c, '1:5', w * 0.42, h * 0.46, h * 0.1, C.ink);
+    } else if (kind === 'bump') {
+      c.fillStyle = C.ink;
+      c.beginPath();
+      c.moveTo(w * 0.28, h * 0.64);
+      c.quadraticCurveTo(w * 0.5, h * 0.3, w * 0.72, h * 0.64);
+      c.closePath();
+      c.fill();
+    } else if (kind === 'animal') {
+      // A little fox face
+      c.fillStyle = '#f08a5d';
+      c.beginPath();
+      c.moveTo(w * 0.36, h * 0.36);
+      c.lineTo(w * 0.42, h * 0.46);
+      c.lineTo(w * 0.58, h * 0.46);
+      c.lineTo(w * 0.64, h * 0.36);
+      c.lineTo(w * 0.62, h * 0.52);
+      c.lineTo(w * 0.5, h * 0.64);
+      c.lineTo(w * 0.38, h * 0.52);
+      c.closePath();
+      c.fill();
+      c.fillStyle = '#ffffff';
+      c.beginPath();
+      c.moveTo(w * 0.42, h * 0.54);
+      c.lineTo(w * 0.5, h * 0.64);
+      c.lineTo(w * 0.58, h * 0.54);
+      c.closePath();
+      c.fill();
+      c.fillStyle = C.ink;
+      for (const s of [-1, 1]) {
+        c.beginPath();
+        c.arc(w * (0.5 + s * 0.05), h * 0.5, w * 0.014, 0, Math.PI * 2);
+        c.fill();
+      }
     } else if (kind === 'school') {
       c.fillStyle = C.ink;
       for (const [x, s] of [[0.42, 1], [0.58, 0.8]]) {
@@ -477,6 +567,29 @@ export function drawChibi(c, x, y, s, L) {
   c.beginPath();
   c.arc(x, y + s * 0.2, s * 0.11, 0.2, Math.PI - 0.2);
   c.stroke();
+  if (L.glasses) {
+    c.strokeStyle = C.ink;
+    c.lineWidth = s * 0.035;
+    for (const sx of [-1, 1]) {
+      c.beginPath();
+      c.arc(x + sx * s * 0.19, y + s * 0.08, s * 0.13, 0, Math.PI * 2);
+      c.stroke();
+    }
+    c.beginPath();
+    c.moveTo(x - s * 0.06, y + s * 0.06);
+    c.lineTo(x + s * 0.06, y + s * 0.06);
+    c.stroke();
+  }
+  if (L.mustache) {
+    c.fillStyle = L.mustache;
+    c.beginPath();
+    c.moveTo(x, y + s * 0.2);
+    c.quadraticCurveTo(x - s * 0.12, y + s * 0.13, x - s * 0.2, y + s * 0.24);
+    c.quadraticCurveTo(x - s * 0.1, y + s * 0.22, x, y + s * 0.25);
+    c.quadraticCurveTo(x + s * 0.1, y + s * 0.22, x + s * 0.2, y + s * 0.24);
+    c.quadraticCurveTo(x + s * 0.12, y + s * 0.13, x, y + s * 0.2);
+    c.fill();
+  }
   if (L.girl && L.bow) {
     c.fillStyle = L.bow;
     heartPath(c, x + s * 0.36, y - s * 0.42, s * 0.16);
@@ -545,6 +658,7 @@ export function drawPolaroid(c, x, y, w, h, L, caption, tilt = 0, bg = '#bfe6ff'
 
 export const HOMAMA_PHOTO = { skin: '#f6d8c6', hair: '#141010', top: '#3f7bf0', thumbs: true };
 export const ROJI_PHOTO = { skin: '#f8dccb', hair: '#2a1a13', top: '#ef5b6f', girl: true, bow: '#ff7fa3' };
+export const ABU_SANAD_PHOTO = { skin: '#c98f68', hair: '#3a3634', top: '#21a99a', glasses: true, mustache: '#2b2624' };
 
 // Homama's driving certificate
 export function drawCertificate(c, w, h) {
@@ -653,25 +767,26 @@ export function drawBoard(c, w, h, { progress = 0, lessons = 0 } = {}) {
     c.arc(w * x, h * y, h * 0.018, 0, Math.PI * 2);
     c.fill();
   }
-  // Lesson stickers
+  // Lesson stickers: one per lesson in Abu Sanad's course, gold once done
   const sx0 = w * 0.68;
   text(c, 'Lessons', sx0 + w * 0.14, h * 0.24, h * 0.055, '#5a3a20', 700);
-  for (let i = 0; i < 4; i++) {
-    const x = sx0 + w * (0.035 + (i % 2) * 0.21);
-    const y = h * (0.37 + Math.floor(i / 2) * 0.17);
+  for (let i = 0; i < 8; i++) {
+    const x = sx0 + w * (0.02 + (i % 4) * 0.07);
+    const y = h * (0.36 + Math.floor(i / 4) * 0.15);
     c.fillStyle = '#ffffff';
     c.beginPath();
-    c.arc(x + w * 0.035, y, h * 0.07, 0, Math.PI * 2);
+    c.arc(x + w * 0.015, y, h * 0.055, 0, Math.PI * 2);
     c.fill();
-    if (i < lessons) star(c, x + w * 0.035, y, h * 0.06, C.sun, '#e0a83a', 3);
+    if (i < lessons) star(c, x + w * 0.015, y, h * 0.047, i === 7 ? C.rose : C.sun, i === 7 ? '#c7404f' : '#e0a83a', 3);
     else {
       c.setLineDash([5, 5]);
       c.strokeStyle = '#d8c6b8';
       c.lineWidth = 3;
       c.beginPath();
-      c.arc(x + w * 0.035, y, h * 0.05, 0, Math.PI * 2);
+      c.arc(x + w * 0.015, y, h * 0.04, 0, Math.PI * 2);
       c.stroke();
       c.setLineDash([]);
+      text(c, String(i + 1), x + w * 0.015, y + 2, h * 0.04, '#c9b6a8', 700);
     }
   }
   // Licence meter
@@ -705,6 +820,50 @@ export function drawBoard(c, w, h, { progress = 0, lessons = 0 } = {}) {
     heartPath(c, w * x, h * y, h * s * 1.6);
     c.fill();
   }
+}
+
+// ------------------------------------------------------------------ people and animals
+// Abu Sanad's course chart on the office wall: the eight lessons with Roji's stars and her licence.
+export function drawCourseChart(c, w, h, state = null, progress = 0) {
+  c.fillStyle = '#fffaf0';
+  roundRect(c, 0, 0, w, h, w * 0.05);
+  c.fill();
+  c.fillStyle = C.teal;
+  roundRect(c, 0, 0, w, h * 0.15, w * 0.05);
+  c.fill();
+  c.fillRect(0, h * 0.08, w, h * 0.07);
+  text(c, "Abu Sanad's course", w / 2, h * 0.075, h * 0.06, '#ffffff', 700);
+  const rows = COURSE_TITLES.length;
+  const top = h * 0.19;
+  const rh = (h * 0.62) / rows;
+  COURSE_TITLES.forEach((t, i) => {
+    const y = top + rh * (i + 0.5);
+    const done = !!state?.done?.[i];
+    const stars = state?.stars?.[i] || 0;
+    if (i % 2) {
+      c.fillStyle = 'rgba(255,209,102,0.16)';
+      c.fillRect(w * 0.04, y - rh / 2, w * 0.92, rh);
+    }
+    c.fillStyle = done ? (i === rows - 1 ? C.rose : C.mint) : '#efe4da';
+    c.beginPath();
+    c.arc(w * 0.11, y, rh * 0.34, 0, Math.PI * 2);
+    c.fill();
+    text(c, i === rows - 1 ? 'T' : String(i + 1), w * 0.11, y + 2, rh * 0.38, done ? '#ffffff' : '#a8969f', 700);
+    text(c, t, w * 0.2, y + 2, rh * 0.42, done ? C.ink : '#a8969f', 600, 'left');
+    for (let s = 0; s < 3; s++) star(c, w * (0.75 + s * 0.08), y, rh * 0.26, s < stars ? C.sun : '#eadfd8', s < stars ? '#e0a83a' : '#d8cbc2', 2);
+  });
+  // Licence bar
+  const by = h * 0.915;
+  text(c, progress >= 100 ? "Roji's licence: done!" : `Roji's licence ${Math.round(progress)}%`, w / 2, by - h * 0.03, h * 0.04, C.teal, 700);
+  c.fillStyle = '#f0e2d8';
+  roundRect(c, w * 0.1, by, w * 0.8, h * 0.035, h * 0.017);
+  c.fill();
+  const gr = c.createLinearGradient(w * 0.1, 0, w * 0.9, 0);
+  gr.addColorStop(0, C.sun);
+  gr.addColorStop(1, C.rose);
+  c.fillStyle = gr;
+  roundRect(c, w * 0.1, by, Math.max(h * 0.035, w * 0.8 * Math.min(1, progress / 100)), h * 0.035, h * 0.017);
+  c.fill();
 }
 
 // ------------------------------------------------------------------ people and animals
@@ -794,7 +953,10 @@ export function bakeLiveKid(kid, keep = []) {
   const parts = [...kid.legs, ...kid.arms, ...tails];
   colorBake(kid.body, [kid.head, kid.carryAnchor, kid.torso, ...parts, ...keep], o);
   colorBake(kid.head, [...kid.eyes, ...tails], o);
+  // The hair is many textured pieces sharing one material: merge them too
+  bakeStatic(kid.head, [...kid.eyes, ...tails], mergeGeometries);
   for (const p of parts) colorBake(p, [], o);
+  for (const t of tails) bakeStatic(t, [], mergeGeometries);
   return kid;
 }
 

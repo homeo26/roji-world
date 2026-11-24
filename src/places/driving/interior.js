@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mat, umat, mesh, canvasTexture, roundRect } from '../../util.js';
-import { C, kit, colorBake, Atlas, drawSign, signGeo, drawCertificate, drawNote, drawPolaroid, drawWheelBadge, HOMAMA_PHOTO, ROJI_PHOTO, makeNora, freezeKid, makeCone, tree, addFlowers, paintedPlane, paintText, heartPath, licenceProgress } from './kit.js';
+import { C, kit, colorBake, Atlas, drawSign, signGeo, drawCertificate, drawNote, drawPolaroid, drawWheelBadge, drawLPlate, drawCourseChart, drawChibi, HOMAMA_PHOTO, ROJI_PHOTO, makeNora, freezeKid, makeCone, tree, addFlowers, paintedPlane, paintText, heartPath, licenceProgress, courseState } from './kit.js';
 
 // Inside Little Wheels, open at the front like a dollhouse:
 //   reception with the waiting chairs | the theory corner with the quiz computer and Abu Sanad | the certificate room
@@ -63,6 +63,7 @@ export function buildDrivingInterior(ctx) {
   const add = (...o) => (g.add(...o), o[0]);
   const col = (x, z, hw, hd, h) => colliders.push(h === undefined ? { type: 'box', x, z, hw, hd } : { type: 'box', x, z, hw, hd, h });
   const atlas = new Atlas(8, 4, 256);
+  const atlas2 = new Atlas(4, 4, 256); // Abu Sanad's desk, Homama's note and his framed L plate
   const cells = {};
   let seed = 9;
   const R = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -239,38 +240,26 @@ export function buildDrivingInterior(ctx) {
   }, 2);
   const recSign = atlas.plane(1.6, 0.8, cells.reception);
   add(at(recSign, RX + 0.4, 2.45, Z0 + 0.13));
-  cells.poster = atlas.add((c, w, h) => {
-    c.fillStyle = '#fff6e6';
-    c.fillRect(0, 0, w, h);
-    c.fillStyle = '#9ad06a';
-    c.fillRect(0, h * 0.62, w, h * 0.38);
-    c.fillStyle = C.road;
-    c.beginPath();
-    c.moveTo(w * 0.42, h * 0.62);
-    c.lineTo(w * 0.58, h * 0.62);
-    c.lineTo(w * 0.9, h);
-    c.lineTo(w * 0.1, h);
-    c.fill();
-    c.fillStyle = C.sun;
-    c.beginPath();
-    c.arc(w * 0.78, h * 0.26, w * 0.1, 0, Math.PI * 2);
-    c.fill();
-    paintText(c, 'Learn to drive', w / 2, h * 0.16, h * 0.1, C.teal);
-    paintText(c, 'with a smile', w / 2, h * 0.3, h * 0.09, C.rose);
-    c.save();
-    c.translate(w * 0.5, h * 0.78);
-    c.fillStyle = C.sun;
-    roundRect(c, -w * 0.13, -h * 0.07, w * 0.26, h * 0.12, 12);
-    c.fill();
-    c.fillStyle = C.ink;
-    c.beginPath();
-    c.arc(-w * 0.07, h * 0.05, w * 0.03, 0, Math.PI * 2);
-    c.arc(w * 0.07, h * 0.05, w * 0.03, 0, Math.PI * 2);
-    c.fill();
-    c.restore();
-  });
-  add(at(rbox(0.96, 0.96, 0.05, C.white, 0.03), RX + 2.6, 1.75, Z0 + 0.13));
-  add(at(atlas.plane(0.84, 0.84, cells.poster), RX + 2.6, 1.75, Z0 + 0.165));
+  // Abu Sanad's course chart: Roji's stars for each of the eight lessons (redrawn as she goes)
+  const chartState = () => ({ s: courseState('course'), p: licenceProgress() });
+  let chartKey = '';
+  const chart = paintedPlane(0.9, 1.12, 512, (c, w, h) => {
+    const { s: st, p: pr } = chartState();
+    drawCourseChart(c, w, h, st, pr);
+  }, { rough: 0.8 });
+  add(at(rbox(1.02, 1.24, 0.05, C.woodDark, 0.03), RX + 2.6, 1.72, Z0 + 0.13));
+  add(at(chart, RX + 2.6, 1.72, Z0 + 0.165));
+  dynamic.push(chart);
+  const refreshChart = () => {
+    const st = chartState();
+    const key = JSON.stringify(st);
+    if (key === chartKey) return;
+    chartKey = key;
+    const tex = chart.userData.tex;
+    drawCourseChart(tex.image.getContext('2d'), tex.image.width, tex.image.height, st.s, st.p);
+    tex.needsUpdate = true;
+  };
+  refreshChart();
   // Waiting chairs, a side table and a water cooler
   const chair = (x, z, ry, colr) => {
     const c = new THREE.Group();
@@ -282,6 +271,22 @@ export function buildDrivingInterior(ctx) {
     col(x, z, 0.27, 0.27, 0.49);
   };
   [[-0.4, C.rose], [0.3, C.sun], [1.0, C.mint]].forEach(([z, cc]) => chair(-11.35, z, Math.PI / 2, cc));
+  // Homama left a note on Roji's favourite chair
+  cells.chairNote = atlas2.add((c, w, h) => {
+    c.fillStyle = '#ffd6e2';
+    c.fillRect(10, 10, w - 20, h - 20);
+    c.fillStyle = 'rgba(255,255,255,0.55)';
+    c.fillRect(w * 0.32, 10, w * 0.36, h * 0.08);
+    paintText(c, 'You can do it,', w / 2, h * 0.32, h * 0.13, C.ink, 600);
+    paintText(c, 'Roji!', w / 2, h * 0.5, h * 0.2, C.rose, 700);
+    paintText(c, '- Homama', w * 0.6, h * 0.74, h * 0.11, C.blue, 700);
+    c.fillStyle = C.rose;
+    heartPath(c, w * 0.24, h * 0.76, h * 0.09);
+    c.fill();
+  });
+  const chairNote = atlas2.plane(0.3, 0.3, cells.chairNote);
+  chairNote.rotation.set(-Math.PI / 2, 0, Math.PI / 2 + 0.25);
+  add(at(chairNote, -11.33, 0.5, 0.32));
   add(at(cyl(0.3, 0.3, 0.05, C.white, 18), -11.35, 0.5, 1.9));
   add(at(cyl(0.04, 0.06, 0.5, C.ink, 8), -11.35, 0.25, 1.9));
   for (let i = 0; i < 2; i++) add(at(box(0.22, 0.02, 0.3, [C.sky, C.pink][i]), -11.33 + i * 0.03, 0.535 + i * 0.02, 1.9));
@@ -419,6 +424,66 @@ export function buildDrivingInterior(ctx) {
   nora.root.rotation.y = -0.45;
   add(nora.root);
   colliders.push({ type: 'circle', x: 3.0, z: -2.5, r: 0.34 });
+  // His desk: a name plate, his mug, a clipboard, and a drawing Roji made of the three of them
+  const DX = 2.85;
+  const DZ = -1.45;
+  add(at(rbox(1.5, 0.06, 0.7, C.wood, 0.02), DX, 0.76, DZ));
+  add(at(rbox(1.4, 0.62, 0.06, C.teal, 0.02), DX, 0.42, DZ + 0.3));
+  for (const [lx, lz] of [[0.66, 0.28], [-0.66, 0.28], [0.66, -0.28], [-0.66, -0.28]]) add(at(cyl(0.03, 0.03, 0.74, C.ink, 6), DX + lx, 0.37, DZ + lz));
+  col(DX, DZ, 0.76, 0.36, 0.79);
+  cells.nameplate = atlas2.add((c, w, h) => {
+    c.fillStyle = C.ink;
+    roundRect(c, 4, 70, w - 8, h - 140, 20);
+    c.fill();
+    paintText(c, 'Abu Sanad', w / 2, h * 0.43, h * 0.2, '#ffd166');
+    paintText(c, 'INSTRUCTOR', w / 2, h * 0.62, h * 0.1, '#ffffff', 600);
+  }, 2);
+  const plate = new THREE.Group();
+  const wedge = rbox(0.62, 0.14, 0.08, C.ink, 0.02);
+  plate.add(wedge);
+  const face = atlas2.plane(0.62, 0.31, cells.nameplate);
+  face.position.set(0, 0.02, 0.045);
+  plate.add(face);
+  plate.rotation.x = -0.35;
+  add(at(plate, DX - 0.25, 0.86, DZ + 0.26));
+  cells.mug = atlas2.add((c, w, h) => {
+    c.fillStyle = '#ffffff';
+    c.fillRect(0, 0, w, h);
+    paintText(c, 'Calm', w / 2, h * 0.38, h * 0.26, C.teal);
+    paintText(c, 'and kind', w / 2, h * 0.66, h * 0.2, C.rose);
+  });
+  const mug = new THREE.Group();
+  const mugBody = mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.13, 14, 1, true), mat(C.white, { side: THREE.DoubleSide }));
+  mug.add(at(mugBody, 0, 0.065, 0));
+  const mugFace = atlas2.mesh(new THREE.PlaneGeometry(0.09, 0.09), cells.mug);
+  mug.add(at(mugFace, 0, 0.065, 0.062));
+  mug.add(at(tor(0.035, 0.01, C.white, Math.PI * 2, undefined, 10), 0.07, 0.07, 0)).rotation.y = Math.PI / 2;
+  add(at(mug, DX + 0.45, 0.79, DZ + 0.1));
+  add(at(rbox(0.24, 0.02, 0.3, C.woodDark, 0.01), DX + 0.1, 0.8, DZ - 0.05)).rotation.y = 0.3;
+  cells.kidDrawing = atlas2.add((c, w, h) => {
+    c.fillStyle = '#ffffff';
+    c.fillRect(0, 0, w, h);
+    c.fillStyle = '#9ad06a';
+    c.fillRect(0, h * 0.8, w, h * 0.2);
+    c.fillStyle = C.sun;
+    roundRect(c, w * 0.12, h * 0.45, w * 0.76, h * 0.26, 18);
+    c.fill();
+    c.fillStyle = C.ink;
+    for (const x of [0.28, 0.72]) {
+      c.beginPath();
+      c.arc(w * x, h * 0.74, w * 0.07, 0, Math.PI * 2);
+      c.fill();
+    }
+    drawChibi(c, w * 0.32, h * 0.33, w * 0.12, ROJI_PHOTO);
+    drawChibi(c, w * 0.66, h * 0.33, w * 0.12, { skin: '#c98f68', hair: '#3a3634', top: C.teal, glasses: true, mustache: '#2b2624' });
+    drawChibi(c, w * 0.86, h * 0.62, w * 0.09, HOMAMA_PHOTO);
+    c.fillStyle = C.rose;
+    heartPath(c, w * 0.5, h * 0.14, w * 0.06);
+    c.fill();
+  });
+  const drawing = atlas2.plane(0.26, 0.26, cells.kidDrawing);
+  drawing.rotation.set(-Math.PI / 2 + 0.2, 0, -0.2);
+  add(at(drawing, DX + 0.18, 0.81, DZ - 0.02));
   // A play rug with a toy road loop, toy cars and tiny cones
   const mapRug = paintedPlane(3.6, 2.2, 512, (c, w, h) => {
     c.fillStyle = '#bfe8a6';
@@ -494,6 +559,23 @@ export function buildDrivingInterior(ctx) {
   }, 3);
   add(at(atlas.plane(2.6, 0.87, cells.banner), CX, 2.72, Z0 + 0.15));
   for (const [x, y, s, cc] of [[CX - 1.2, 1.1, 0.16, C.rose], [CX + 1.15, 2.25, 0.13, C.pink], [CX - 1.55, 2.35, 0.1, C.sun]]) add(at(k.heart(s, 0.03, cc), x, y, Z0 + 0.17));
+  // Homama's very first L plate, framed
+  cells.lplate = atlas2.add(drawLPlate);
+  cells.lplateTag = atlas2.add((c, w, h) => {
+    c.fillStyle = '#fff6ea';
+    roundRect(c, 4, 80, w - 8, h - 160, 14);
+    c.fill();
+    paintText(c, "Homama's first", w / 2, h * 0.44, h * 0.13, C.ink, 600);
+    paintText(c, 'L plate', w / 2, h * 0.58, h * 0.13, C.rose, 700);
+  });
+  const LPX = 4.6;
+  add(at(rbox(0.54, 0.54, 0.05, gold, 0.03), LPX, 1.7, Z0 + 0.14));
+  add(at(atlas2.plane(0.42, 0.42, cells.lplate), LPX, 1.7, Z0 + 0.17));
+  add(at(atlas2.plane(0.46, 0.46, cells.lplateTag), LPX, 1.26, Z0 + 0.15));
+  // A secret: one floor tile in the theory corner hides a little heart
+  const tileHeart = k.heart(0.16, 0.01, C.pink);
+  tileHeart.rotation.x = -Math.PI / 2;
+  add(at(tileHeart, -3.5, 0.006, 4.4));
   // A low shelf with a trophy and toy cars
   add(at(rbox(1.5, 0.8, 0.45, C.white, 0.05), CX - 1.6, 0.4, Z0 + 0.35));
   col(CX - 1.6, Z0 + 0.35, 0.78, 0.26, 0.82);
@@ -624,17 +706,21 @@ export function buildDrivingInterior(ctx) {
   const roji = (api) => api.playerId === 'roji';
   const noraSays = (api) => {
     const p = licenceProgress();
+    const st = courseState('course');
+    const done = st ? st.done.filter(Boolean).length : 0;
     const lines = roji(api)
       ? [
           '<b>Abu Sanad:</b> Hello Roji! Gentle on the brake, smooth on the turns.',
-          p >= 100 ? '<b>Abu Sanad:</b> Licensed driver Roji! I am so proud of you.' : `<b>Abu Sanad:</b> Your licence is ${Math.round(p)}% done. A few more lessons!`,
+          p >= 100 ? '<b>Abu Sanad:</b> Licensed driver Roji! I am so proud of you.' : `<b>Abu Sanad:</b> ${done} of my 8 lessons done, and your licence is ${Math.round(p)}% there.`,
           '<b>Abu Sanad:</b> The ducks always have right of way. Always!',
           '<b>Abu Sanad:</b> Homama got full marks. He talks about you all the time.',
+          '<b>Abu Sanad:</b> My tip for the test? Breathe, look, then go. You will be fine.',
         ]
       : [
           '<b>Abu Sanad:</b> Hi Homama! Roji is doing wonderfully.',
           '<b>Abu Sanad:</b> Your certificate is on the wall. Roji reads it every visit.',
           p >= 100 ? '<b>Abu Sanad:</b> Roji passed! You two can take turns driving now.' : '<b>Abu Sanad:</b> Keep cheering, Homama. It really helps her.',
+          '<b>Abu Sanad:</b> Fancy a refresher course? Even good drivers can get better.',
         ];
     return lines[noraI++ % lines.length];
   };
@@ -705,7 +791,7 @@ export function buildDrivingInterior(ctx) {
     },
     {
       x: 2.9,
-      z: -1.4,
+      z: -0.35,
       r: 1.3,
       icon: 'smile',
       label: 'Talk to Abu Sanad',
@@ -746,6 +832,48 @@ export function buildDrivingInterior(ctx) {
         }),
     },
     {
+      x: -10.6,
+      z: 0.3,
+      r: 1.2,
+      icon: 'heart',
+      label: 'Read the note',
+      act: (api) => {
+        api.focus({ x: -11.3, z: 0.3, y: 0.6, zoom: 0.3 });
+        setTimeout(() => api.focus(null), 3600);
+        api.fx.heartsAt(api.world(-11.3, 0.3, 1.0), 3);
+        api.emote('player', roji(api) ? 'heart' : 'bow');
+        api.toast(roji(api) ? 'A note on your chair: <b>"You can do it, Roji!"</b> Homama is right here waiting.' : 'Your note is still on Roji\'s chair: <b>"You can do it, Roji!"</b>', 3400);
+      },
+    },
+    {
+      x: RX + 2.6,
+      z: -3.4,
+      r: 1.2,
+      icon: 'board',
+      label: 'Read the lesson chart',
+      act: (api) => {
+        refreshChart();
+        const st = courseState('course');
+        const n = st ? st.done.filter(Boolean).length : 0;
+        const stars = st ? st.stars.reduce((a, b) => a + b, 0) : 0;
+        api.focus({ x: RX + 2.6, z: Z0 + 1, y: 1.7, zoom: 0.34 });
+        setTimeout(() => api.focus(null), 3800);
+        api.toast(n >= 8 ? `Every lesson done, <b>${stars} of 24 stars</b>. Abu Sanad drew a heart next to the test.` : `Roji has done <b>${n} of 8</b> lessons with <b>${stars} stars</b>. Next up: ${['First drive', 'Roundabout traffic', 'School zone', 'Parking', 'Rainy day', 'Night drive', 'Hill and bridge', 'The driving test'][n]}.`, 3800);
+      },
+    },
+    {
+      x: 4.6,
+      z: -3.0,
+      r: 0.9,
+      icon: 'star',
+      label: 'Look at the L plate',
+      act: (api) => {
+        api.focus({ x: 4.6, z: Z0 + 1, y: 1.6, zoom: 0.3 });
+        setTimeout(() => api.focus(null), 3400);
+        api.toast(roji(api) ? "Homama's very first L plate. He kept it for luck, and to remind you everyone starts somewhere." : 'Your very first L plate. You framed it the day you passed, so Roji could see everyone starts somewhere.', 3800);
+      },
+    },
+    {
       x: 10.25,
       z: -3.7,
       r: 1.2,
@@ -771,6 +899,7 @@ export function buildDrivingInterior(ctx) {
     background: '#fde3c9',
     onEnter(api) {
       refreshPhotos();
+      refreshChart();
       setTimeout(() => {
         if (!api.inside) return;
         api.toast(roji(api) ? '<b>Homama:</b> Theory today? You will ace it, Roji!' : 'Homama holds the door for Roji. "After you, future driver!"', 3200);

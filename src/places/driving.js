@@ -39,7 +39,7 @@ export default {
     tag: 'Roji learns to drive',
     icon: 'wheel',
     color: '#f4a742',
-    text: 'Roji is taking driving lessons with Abu Sanad. Homama already has his licence and cheers her on at every turn.',
+    text: "Roji works through Abu Sanad's eight lessons, from her first drive to the driving test. Homama already has his licence and cheers her on at every turn.",
   },
   icons: { wheel: WHEEL, board: BOARD_ICON, duck: DUCK },
 
@@ -95,6 +95,18 @@ export default {
     add(at(tor(0.25, 0.035, C.white, Math.PI * 2, undefined, 20), BX, 1.55, FZ + 0.16));
     add(at(sph(0.06, C.sun, { rough: 0.3, metal: 0.3 }, 10), BX + 0.45, 1.05, FZ + 0.17));
     add(at(k.heart(0.22, 0.03, C.rose), BX, 0.8, FZ + 0.16));
+    // A brass plaque by the door
+    cells.plaque = atlas.add((c, w, h) => {
+      c.fillStyle = '#e8b84a';
+      util.roundRect(c, 6, 60, w - 12, h - 120, 18);
+      c.fill();
+      c.strokeStyle = '#c99a3a';
+      c.lineWidth = 6;
+      c.stroke();
+      paintText(c, 'Instructor', w / 2, h * 0.42, h * 0.11, '#6a4a1a', 600);
+      paintText(c, 'Abu Sanad', w / 2, h * 0.58, h * 0.15, '#3b2b3f', 700);
+    });
+    add(at(atlas.plane(0.42, 0.42, cells.plaque), BX + 1.07, 1.6, FZ + 0.1));
     add(at(rbox(2.6, 0.18, 1.3, C.sun, 0.08), BX, 2.68, FZ + 0.62));
     for (let x = BX - 1.15; x < BX + 1.2; x += 0.33) add(at(sph(0.1, C.white, undefined, 8), x, 2.56, FZ + 1.26));
     for (const s of [-1, 1]) {
@@ -369,6 +381,36 @@ export default {
     nora.root.rotation.y = -0.3;
     add(nora.root);
     colliders.push({ type: 'circle', x: 10.7, z: 6.9, r: 0.32 });
+    // His A-board: the course in one line
+    cells.aboard = atlas.add((c, w, h) => {
+      c.fillStyle = '#3d4a46';
+      util.roundRect(c, 8, 6, w - 16, h - 12, 18);
+      c.fill();
+      c.lineWidth = 10;
+      c.strokeStyle = C.wood;
+      c.stroke();
+      paintText(c, 'Lessons with', w / 2, h * 0.2, h * 0.1, '#ffffff', 600);
+      paintText(c, 'Abu Sanad', w / 2, h * 0.36, h * 0.15, '#ffd166', 700);
+      paintText(c, '8 lessons', w / 2, h * 0.56, h * 0.1, '#ffffff', 600);
+      paintText(c, '1 licence', w / 2, h * 0.7, h * 0.1, '#ffffff', 600);
+      c.fillStyle = C.pink;
+      heartPath(c, w / 2, h * 0.86, h * 0.07);
+      c.fill();
+    });
+    const aboard = new THREE.Group();
+    for (const s of [-1, 1]) {
+      const panel = new THREE.Group();
+      const face = atlas.plane(0.62, 0.82, cells.aboard);
+      face.position.z = 0.025;
+      panel.add(face);
+      panel.add(rbox(0.68, 0.9, 0.04, C.woodDark, 0.02));
+      panel.rotation.set(s * -0.2, s < 0 ? Math.PI : 0, 0);
+      panel.position.set(0, 0.45, s * 0.1);
+      aboard.add(panel);
+    }
+    aboard.rotation.y = -0.2;
+    add(at(aboard, 12.1, 0, 7.3));
+    colliders.push({ type: 'box', x: 12.1, z: 7.3, hw: 0.36, hd: 0.22, h: 0.9 });
 
     // ---------------------------------------------------------------- front lawn
     // "Roji's progress" board with Homama's framed certificate
@@ -538,7 +580,9 @@ export default {
           const res = await api.playArena('drivinglesson');
           refreshBoard();
           if (!res || res.quit) return;
+          const roji = api.playerId === 'roji';
           if (res.licence) api.toast('<b>Homama:</b> Roji got her licence! I am so proud of you!', 4000);
+          else if (!roji) api.toast(res.stars === 3 ? '<b>Roji:</b> Three stars on your refresher? Show-off!' : '<b>Roji:</b> Good practice, Homama!', 3200);
           else if (res.stars === 3) api.toast('<b>Homama:</b> Three stars! So smooth, Roji.', 3200);
           else api.toast('<b>Homama:</b> Every lesson makes you better, Roji.', 3200);
         },
