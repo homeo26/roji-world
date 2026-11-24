@@ -608,7 +608,23 @@ export class World {
         balls.push({ x: t.x + 0.5 * t.s, y: 1.55 * t.s, z: t.z + 0.25 * t.s, sc: 0.6 * t.s, col });
         balls.push({ x: t.x - 0.45 * t.s, y: 1.6 * t.s, z: t.z - 0.2 * t.s, sc: 0.62 * t.s, col });
       }
-      this.addCollider({ type: 'circle', x: t.x, z: t.z, r: 0.35 * t.s });
+      // The trunk, grown to the low branches a kid's head and shoulders would pass through (one circle)
+      let reach = 0;
+      if (t.kind === 'pine') {
+        const low = Math.max(0.5, 0.635 * t.s); // bottom cone, widest at its base
+        reach = (0.95 * (1.965 * t.s - low)) / 1.33;
+      } else {
+        const head = 1.35; // top of a kid's head
+        const spread = (cy, rad, hh) => {
+          const dy = Math.max(0, cy - head);
+          return dy < hh ? rad * Math.sqrt(1 - (dy / hh) ** 2) : 0;
+        };
+        const main = spread(1.85 * t.s, 0.92 * t.s, 0.846 * t.s);
+        const s1 = spread(1.55 * t.s, 0.6 * t.s, 0.552 * t.s);
+        const s2 = spread(1.6 * t.s, 0.62 * t.s, 0.57 * t.s);
+        reach = Math.max(main, s1 ? 0.56 * t.s + s1 : 0, s2 ? 0.49 * t.s + s2 : 0);
+      }
+      this.addCollider({ type: 'circle', x: t.x, z: t.z, r: Math.max(0.35 * t.s, reach - 0.2) });
     });
     for (const b of balls) b.rot = [r(), r(), r()];
     chunked(ballGeo, mat('#ffffff', { rough: 0.85, flat: true }), balls, (im, i, b) => {
@@ -697,7 +713,8 @@ export class World {
     for (const k of rocks) {
       k.rot = [r(), r(), r()];
       k.col = snowy(k.z) ? '#eef4f8' : r() < 0.5 ? '#c9c2b3' : '#b5ae9f';
-      if (k.s > 0.5) this.addCollider({ type: 'circle', x: k.x, z: k.z, r: k.s * 0.45, h: k.s * 0.55 });
+      // Small rocks are stepped onto, big ones are jumped onto
+      this.addCollider({ type: 'circle', x: k.x, z: k.z, r: k.s * 0.45, h: k.s * 0.55 });
     }
     chunked(rockGeo, mat('#ffffff', { rough: 0.9, flat: true }), rocks, (im, i, k) => {
       m4.compose(v.set(k.x, k.s * 0.22, k.z), q.setFromEuler(e.set(...k.rot)), s.set(k.s, k.s * 0.65, k.s));

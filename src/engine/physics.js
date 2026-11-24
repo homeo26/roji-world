@@ -26,6 +26,13 @@ export class Physics {
   // Push point p (Vector3, uses x/z) out of every collider it overlaps. v is its velocity, also corrected.
   // feet: height of the feet. skip: (collider) => true to ignore one (for example the car you are in).
   resolve(p, r, v, { bounce = 0, feet = 0, skip = null, bounds = true } = {}) {
+    // A second pass settles inside corners, where leaving one collider pushes into the next (no jitter)
+    if (this.pass(p, r, v, bounce, feet, skip)) this.pass(p, r, v, bounce, feet, skip);
+    if (bounds && this.bounds) this.bounds(p, r, v, bounce);
+  }
+
+  pass(p, r, v, bounce, feet, skip) {
+    let pushed = false;
     for (const c of this.colliders) {
       if (skip && skip(c)) continue;
       if (c.h !== undefined && c.h <= feet + STEP_UP) continue;
@@ -37,9 +44,15 @@ export class Physics {
         const min = c.r + r;
         const d2 = dx * dx + dz * dz;
         if (d2 >= min * min) continue;
-        const d = Math.sqrt(d2) || 1e-4;
-        dx /= d;
-        dz /= d;
+        const d = Math.sqrt(d2);
+        // Exactly on the centre: push out along +x instead of not at all
+        if (d < 1e-6) {
+          dx = 1;
+          dz = 0;
+        } else {
+          dx /= d;
+          dz /= d;
+        }
         p.x += dx * (min - d);
         p.z += dz * (min - d);
       } else {
@@ -69,13 +82,14 @@ export class Physics {
           }
         }
       }
+      pushed = true;
       const into = v.x * dx + v.z * dz;
       if (into < 0) {
         v.x -= dx * into * (1 + bounce);
         v.z -= dz * into * (1 + bounce);
       }
     }
-    if (bounds && this.bounds) this.bounds(p, r, v, bounce);
+    return pushed;
   }
 
   // Height of the highest top under (x, z) that a kid with its feet at `feet` can stand on.

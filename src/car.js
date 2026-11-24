@@ -136,19 +136,26 @@ export class Car {
     let target = 0;
     if (wantYaw !== null && intent > 0.05) {
       const d = Math.atan2(Math.sin(wantYaw - this.yaw), Math.cos(wantYaw - this.yaw));
+      // Asked to go the other way from a near stop (nose against a wall): back up while the nose swings round
+      if (Math.abs(d) > 2.2 && Math.abs(this.speed) < 1.5) this.reversing = true;
+      else if (Math.abs(d) < 1.6 || this.speed > 0.5) this.reversing = false;
       const grip = clamp(0.4 + Math.abs(this.speed) / 3, 0, 1);
       const rate = 2.9 - 0.9 * clamp(Math.abs(this.speed) / max, 0, 1);
       const turn = clamp(d * 3.4, -rate, rate) * grip;
       this.yaw += turn * dt;
       this.turnRate = turn;
-      this.steer = damp(this.steer, clamp(d, -0.6, 0.6), 10, dt);
-      target = max * Math.min(1, intent) * clamp(Math.cos(d) * 1.15, 0.28, 1);
+      this.steer = damp(this.steer, clamp(this.reversing ? -d : d, -0.6, 0.6), 10, dt);
+      target = this.reversing ? -2.6 * Math.min(1, intent) : max * Math.min(1, intent) * clamp(Math.cos(d) * 1.15, 0.28, 1);
     } else {
+      this.reversing = false;
       this.turnRate = 0;
       this.steer = damp(this.steer, 0, 8, dt);
     }
     const dv = target - this.speed;
-    this.speed += clamp(dv, -11 * dt, (target > 0 ? 5.5 : 0) * dt);
+    // Speeding up forward 5.5, backward 4, braking (toward a stop) 11
+    const up = this.speed >= 0 ? 5.5 : 11;
+    const down = this.speed <= 0 ? 4 : 11;
+    this.speed += clamp(dv, -down * dt, up * dt);
     if (Math.abs(this.speed) < 0.02 && target === 0) this.speed = 0;
   }
 

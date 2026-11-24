@@ -724,7 +724,12 @@ function jump() {
   }
   const p = P();
   const r = tryJump(p);
-  if (!r) return;
+  if (!r) {
+    // Pressed a moment before landing: jump as soon as the feet touch down
+    if (airOf(p) > 0.05 && p.mode !== 'swim') p.jumpBuf = 0.16;
+    return;
+  }
+  p.jumpBuf = 0;
   hop(p, r);
   // The partner hops too when holding hands or close by
   const c = C();
@@ -1064,7 +1069,10 @@ function updateCamera(dt, t) {
   if (inside) {
     const b = inside.bounds;
     desiredLook.x = clamp(desiredLook.x, Math.min(b.x0 + 3, (b.x0 + b.x1) / 2), Math.max(b.x1 - 3, (b.x0 + b.x1) / 2));
-    desiredLook.z = clamp(desiredLook.z, Math.min(b.z0 + 2, (b.z0 + b.z1) / 2), Math.max(b.z1 - 1.5, (b.z0 + b.z1) / 2));
+    // Stop following toward the front once the floor's front edge reaches the bottom of the screen,
+    // so the room fills the view and its back wall stays clear of the top bar
+    const frontGap = Math.max(1.5, 5.4 * z - 1.4);
+    desiredLook.z = clamp(desiredLook.z, Math.min(b.z0 + 2, (b.z0 + b.z1) / 2), Math.max(b.z1 - frontGap, (b.z0 + b.z1) / 2));
   }
   if (focus) {
     desiredLook.set(focus.x, focus.y ?? 1, focus.z);
@@ -1242,6 +1250,10 @@ function updatePlayer(dt, ax) {
     else fx.puff(p.pos);
   }
   if (!wasSwim && p.mode === 'swim') fx.burst(new THREE.Vector3(p.pos.x, p.y + 0.1, p.pos.z), ['#ffffff', '#bdefff'], 16);
+  if (p.jumpBuf > 0) {
+    p.jumpBuf -= dt;
+    if (airOf(p) < 0.02 && p.vy === 0) jump();
+  }
   p.idle = p.speed > 0.25 ? 0 : p.idle + dt;
   if (p.speed > 0.25) faceTo(p, dt, Math.atan2(p.vel.x, p.vel.z));
   else if (p.idle > 1.2) faceTo(p, dt, spaces.inside ? 0.2 : 0.3, 3);
@@ -1294,10 +1306,14 @@ function updateCompanion(dt) {
       stepWalker(c, physics, dx, dz, clamp(d * 2, 0, 1), d > 3 ? 7.2 : 5.4, 14, dt);
       if (c.speed > 0.25) faceTo(c, dt, Math.atan2(c.vel.x, c.vel.z));
       else faceTo(c, dt, p.yaw, 8);
-      if (d > 30) {
+      c.stuckT = d > 3 && c.speed < 0.6 ? (c.stuckT || 0) + dt : 0;
+      if (d > 30 || c.stuckT > 2.2) {
+        c.stuckT = 0;
         fx.poof(c.pos);
         c.pos.set(target.x, 0, target.z);
+        physics.resolve(c.pos, RADIUS, c.vel, { feet: p.y });
         c.y = p.y;
+        fx.poof(c.pos);
       }
       if (d < 0.35 && Math.abs(c.y - p.y) < 0.2) {
         holdGrip = true;
@@ -1318,7 +1334,10 @@ function updateCompanion(dt) {
     const dx = target.x - c.pos.x;
     const dz = target.z - c.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d > 30) {
+    // Caught behind a fence or a wall for a while: hop over to the player with a poof
+    c.stuckT = d > 4.5 && c.speed < 0.8 ? (c.stuckT || 0) + dt : 0;
+    if (d > 30 || c.stuckT > 2.2) {
+      c.stuckT = 0;
       fx.poof(c.pos);
       // On a pier the spot beside the player may be over the sea: land right behind them instead
       if (spaces.onWalkway(p.pos.x, p.pos.z) && !spaces.onWalkway(target.x, target.z)) target.copy(p.pos).addScaledVector(fwd, -0.7);
@@ -1341,6 +1360,39 @@ function updateCompanion(dt) {
   if (stepVertical(c, physics, dt, spaces.waterAt(c.pos.x, c.pos.z)) === 'land') {
     c.kid.squash = 0.78;
     fx.puff(c.pos);
+  }
+}
+
+// People are solid: Roji and Homama step around the people of the place they are in instead of walking
+// through them. Small enough that chats, high fives and selfies (0.56 m or more apart) still fit.
+const inScene = (o) => {
+  for (; o; o = o.parent) {
+    if (!o.visible) return false;
+    if (o === scene) return true;
+  }
+  return false;
+};
+function pushOffPeople(a) {
+  if (a.seated || a.kid.pose !== 'stand') return;
+  for (const n of spaces.npcs) {
+    const e = n.kid.root.matrixWorld.elements;
+    const dx = a.pos.x - e[12];
+    const dz = a.pos.z - e[14];
+    if (Math.abs(dx) > 0.9 || Math.abs(dz) > 0.9) continue;
+    const s = Math.hypot(e[0], e[1], e[2]) || 1;
+    const r = 0.24 + 0.22 * s;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r * r || Math.abs(e[13] - a.y) > 1 || n.kid.pose === 'sleep' || !inScene(n.kid.root)) continue;
+    const d = Math.sqrt(d2) || 1e-3;
+    const nx = d2 > 1e-6 ? dx / d : 1;
+    const nz = d2 > 1e-6 ? dz / d : 0;
+    a.pos.x = e[12] + nx * r;
+    a.pos.z = e[14] + nz * r;
+    const into = a.vel.x * nx + a.vel.z * nz;
+    if (into < 0) {
+      a.vel.x -= nx * into;
+      a.vel.z -= nz * into;
+    }
   }
 }
 
@@ -1367,6 +1419,8 @@ const insideColor = new THREE.Color();
 window.__roji = {
   renderer,
   scene,
+  world,
+  car,
   camera,
   stations,
   actors,
@@ -1408,6 +1462,24 @@ window.__roji = {
     camLook.set(x, 0.9, z);
     return true;
   },
+  // Run the movement for n frames without drawing: ax is { x, y } or (i) => { x, y }. Returns a trace.
+  sim(n = 60, ax = { x: 0, y: 0 }, dt = 1 / 60, every = 10) {
+    const trace = [];
+    for (let i = 0; i < n; i++) {
+      elapsed += dt;
+      updatePlayer(dt, typeof ax === 'function' ? ax(i) : ax);
+      updateCompanion(dt);
+      if (!game.activities.active && !mount) {
+        pushOffPeople(P());
+        pushOffPeople(C());
+      }
+      for (const a of Object.values(actors)) syncKid(a, dt, elapsed);
+      spaces.update(dt, elapsed, P().pos);
+      game.life.emit('tick', dt, elapsed);
+      if (i % every === 0 || i === n - 1) trace.push({ p: [+P().pos.x.toFixed(2), +P().pos.z.toFixed(2), +P().y.toFixed(2)], c: [+C().pos.x.toFixed(2), +C().pos.z.toFixed(2), +C().y.toFixed(2)], grip: holdGrip, gap: +P().pos.distanceTo(C().pos).toFixed(2) });
+    }
+    return trace;
+  },
   // Stand next to the hotspot whose label contains `text` and press it
   act(text) {
     const list = spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()];
@@ -1417,11 +1489,6 @@ window.__roji = {
     P().pos.set(hp.x, 0, hp.z + 0.3);
     h.act();
     return h.label;
-  },
-  goto: (x, z) => {
-    P().pos.set(x, 0, z);
-    C().pos.set(x + 1, 0, z + 0.6);
-    camLook.set(x, 0.9, z);
   },
 };
 
@@ -1446,6 +1513,10 @@ function frame() {
   const ax = started && !ui.panelOpen ? input.axis() : { x: 0, y: 0 };
   updatePlayer(dt, ax);
   updateCompanion(dt);
+  if (!game.activities.active && !mount) {
+    pushOffPeople(P());
+    pushOffPeople(C());
+  }
   for (const a of Object.values(actors)) {
     syncKid(a, dt, t);
     footsteps(a);

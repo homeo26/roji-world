@@ -32,7 +32,7 @@ body.touch #arena .a-btns { display: flex; }
 #arena .a-btn.main { width: 88px; height: 88px; background: #ef5b6f; color: #fff; font-size: .9rem; }
 #arena .a-btn.on { transform: scale(.94); filter: brightness(.95); }
 #arena .a-btn:empty, #arena .a-btn.off { display: none; }
-#arena .a-result { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(40,24,40,.35); pointer-events: auto; }
+#arena .a-result { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(40,24,40,.35); pointer-events: auto; z-index: 50; }
 #arena .a-result.hidden { display: none; }
 #arena .a-card { background: #fffaf4; border-radius: 26px; padding: 22px 26px; width: min(420px, 86vw); text-align: center; box-shadow: 0 20px 60px rgba(40,20,30,.35); }
 #arena .a-card h2 { margin: 0 0 6px; font-size: 1.7rem; }
@@ -40,6 +40,15 @@ body.touch #arena .a-btns { display: flex; }
 #arena .a-card .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 #arena .a-card button { border: 0; border-radius: 999px; padding: .7em 1.3em; font: 600 1rem var(--font, system-ui); cursor: pointer; background: #f3e6dc; color: #3b2b3f; }
 #arena .a-card button.primary { background: #ef5b6f; color: #fff; }
+body.arena-result #arena .a-btns, body.arena-result #stick, body.arena-result #joy { display: none !important; }
+body.arena-result #arena { z-index: 48; }
+@media (max-height: 520px) and (orientation: landscape) {
+  #arena .a-result { place-items: center end; padding-right: max(16px, env(safe-area-inset-right)); background: linear-gradient(90deg, rgba(40,24,40,0) 35%, rgba(40,24,40,.32)); }
+  #arena .a-card { width: min(320px, 40vw); padding: 14px 18px; border-radius: 22px; }
+  #arena .a-card h2 { font-size: 1.3rem; margin-bottom: 4px; }
+  #arena .a-card p { font-size: .86rem; margin-bottom: 12px; line-height: 1.3; }
+  #arena .a-card button { padding: .6em 1.05em; font-size: .92rem; }
+}
 body.arena-nostick #stick, body.arena-nostick #joy { display: none !important; }
 body.arena-on #hud, body.arena-on #minimap, body.arena-on #card, body.arena-on #prompt, body.arena-on #dock, body.arena-on #tbuttons, body.arena-on #toast { display: none !important; }
 `;
@@ -62,8 +71,18 @@ export class ArenaHost {
       if (!e.repeat) this.pressedSet.add(k);
       if (k === ' ') this.pressedSet.add('jump');
       if (k === 'e' || k === 'enter') this.pressedSet.add('action');
-      if (k === 'escape') this.end({ quit: true });
     });
+    // Esc always closes the game, also while a choice card or a game's own card has the focus
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (this.current && e.key === 'Escape') {
+          e.stopImmediatePropagation();
+          this.end({ quit: true });
+        }
+      },
+      true,
+    );
   }
 
   get active() {
@@ -218,18 +237,32 @@ export class ArenaHost {
     this.$('.a-score').innerHTML = '';
     this.$('.a-hint').textContent = '';
     this.$('.a-result').classList.add('hidden');
+    document.body.classList.remove('arena-result');
+    c.viewShift = 0;
+    c.viewShiftNow = 0;
     this.setButtons({});
     this.pressedSet.clear();
     this.taps.length = 0;
     const ctx = this.makeCtx(c);
     c.ctx = ctx;
+    let game;
     try {
-      c.game = (await c.mod.start(ctx)) || {};
+      game = (await c.mod.start(ctx)) || {};
     } catch (e) {
       console.error(`arena ${c.id} failed to start`, e);
-      this.end({ error: true });
+      if (this.current === c && c.ctx === ctx) this.end({ error: true });
       return;
     }
+    // Closed (Esc) or restarted while it was still starting: clean up the game that just started
+    if (this.current !== c || c.ctx !== ctx) {
+      try {
+        game.dispose?.();
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
+    c.game = game;
     c.starting = false;
   }
 
@@ -331,6 +364,11 @@ export class ArenaHost {
         host.$('.a-card h2').textContent = result.title || (result.win ? 'You win!' : result.win === false ? 'So close!' : 'Well played!');
         host.$('.a-card p').innerHTML = result.text || '';
         host.$('.a-result').classList.remove('hidden');
+        document.body.classList.add('arena-result');
+        // Short landscape screens: the card sits on the right, so slide the scene left to keep the celebration in view
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        c.viewShift = H <= 520 && W > H ? Math.min(host.$('.a-card').offsetWidth / 2 + 16, W * 0.25) : 0;
         host.sound?.ui(result.win === false ? 'lose' : 'win');
       },
       end: (result) => host.end(result || {}),
@@ -360,12 +398,16 @@ export class ArenaHost {
     }
     c.scene?.traverse((o) => {
       o.geometry?.dispose?.();
+      if (o.isLight) o.dispose?.(); // frees the shadow map
+      o.skeleton?.dispose?.(); // and a skinned model's bone texture
       const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
       for (const m of ms) {
         for (const v of Object.values(m)) if (v?.isTexture) v.dispose();
+        for (const u of Object.values(m.uniforms || {})) if (u?.value?.isTexture) u.value.dispose();
         m.dispose?.();
       }
     });
+    for (const k of ['background', 'environment']) if (c.scene?.[k]?.isTexture) c.scene[k].dispose();
     c.scene = null;
     c.game = null;
   }
@@ -387,7 +429,8 @@ export class ArenaHost {
     clearTimeout(this.msgTimer);
     this.$('.a-msg').classList.remove('on');
     this.el.classList.add('hidden');
-    document.body.classList.remove('arena-on', 'arena-nostick');
+    this.$('.a-result').classList.add('hidden');
+    document.body.classList.remove('arena-on', 'arena-nostick', 'arena-result');
     this.input.pointerSteer = true;
     this.heldSet.clear();
     this.onClose?.(c.id, result);
@@ -415,6 +458,14 @@ export class ArenaHost {
     }
     if (!this.current) return;
     c.fx.update(dt, t);
+    const shift = c.viewShift || 0;
+    if (shift || c.viewShiftNow) {
+      c.viewShiftNow = Math.abs(shift - c.viewShiftNow) < 0.5 ? shift : c.viewShiftNow + (shift - c.viewShiftNow) * (1 - Math.exp(-6 * dt));
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      if (c.viewShiftNow > 0.5) c.camera.setViewOffset(W, H, c.viewShiftNow, 0, W, H);
+      else c.camera.clearViewOffset();
+    }
     this.renderer.render(c.scene, c.camera);
     this.pressedSet.clear();
     this.taps.length = 0;

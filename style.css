@@ -435,6 +435,11 @@ body.night-time #minimap {
   background: var(--paper);
   border-radius: 22px;
   box-shadow: var(--shadow);
+  /* Above the touch buttons, and it scrolls on short screens */
+  z-index: 32;
+  max-height: calc(100vh - 90px);
+  max-height: calc(100dvh - 90px);
+  overflow: auto;
 }
 .panel.hidden {
   display: none;
@@ -1528,6 +1533,20 @@ body.touch #jump-btn {
 
 body.inside #minimap {
   display: none;
+}
+/* Inside a building the stamps bar shrinks and fades so the room's back wall shows through */
+#journey {
+  transition: opacity 0.3s, transform 0.3s;
+  transform-origin: 50% 0;
+}
+body.inside #journey {
+  opacity: 0.5;
+  transform: scale(0.8);
+}
+body.inside #journey:hover,
+body.inside #journey:focus-within {
+  opacity: 1;
+  transform: none;
 }
 
 /* Touch phones in landscape: the card sits between the stick and the buttons */

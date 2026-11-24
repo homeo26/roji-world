@@ -7,6 +7,12 @@ import { damp, dampAngle, clamp } from '../util.js';
 
 export const GRAVITY = 22;
 export const RADIUS = 0.34;
+const HANG_V = 1.7; // below this vertical speed near the top of a jump gravity eases off (a little hang time)
+const HANG_G = 0.55;
+const FALL_G = 1.3; // and the way down is a bit quicker than the way up
+const MAX_FALL = 18;
+const COYOTE = 0.12; // a jump still counts this long after walking off a ledge
+const STEP_RATE = 26; // how quickly feet rise onto a small ledge (no snap)
 
 export function makeActor(id, kid, x, z, yaw = 0) {
   const a = {
@@ -40,10 +46,12 @@ export function stepWalker(a, physics, dirX, dirZ, intent, maxSpeed, accel, dt, 
   const k = Math.min(1, intent);
   const ice = a.surface === 'ice';
   const acc = ice ? accel * 0.18 : accel;
-  const brake = ice ? 0.6 : 9;
+  const brake = ice ? 0.6 : 13;
   const top = a.surface === 'snow' ? maxSpeed * 0.82 : a.mode === 'swim' ? maxSpeed * 0.5 : maxSpeed;
-  a.vel.x = damp(a.vel.x, (dirX / len) * top * k, intent > 0.05 ? acc : brake, dt);
-  a.vel.z = damp(a.vel.z, (dirZ / len) * top * k, intent > 0.05 ? acc : brake, dt);
+  // A little less steering in the air, so jumps keep their line
+  const airK = a.y - a.ground > 0.05 && a.mode !== 'swim' ? 0.75 : 1;
+  a.vel.x = damp(a.vel.x, (dirX / len) * top * k, (intent > 0.05 ? acc : brake) * airK, dt);
+  a.vel.z = damp(a.vel.z, (dirZ / len) * top * k, (intent > 0.05 ? acc : brake) * airK, dt);
   a.pos.x += a.vel.x * dt;
   a.pos.z += a.vel.z * dt;
   physics.resolve(a.pos, radius, a.vel, { feet: a.y });
@@ -61,20 +69,31 @@ export function stepVertical(a, physics, dt, water = null, radius = RADIUS) {
   a.ground = ground;
   let landed = null;
   if (a.y > ground + 1e-3 || a.vy > 0) {
-    a.vy -= GRAVITY * (swim && a.y < ground + 0.3 ? 0.35 : 1) * dt;
-    a.y += a.vy * dt;
+    // The hang is for jumps only: stepping off a ledge drops straight away
+    const g = GRAVITY * (swim && a.y < ground + 0.3 ? 0.35 : a.jumps > 0 && Math.abs(a.vy) < HANG_V ? HANG_G : a.vy < 0 ? FALL_G : 1);
+    // Exact for constant gravity over the frame, so the jump height does not depend on the frame rate
+    a.y += a.vy * dt - 0.5 * g * dt * dt;
+    a.vy = Math.max(a.vy - g * dt, -MAX_FALL);
+    a.airT = (a.airT || 0) + dt;
     if (a.y <= ground) {
-      if (a.vy < -3) landed = 'land';
+      if (a.vy < -4.2) landed = 'land'; // stepping off a kerb is not a landing
       a.y = ground;
       a.vy = 0;
       a.jumps = 0;
+      a.airT = 0;
       // A flip that is still going finishes quickly on the ground (syncKid) instead of snapping upright
     }
   } else {
-    a.y = ground; // steps up small ledges, sits on the water surface
+    // Small ledges: the body rises onto them over a few frames (stepLag, drawn by syncKid) instead of
+    // snapping, while the feet used for collisions are already on top. The water surface holds them up.
+    const rise = ground - a.y;
+    if (rise > 0.01 && rise < 0.45) a.stepLag = Math.min(0.45, (a.stepLag || 0) + rise);
+    a.y = ground;
     a.vy = 0;
     a.jumps = 0;
+    a.airT = 0;
   }
+  if (a.stepLag) a.stepLag = a.stepLag < 0.005 ? 0 : a.stepLag * Math.exp(-STEP_RATE * dt);
   if (a.flipT >= 0) a.flipT += dt;
   return landed;
 }
@@ -88,12 +107,15 @@ export function tryJump(a, { power = 7.4, allowDouble = true } = {}) {
     a.jumps = 1;
     return 'jump';
   }
-  if (air < 0.03 && a.vy <= 0.01) {
+  // On the ground, or just walked off a ledge (coyote time)
+  if ((air < 0.03 && a.vy <= 0.01) || (a.jumps === 0 && a.vy <= 0 && (a.airT || 0) < COYOTE)) {
     a.vy = power;
     a.jumps = 1;
+    a.airT = 0;
     return 'jump';
   }
-  if (allowDouble && a.jumps === 1) {
+  // The second jump; falling off a ledge without jumping still leaves this one
+  if (allowDouble && a.jumps <= 1) {
     a.vy = power * 0.92;
     a.jumps = 2;
     a.flipT = 0;
@@ -117,7 +139,7 @@ export function syncKid(a, dt, t) {
   const air = airOf(a);
   if (k.pose === 'stand' || k.pose === 'swim') {
     k.pose = a.mode === 'swim' ? 'swim' : k.pose === 'swim' ? 'stand' : k.pose;
-    k.root.position.set(a.pos.x, a.y, a.pos.z);
+    k.root.position.set(a.pos.x, a.y - (a.stepLag || 0), a.pos.z);
     k.root.rotation.set(0, a.yaw, 0);
   }
   if (a.flipT >= 0) a.flipT += dt * (air < 0.02 ? 5 : 0);
