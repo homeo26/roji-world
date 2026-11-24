@@ -383,28 +383,58 @@ export function buildExterior(ctx) {
     s.lineTo(-w / 2, 0);
     return s;
   };
-  const frameGeo = new THREE.ExtrudeGeometry(arch(1.66, 2.5, 0.83), { depth: 0.08, bevelEnabled: false });
+  // A big, clear front door: a deep frame, a pink door with a heart window, a brass knob and kick plate
+  const frameGeo = new THREE.ExtrudeGeometry(arch(1.9, 2.8, 0.95), { depth: 0.1, bevelEnabled: false });
   add(at(mesh(frameGeo, white), 0, 0.3, ZF - 0.02));
-  const doorGeo = new THREE.ExtrudeGeometry(arch(1.4, 2.2, 0.7), { depth: 0.08, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2 });
+  const doorGeo = new THREE.ExtrudeGeometry(arch(1.58, 2.5, 0.79), { depth: 0.08, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2 });
   const doorMat = mat('#ef6f86', { rough: 0.6 });
-  add(at(mesh(doorGeo, doorMat), 0, 0.3, ZF + 0.04));
-  for (const s of [-1, 1]) add(at(rbox(0.44, 0.8, 0.04, '#e45d77', 0.03), s * 0.29, 0.95, ZF + 0.15));
-  add(at(mesh(heartGeo(0.42, 0.04), glassA), 0, 2.0, ZF + 0.15));
-  add(at(sph(0.055, '#f4c24f', { metal: 0.6, rough: 0.3 }), 0.52, 1.3, ZF + 0.18));
+  add(at(mesh(doorGeo, doorMat), 0, 0.3, ZF + 0.06));
+  for (const s of [-1, 1]) add(at(rbox(0.5, 0.9, 0.04, '#e45d77', 0.03), s * 0.33, 1.0, ZF + 0.17));
+  add(at(rbox(1.3, 0.16, 0.03, mat('#f4c24f', { metal: 0.5, rough: 0.35 }), 0.02), 0, 0.42, ZF + 0.18));
+  add(at(mesh(heartGeo(0.48, 0.04), glassA), 0, 2.2, ZF + 0.17));
+  add(at(sph(0.065, '#f4c24f', { metal: 0.6, rough: 0.3 }), 0.6, 1.35, ZF + 0.2));
+  add(at(rbox(0.06, 0.22, 0.03, mat('#f4c24f', { metal: 0.6, rough: 0.3 }), 0.01), 0.6, 1.35, ZF + 0.18));
+  // House number 14 and a name sign over the door
+  const numTex = canvasTexture(128, 112, (c, w, h) => {
+    c.fillStyle = '#2c3e66';
+    c.beginPath();
+    c.roundRect?.(4, 4, w - 8, h - 8, 20);
+    if (!c.roundRect) c.rect(4, 4, w - 8, h - 8);
+    c.fill();
+    c.strokeStyle = '#f4c24f';
+    c.lineWidth = 6;
+    c.stroke();
+    c.fillStyle = '#ffffff';
+    c.font = `700 64px 'Fredoka', ui-rounded, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('14', w / 2, h / 2 + 4);
+  });
+  add(at(panel(0.42, 0.37, numTex), 1.3, 1.5, ZF + 0.04));
+  const nameTex = labelTex(['Roji and Homama'], { w: 640, h: 120, bg: '#fff6e6', border: '#c98f5f', color: '#ef5b6f', radius: 50 });
+  add(at(rbox(2.0, 0.36, 0.06, wood, 0.03), 0, 3.22, ZF + 0.03));
+  add(at(panel(1.94, 0.32, nameTex), 0, 3.22, ZF + 0.065));
+  for (const s of [-1, 1]) add(at(mesh(heartGeo(0.16, 0.03), mat('#ef5b6f')), s * 1.1, 3.22, ZF + 0.07));
   // Flower wreath around the heart window
-  const wreath = add(at(tor(0.34, 0.06, LEAF, undefined, Math.PI * 2, 6, 22), 0, 1.98, ZF + 0.16));
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2;
-    garden.flower(Math.cos(a) * 0.34, wreath.position.y + Math.sin(a) * 0.34 - 0.03, ZF + 0.2, i % 2 ? 'rose' : 'pom', i % 3 ? PINK : '#ffffff', 0.01);
+  const wreath = add(at(tor(0.38, 0.06, LEAF, undefined, Math.PI * 2, 6, 22), 0, 2.18, ZF + 0.18));
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    garden.flower(Math.cos(a) * 0.38, wreath.position.y + Math.sin(a) * 0.38 - 0.03, ZF + 0.22, i % 2 ? 'rose' : 'pom', i % 3 ? PINK : '#ffffff', 0.01);
   }
   // Porch lanterns: gold brackets with warm glowing glass
   const brass = mat('#f4c24f', { metal: 0.5, rough: 0.35 });
+  const halos = [];
   for (const s of [-1, 1]) {
-    const x = s * 1.08;
-    add(at(box(0.05, 0.05, 0.2, brass), x, 2.12, ZF + 0.1));
-    add(at(rbox(0.18, 0.24, 0.18, mat('#fff1c9', { emissive: '#ffc977', ei: 1.2 }), 0.04), x, 1.98, ZF + 0.22));
-    add(rot(at(cyl(0.0, 0.14, 0.1, brass, 4), x, 2.15, ZF + 0.22), 0, Math.PI / 4, 0));
-    add(at(cyl(0.1, 0.1, 0.03, brass, 4), x, 1.85, ZF + 0.22)).rotation.y = Math.PI / 4;
+    const x = s * 1.3;
+    add(at(box(0.06, 0.06, 0.26, brass), x, 2.32, ZF + 0.12));
+    add(at(rbox(0.24, 0.32, 0.24, mat('#fff1c9', { emissive: '#ffc977', ei: 1.6 }), 0.05), x, 2.14, ZF + 0.3));
+    add(rot(at(cyl(0.0, 0.19, 0.13, brass, 4), x, 2.36, ZF + 0.3), 0, Math.PI / 4, 0));
+    add(at(cyl(0.13, 0.13, 0.04, brass, 4), x, 1.97, ZF + 0.3)).rotation.y = Math.PI / 4;
+    const halo = sprite(glowTex(), { color: '#ffd38a', opacity: 0.5, scale: 1.2 });
+    halo.position.set(x, 2.14, ZF + 0.36);
+    add(halo);
+    dynamic.push(halo);
+    halos.push(halo);
   }
   // Deck and step
   const deck = new THREE.BoxGeometry(3.8, 0.3, 1.5);
@@ -792,6 +822,7 @@ export function buildExterior(ctx) {
         f.b.rotation.y = a + Math.PI / 2;
         for (const { wg, s } of f.wings) wg.rotation.z = s * (0.3 + Math.sin(t * 18 + f.ph) * 0.9);
       }
+      for (const h of halos) h.material.opacity = 0.42 + Math.sin(t * 1.3) * 0.08;
       bird.position.y = 0.97 + Math.max(0, Math.sin(t * 2.5)) * 0.05;
       bird.rotation.y = -1.2 + Math.sin(t * 0.7) * 0.5;
       state.flag = Math.max(0, state.flag - dt * 0.3);

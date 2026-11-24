@@ -215,7 +215,8 @@ export function makeCat() {
 }
 
 // Where Mishmish likes to be. Local interior coordinates. hop: the floor point she jumps up from.
-export function catBrain(cat, spots, { corridorZ = 2.3, api, homeSound }) {
+// route(sx, sz, tx, tz) -> floor waypoints between two points (through the doors), optional.
+export function catBrain(cat, spots, { corridorZ = 2.3, api, route = null }) {
   const st = {
     x: spots[0].x,
     z: spots[0].z,
@@ -242,7 +243,8 @@ export function catBrain(cat, spots, { corridorZ = 2.3, api, homeSound }) {
     const sz = path.length ? path[0].z : st.z;
     const ax = spot.hop ? spot.hop.x : spot.x;
     const az = spot.hop ? spot.hop.z : spot.z;
-    if (Math.abs(sx - ax) > 0.3 || Math.abs(sz - az) > 2.5) {
+    if (route) for (const w of route(sx, sz, ax, az)) path.push({ x: w.x, z: w.z, y: 0 });
+    else if (Math.abs(sx - ax) > 0.3 || Math.abs(sz - az) > 2.5) {
       path.push({ x: sx, z: corridorZ, y: 0 });
       path.push({ x: ax, z: corridorZ, y: 0 });
     }
@@ -373,7 +375,7 @@ export function catBrain(cat, spots, { corridorZ = 2.3, api, homeSound }) {
             st.path.shift();
           } else if (d < 0.05) st.path.shift();
           else {
-            const sp = Math.min(d, (st.hold ? 1.8 : 1.0) * dt);
+            const sp = Math.min(d, (st.hold ? 1.8 : st.path.length > 2 ? 1.5 : 1.0) * dt);
             st.x += (dx / d) * sp;
             st.z += (dz / d) * sp;
             st.yaw = dampAngle(st.yaw, Math.atan2(dx, dz), 8, dt);

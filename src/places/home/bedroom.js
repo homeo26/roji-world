@@ -1,10 +1,13 @@
-import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, heartGeo, starGeo, pillowGeo, sprite, smooth, bake, FONT, roundRect } from './kit.js';
+import { THREE, mat, umat, mesh, box, rbox, cyl, sph, tor, at, rot, canvasTexture, heartGeo, starGeo, pillowGeo, sprite, smooth, bake, FONT, roundRect, pattern, texMat } from './kit.js';
 import { makeQuilt, quiltTexture } from './quilt.js';
 import { setupGifts } from './gift.js';
-import { damp } from '../../util.js';
+import { makeYap } from './yap.js';
+import { damp, easeInOut } from '../../util.js';
 
 // Main bedroom: the big bed with a thick quilt, the wardrobe, the empty crib with a star mobile,
-// and the gift shelf. Sleep, story time, look under Roji's pillow.
+// the gift shelf and a dresser. Sleep (Homama tucks Roji in, and some nights brings her a hot water
+// bottle), story time, a foot rub when Roji is tired, a pillow fight, yap time on the bed, and the
+// gift under Roji's pillow. Built in its own coordinates (back wall at ZB).
 
 const BX = 1.4; // bed centre x
 const MT = 0.63; // mattress top
@@ -92,7 +95,7 @@ export function buildBedroom(R) {
   const { add, L, api } = R;
   const ZB = L.ZB;
   const P = Math.PI;
-  const st = { roji: 0, homama: 0, sitter: 0, doors: 0, doorsTarget: 0, doorT: 0, mobile: 0, story: 0, line: 0 };
+  const st = { roji: 0, homama: 0, bottle: 0, cover: 1, sitter: 0, doors: 0, doorsTarget: 0, doorT: 0, mobile: 0, story: 0, line: 0, care: null, mass: null, pf: null };
   const wood = mat('#d9b38c', { rough: 0.75 });
   const white = mat('#ffffff', { rough: 0.6 });
 
@@ -157,12 +160,22 @@ export function buildBedroom(R) {
         const prof = d < 0 ? 0.13 * smooth(-0.24, 0, d) : 0.13 + 0.33 * smooth(0.0, 0.11, d) + 0.04 * smooth(0.3, 0.55, d);
         b = Math.max(b, k * lat * prof);
       }
+      // The hot water bottle tucked in next to Roji
+      if (st.bottle > 0) {
+        const bx2 = x + 0.12;
+        const bz2 = z - (LIE_Z - QZ - 0.62);
+        const rr = Math.hypot(bx2 / 0.16, bz2 / 0.2);
+        if (rr < 1) b = Math.max(b, st.bottle * (0.09 + 0.07 * (1 - rr * rr)));
+      }
       return b;
     },
   });
-  quilt.group.position.set(BX, 0, QZ);
-  add(quilt.group);
-  R.dyn(quilt.group);
+  // The quilt hangs from a pivot at the foot of the bed, so it can be pulled up over Roji
+  const qPivot = R.dyn(new THREE.Group());
+  qPivot.position.set(BX, 0, FOOT);
+  quilt.group.position.set(0, 0, QZ - FOOT);
+  qPivot.add(quilt.group);
+  add(qPivot);
 
   // Nightstands: a lamp on Roji's side, a star night light on Homama's
   const lampShade = umat('#fff1c9', { emissive: '#ffc977', ei: 0.6, rough: 0.6, side: THREE.DoubleSide });
@@ -219,8 +232,8 @@ export function buildBedroom(R) {
     const x = WX - 0.55 + i * 0.18;
     add(rot(at(tor(0.07, 0.008, '#c9a27a', undefined, P, 4, 10), x, 1.83, ZB + 0.32), 0, P / 2, 0));
     if (k === 'tee') {
-      const tee = add(at(rbox(0.06, 0.4, 0.34, c, 0.02), x, 1.58, ZB + 0.32));
-      tee.add(at(rbox(0.05, 0.1, 0.5, c, 0.02), 0, 0.14, 0));
+      add(at(rbox(0.06, 0.4, 0.34, c, 0.02), x, 1.58, ZB + 0.32));
+      add(at(rbox(0.05, 0.1, 0.5, c, 0.02), x, 1.72, ZB + 0.32));
     } else {
       const len = k === 'coat' ? 0.8 : 0.62;
       add(at(mesh(new THREE.CylinderGeometry(0.07, 0.17, len, 14).scale(0.35, 1, 1), mat(c, { rough: 0.8 })), x, 1.8 - len / 2, ZB + 0.32));
@@ -270,11 +283,81 @@ export function buildBedroom(R) {
     const z = Math.sin(a) * 0.22;
     mobile.add(at(cyl(0.003, 0.003, 0.22, '#ffffff', 3), x, -0.11, z));
     const geo = k === 'heart' ? heartGeo(0.1, 0.025) : k === 'moon' ? new THREE.TorusGeometry(0.05, 0.02, 6, 12, P * 1.3) : starGeo(0.06, 0.025, 0.025);
-    mobile.add(at(mesh(geo, mat(c, { emissive: c, ei: 0.25 })), x, -0.26, z));
+    mobile.add(at(mesh(geo, mat(c, { rough: 0.5 })), x, -0.26, z));
   });
   add(bake(mobile));
   R.col({ type: 'box', x: CX, z: -4.0, hw: 0.6, hd: 0.36 });
   R.windowAt(CX, 2.25, 0.9, 0.75, '#ffd6e6');
+
+  // Roji's vanity table by the wall: an oval mirror with a little note tucked in, perfume and lipstick
+  const VX = -2.1;
+  const VZ = 0.15;
+  add(at(rbox(0.5, 0.05, 1.05, '#fbe3d3', 0.02), VX, 0.72, VZ));
+  for (const dz of [-0.46, 0.46]) for (const dx of [-0.2, 0.2]) add(at(cyl(0.022, 0.018, 0.7, '#f7d9c4', 6), VX + dx, 0.35, VZ + dz));
+  add(at(rbox(0.46, 0.12, 0.98, '#f7d9c4', 0.02), VX, 0.64, VZ));
+  add(at(sph(0.022, '#f4c24f', { metal: 0.5 }, 8), VX + 0.24, 0.64, VZ));
+  R.col({ type: 'box', x: VX, z: VZ, hw: 0.26, hd: 0.54, h: 0.75 });
+  const mirror = new THREE.Group();
+  mirror.add(at(tor(0.32, 0.035, '#f4c24f', { metal: 0.4, rough: 0.4 }, P * 2, 8, 28), 0, 0, 0));
+  mirror.add(at(mesh(new THREE.CircleGeometry(0.32, 28), mat('#dcf0f7', { rough: 0.15 })), 0, 0, -0.005));
+  mirror.children[0].scale.set(0.8, 1, 1);
+  mirror.children[1].scale.set(0.8, 1, 1);
+  const vnote = (ctx, w, h) => {
+    ctx.fillStyle = '#ffd6e0';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#7a2e3a';
+    ctx.font = `600 15px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('So pretty!', w / 2, 30);
+    ctx.fillText('- H', w / 2, 54);
+  };
+  mirror.add(rot(at(R.atlas.panel(0.1, 0.09, 96, 72, vnote), 0.2, -0.2, 0.01), 0, 0, -0.2));
+  mirror.position.set(-2.32, 1.35, VZ);
+  mirror.rotation.y = P / 2;
+  add(mirror);
+  add(at(cyl(0.035, 0.045, 0.12, mat('#ffc2e0', { rough: 0.2 }), 10), VX - 0.05, 0.81, VZ - 0.3));
+  add(at(sph(0.03, '#ffffff', { rough: 0.2 }, 8), VX - 0.05, 0.9, VZ - 0.3));
+  add(at(cyl(0.015, 0.015, 0.08, '#ef3b5d', 8), VX + 0.08, 0.79, VZ - 0.18));
+  add(at(rbox(0.12, 0.07, 0.1, '#c7a6ff', 0.02), VX, 0.785, VZ + 0.3));
+  add(at(mesh(heartGeo(0.05, 0.01), mat('#ffffff')), VX + 0.05, 0.79, VZ + 0.3)).rotation.y = -P / 2;
+  // A little cushioned stool
+  add(at(cyl(0.2, 0.18, 0.42, '#f6cdb8', 14), VX + 0.62, 0.21, VZ));
+  add(at(cyl(0.21, 0.21, 0.08, '#ff9eb5', 14), VX + 0.62, 0.45, VZ));
+  R.col({ type: 'circle', x: VX + 0.62, z: VZ, r: 0.22, h: 0.49 });
+
+  // Dresser against the side wall, with a photo of the two of them and a tiny lamp
+  add(at(rbox(0.46, 0.8, 0.95, '#f7d9c4', 0.03), 6.25, 0.4, -3.3));
+  for (let k = 0; k < 3; k++) {
+    add(at(rbox(0.02, 0.2, 0.82, '#fbe3d3', 0.02), 6.01, 0.16 + k * 0.24, -3.3));
+    add(at(sph(0.025, '#f4c24f', { metal: 0.5 }, 8), 5.99, 0.16 + k * 0.24, -3.3));
+  }
+  R.col({ type: 'box', x: 6.25, z: -3.3, hw: 0.25, hd: 0.5, h: 0.8 });
+  add(at(cyl(0.13, 0.11, 0.08, '#d9b38c', 12), 6.25, 0.84, -3.55));
+  const couple = (ctx, w, h) => {
+    ctx.fillStyle = '#ffe9f0';
+    ctx.fillRect(0, 0, w, h);
+    for (const [x, c, hair] of [[w * 0.36, '#ef5b6f', '#4a2a1a'], [w * 0.64, '#3f7bf0', '#1d130f']]) {
+      ctx.fillStyle = c;
+      ctx.fillRect(x - 12, h * 0.6, 24, h * 0.3);
+      ctx.fillStyle = '#ffd9c2';
+      ctx.beginPath();
+      ctx.arc(x, h * 0.48, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = hair;
+      ctx.beginPath();
+      ctx.arc(x, h * 0.45, 14.5, Math.PI, 0);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ff6b8a';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, h * 0.32);
+    ctx.bezierCurveTo(w / 2 - 12, h * 0.24, w / 2 - 8, h * 0.14, w / 2, h * 0.2);
+    ctx.bezierCurveTo(w / 2 + 8, h * 0.14, w / 2 + 12, h * 0.24, w / 2, h * 0.32);
+    ctx.fill();
+  };
+  add(rot(at(rbox(0.04, 0.3, 0.24, '#f4c24f', 0.01), 6.28, 0.97, -3.02), 0, 0, 0.12));
+  add(rot(at(R.atlas.panel(0.19, 0.25, 96, 128, couple), 6.255, 0.97, -3.02), 0, -P / 2, 0.12));
+  add(at(cyl(0.06, 0.07, 0.04, '#c7a6ff', 10), 6.25, 0.82, -2.95));
 
   // ---------------------------------------------------------------- rug, slippers, wall art, star garland
   const rugTex = (ctx, w, h) => {
@@ -339,16 +422,152 @@ export function buildBedroom(R) {
 
   // ---------------------------------------------------------------- activities
   const lie = (who, s) => ({ who, x: BX + s * 0.55, z: LIE_Z, y: LIE_Y, yaw: 0, rot: [LIE, -s * 0.25, 0], pose: 'sleep' });
+  const SIDE_R = { x: BX - 1.36, z: -2.78 }; // beside Roji's side of the bed
+  const SIDE_H = { x: BX + 1.36, z: -2.78 };
+  const FOOTWAY = -1.4; // walking round the foot of the bed
+  const DRESSER = { x: 5.62, z: -3.3 };
+
+  // The hot water bottle in its knitted cover, kept in a basket on the dresser
+  const knit = pattern(64, 64, '#ef6f86', (ctx) => {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      for (let y = 0; y <= 64; y += 8) ctx.lineTo(i * 16 + 8 + (y % 16 ? 3 : -3), y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ffd6e0';
+    ctx.fillRect(0, 0, 64, 6);
+  });
+  knit.repeat.set(2, 2);
+  const bottle = new THREE.Group();
+  bottle.add(at(rbox(0.22, 0.3, 0.08, texMat(knit, { rough: 1 }), 0.04), 0, 0.15, 0));
+  bottle.add(at(cyl(0.035, 0.04, 0.06, '#ef6f86', 10), 0, 0.33, 0));
+  bottle.add(at(cyl(0.03, 0.03, 0.04, '#ffd166', 10), 0, 0.38, 0));
+  bottle.add(at(mesh(heartGeo(0.08, 0.015), mat('#ffffff')), 0, 0.15, 0.045));
+  bake(bottle);
+  const bottleHome = { x: 6.25, y: 0.86, z: -3.55 };
+  const restBottle = () => {
+    bottle.removeFromParent();
+    bottle.position.set(bottleHome.x, bottleHome.y, bottleHome.z);
+    bottle.rotation.set(0, -P / 2, -0.25);
+    bottle.scale.setScalar(1);
+    add(bottle);
+  };
+  R.dyn(bottle);
+  restBottle();
+
+  // A small script runner: walk through points, wait, do things, one step after another
+  const runSteps = (who, steps, dt) => {
+    const s0 = steps[0];
+    if (!s0) return true;
+    if (s0.walk) {
+      if (R.walkTo(who, s0.walk[0].x, s0.walk[0].z, dt, s0.speed || 1.9)) s0.walk.shift();
+      if (!s0.walk.length) steps.shift();
+    } else if (s0.wait !== undefined) {
+      s0.wait -= dt;
+      if (s0.wait <= 0) steps.shift();
+    } else {
+      steps.shift();
+      s0.do?.();
+    }
+    return !steps.length;
+  };
+
   function sleep(a) {
+    const care = { t: 0, steps: [], bottle: Math.random() < 0.45, kiss: Math.random() < 0.4, lying: false, cover: 0 };
+    st.care = care;
+    st.cover = 0;
+    st.roji = 0;
+    st.bottle = 0;
+    quilt.setK(1, true);
     const spec = R.start('sleep', {
       label: 'Wake up',
-      seats: [lie('roji', -1), lie('homama', 1)],
-      focus: { x: BX, z: -3.2, y: 0.9, zoom: 0.55 },
-      night: 1,
+      seats: [lie('roji', -1), { who: 'homama', x: SIDE_R.x, z: SIDE_R.z, yaw: P / 2, pose: 'stand' }],
+      focus: { x: BX + 1.0, z: -2.9, y: 0.9, zoom: 0.66 },
+      night: 0.7,
       music: 0.35,
       exit: { x: BX - 0.4, z: -1.2 },
+      update(dt) {
+        care.t += dt;
+        const h = a.homama;
+        // He pulls the quilt up over her first
+        if (care.t < 1.7) {
+          h.kid.hands = 'carry';
+          st.cover = easeInOut(Math.min(1, Math.max(0, (care.t - 0.3) / 1.2)));
+          h.kid.body.rotation.x += 0.25 * Math.sin(Math.min(1, care.t / 1.7) * P);
+          return;
+        }
+        if (!care.started) {
+          care.started = true;
+          st.cover = 1;
+          h.kid.hands = null;
+          a.toast(care.bottle ? 'Homama pulls the quilt up over Roji... then tiptoes off for something.' : 'Homama pulls the quilt up over Roji, nice and cosy.', 3000);
+          const s = care.steps;
+          if (care.kiss) {
+            s.push({ walk: [{ x: SIDE_R.x, z: -3.4 }], speed: 1.2 });
+            s.push({ do: () => (R.place(h, SIDE_R.x, -3.4, { yaw: P / 2 }), a.emote('homama', 'kiss'), R.later(0.8, () => a.fx.heartsAt(R.headPos(a.roji), 3))) });
+            s.push({ wait: 1.7 });
+          }
+          if (care.bottle) {
+            s.push({ walk: [{ x: SIDE_R.x, z: FOOTWAY }, { x: DRESSER.x, z: FOOTWAY }, { x: DRESSER.x, z: DRESSER.z }] });
+            s.push({ do: () => R.place(h, DRESSER.x, DRESSER.z, { yaw: P / 2 }) });
+            s.push({ wait: 0.4 });
+            s.push({
+              do: () => {
+                bottle.removeFromParent();
+                bottle.position.set(0, -0.12, 0.05);
+                bottle.rotation.set(0, 0, 0);
+                a.carry('homama', bottle);
+                R.sound((s2, t0) => s2.tone(520, t0, 0.2, { type: 'sine', gain: 0.03, slideTo: 640 }));
+              },
+            });
+            s.push({ wait: 0.5 });
+            s.push({ walk: [{ x: DRESSER.x, z: FOOTWAY }, { x: SIDE_R.x, z: FOOTWAY }, { x: SIDE_R.x, z: SIDE_R.z }] });
+            s.push({ do: () => R.place(h, SIDE_R.x, SIDE_R.z, { yaw: P / 2 }) });
+            s.push({
+              do: () => {
+                a.carry('homama', null);
+                bottle.position.set(BX - 0.12, MT + 0.12, LIE_Z - 0.62);
+                bottle.rotation.set(-P / 2 + 0.3, 0, 0);
+                add(bottle);
+                const b0 = bottle.position.clone();
+                R.tween(0.8, (k) => {
+                  bottle.position.set(b0.x, b0.y - k * 0.1, b0.z);
+                  bottle.scale.setScalar(1 - k * 0.6);
+                  st.bottle = k;
+                }, () => {
+                  bottle.removeFromParent();
+                  st.bottle = 1;
+                });
+                a.fx.heartsAt(a.world(BX - 0.12, LIE_Z - 0.6, 1.0), 3);
+                a.toast('Homama tucks a warm hot water bottle in next to Roji. <b>Roji:</b> Mmm, so warm.', 3600);
+              },
+            });
+            s.push({ wait: 1.2 });
+          }
+          s.push({ walk: [{ x: SIDE_R.x, z: FOOTWAY }, { x: SIDE_H.x, z: FOOTWAY }, { x: SIDE_H.x, z: SIDE_H.z }] });
+          s.push({
+            do: () => {
+              a.seat('homama', lie('homama', 1));
+              care.lying = true;
+              a.setNight(1);
+              R.light.intensity = 1.4;
+              a.focus({ x: BX, z: -3.2, y: 0.9, zoom: 0.55 });
+              a.toast('Sweet dreams...', 2400);
+            },
+          });
+        }
+        if (!care.lying) runSteps(h, care.steps, dt);
+      },
       onEnd(silent) {
         R.cat.release();
+        st.care = null;
+        st.cover = 1;
+        a.carry('homama', null);
+        restBottle();
+        R.later(0.4, () => (st.bottle = 0));
+        R.rest?.();
         if (silent) return;
         a.toast('Good morning!', 2400);
         R.sound((s, t0) => {
@@ -364,8 +583,181 @@ export function buildBedroom(R) {
     R.light.color.set('#ffc98a');
     R.light.intensity = 2.2;
     R.cat.goTo('bedfoot');
-    a.toast('Sweet dreams...', 2600);
   }
+
+  // ---------------------------------------------------------------- foot rub
+  const MFZ = -2.62; // Roji's feet when she lies on top of the quilt
+  const RUB = [
+    'Homama rubs Roji\'s tired feet, slow and gentle.',
+    '<b>Roji:</b> Ahh... that is the spot.',
+    '<b>Homama:</b> You were on your feet all day. Rest now, my love.',
+    'Roji wiggles her toes happily.',
+    '<b>Roji:</b> I feel brand new. You have magic hands.',
+  ];
+  const LULLABY = [72, 76, 79, 76, 74, 77, 81, 77, 72, 76, 79, 84, 81, 79, 76, 74];
+  function massage(a) {
+    st.mass = { t: 0, line: -1, ahh: 2.2, note: 0 };
+    const spec = R.start('massage', {
+      label: 'All better',
+      seats: [
+        { who: 'roji', x: BX - 0.3, z: -2.4, y: 0.68, yaw: 0, rot: [LIE, 0.1, 0], pose: 'sleep' },
+        { who: 'homama', x: BX + 0.24, z: -2.26, y: MT - 0.3, yaw: -P / 2 + 0.1, pose: 'sit', hands: 'carry' },
+      ],
+      focus: { x: BX - 0.1, z: -3.1, y: 0.75, zoom: 0.52 },
+      night: 0.55,
+      music: 0.2,
+      exit: { x: BX - 0.6, z: -1.2 },
+      update(dt, t) {
+        const m = st.mass;
+        m.t += dt;
+        const r = a.roji.kid;
+        const h = a.homama.kid;
+        // Toes wiggle, hands rub
+        r.legs[0].rotation.x += Math.sin(t * 7) * 0.12;
+        r.legs[1].rotation.x += Math.sin(t * 7 + 1.8) * 0.12;
+        r.legs[0].rotation.z += Math.sin(t * 5) * 0.06;
+        h.arms[0].rotation.x = -1.05 + Math.sin(t * 5) * 0.16;
+        h.arms[1].rotation.x = -1.05 + Math.sin(t * 5 + P) * 0.16;
+        h.body.rotation.x += 0.16;
+        h.head.rotation.x += 0.12;
+        const n = Math.floor(m.t / 4.2);
+        if (n !== m.line && n < RUB.length) {
+          m.line = n;
+          a.toast(RUB[n], 3600);
+        }
+        m.ahh -= dt;
+        if (m.ahh <= 0) {
+          m.ahh = 3.1;
+          const k = Math.floor(m.t / 3.1) % 3;
+          R.talk.say(a.roji, k === 2 ? 'hearts' : 'text', { text: k ? 'Mmm...' : 'Ahh...', dur: 2.2 });
+          a.fx.heartsAt(R.headPos(a.roji), 2);
+          R.sound((s, t0) => s.tone(330, t0, 0.6, { type: 'sine', gain: 0.02, slideTo: 262 }));
+        }
+        m.note -= dt;
+        if (m.note <= 0) {
+          m.note = 0.85;
+          m.i = ((m.i || 0) + 1) % LULLABY.length;
+          const f = 440 * Math.pow(2, (LULLABY[m.i] - 69) / 12);
+          R.sound((s, t0) => s.tone(f, t0, 0.9, { type: 'sine', gain: 0.018, attack: 0.08 }));
+        }
+      },
+      onEnd(silent) {
+        st.mass = null;
+        R.cat.release();
+        R.talk.clear();
+        R.rest?.();
+        if (!silent) {
+          a.toast('Roji feels so much better.', 2200);
+          R.later(0.3, () => a.emote('roji', 'heart'));
+        }
+      },
+    });
+    if (!spec) return;
+    R.light.position.set(BX - 1.55, 1.2, ZB + 0.6);
+    R.light.color.set('#ffc98a');
+    R.light.intensity = 1.8;
+    R.cat.goTo('rug');
+  }
+
+  // ---------------------------------------------------------------- pillow fight
+  const pillowFor = (c) => {
+    const g = new THREE.Group();
+    const m = mesh(pg, mat(c, { rough: 0.9 }));
+    m.scale.setScalar(0.6);
+    m.rotation.x = -0.2;
+    g.add(m);
+    g.position.set(0, 0.08, 0.06);
+    return g;
+  };
+  const fightPillows = { roji: pillowFor('#fff0f5'), homama: pillowFor('#eef6ff') };
+  function pillowFight(a) {
+    st.pf = { t: 0, next: 1.0, hits: 0, turn: Math.random() < 0.5 ? 0 : 1, swing: 0, flop: false };
+    const spec = R.start('pillow', {
+      label: 'Stop',
+      seats: [
+        { who: 'roji', x: BX - 0.42, z: -3.05, y: MT, yaw: P / 2, pose: 'stand' },
+        { who: 'homama', x: BX + 0.42, z: -3.05, y: MT, yaw: -P / 2, pose: 'stand' },
+      ],
+      focus: { x: BX, z: -3.0, y: 1.2, zoom: 0.55 },
+      music: 0.7,
+      exit: { x: BX - 0.4, z: -1.2 },
+      update(dt, t) {
+        const f = st.pf;
+        f.t += dt;
+        if (f.flop) return;
+        const kids = [a.roji, a.homama];
+        kids.forEach((k, i) => {
+          const hop = Math.abs(Math.sin(t * 5.2 + i * 1.3)) * 0.22;
+          R.place(k, BX + (i ? 0.42 : -0.42), -3.05, { y: MT + hop, yaw: i ? -P / 2 : P / 2 });
+          if (hop < 0.02) k.kid.squash = 0.86;
+        });
+        // Swing!
+        f.next -= dt;
+        if (f.next <= 0) {
+          f.next = 0.8 + Math.random() * 0.5;
+          f.turn = 1 - f.turn;
+          f.swing = 0.35;
+          const hitter = kids[f.turn];
+          const target = kids[1 - f.turn];
+          target.kid.squash = 0.72;
+          f.hits++;
+          a.fx.burst(R.headPos(target), ['#ffffff', '#fff0f5', '#ffd6e0', '#eef6ff'], 16);
+          R.sound((s, t0) => s.tone(180 + Math.random() * 60, t0, 0.12, { type: 'triangle', gain: 0.06, slideTo: 90 }));
+          if (f.hits % 3 === 0) R.talk.say(hitter, 'text', { text: hitter === a.roji ? 'Got you!' : 'Haha!', dur: 1.2 });
+          if (f.hits === 4) a.toast('<b>Homama:</b> Not the hair! Not the hair!', 2200);
+        }
+        if (f.swing > 0) {
+          f.swing -= dt;
+          const hp = kids[f.turn] === a.roji ? fightPillows.roji : fightPillows.homama;
+          hp.rotation.x = -Math.sin((1 - f.swing / 0.35) * P) * 1.4;
+        }
+        if (f.t > 9) {
+          f.flop = true;
+          a.carry('roji', null);
+          a.carry('homama', null);
+          a.seat('roji', { ...lie('roji', -1), y: 0.68, z: MFZ - 0.25 });
+          a.seat('homama', { ...lie('homama', 1), y: 0.68, z: MFZ - 0.25 });
+          pillows.roji.visible = true;
+          pillows.homama.visible = true;
+          a.fx.burst(a.world(BX, -3.2, 1.4), ['#ffffff', '#ffd6e0', '#eef6ff'], 40);
+          a.fx.heartsAt(a.world(BX, -3.4, 1.3), 5);
+          a.toast(`They flop onto the bed, giggling. <b>${a.playerId === 'roji' ? 'Roji' : 'Homama'} wins!</b> ...probably.`, 3200);
+          R.sound((s, t0) => [0, 0.14, 0.28, 0.42].forEach((d, i) => s.tone(700 - i * 60, t0 + d, 0.1, { type: 'triangle', gain: 0.04 })));
+          R.later(3.2, () => R.is('pillow') && a.endActivity());
+        }
+      },
+      onEnd() {
+        st.pf = null;
+        R.cat.release();
+        a.carry('roji', null);
+        a.carry('homama', null);
+        pillows.roji.visible = true;
+        pillows.homama.visible = true;
+      },
+    });
+    if (!spec) return;
+    pillows.roji.visible = false;
+    pillows.homama.visible = false;
+    for (const h of Object.values(fightPillows)) h.rotation.x = 0;
+    a.carry('roji', fightPillows.roji);
+    a.carry('homama', fightPillows.homama);
+    R.cat.goTo('rug');
+    a.toast('Pillow fight! Feathers everywhere!', 2200);
+  }
+
+  // ---------------------------------------------------------------- yap time on the bed
+  const yap = makeYap(R, {
+    sit: {
+      roji: { x: BX - 0.42, z: FOOT - 0.18, y: MT - 0.33, yaw: 0.55, leanZ: -0.16 },
+      homama: { x: BX + 0.42, z: FOOT - 0.18, y: MT - 0.33, yaw: -0.55, leanZ: 0.12 },
+    },
+    stand: {
+      roji: { x: BX - 0.28, z: -1.25, yaw: P / 2 },
+      homama: { x: BX + 0.28, z: -1.25, yaw: -P / 2 },
+    },
+    focus: { x: BX, z: -1.8, y: 1.0, zoom: 0.52 },
+    exit: { x: BX - 0.6, z: -0.9 },
+  });
 
   const STORY = [
     'Once upon a time, on a little island, there lived a kind doctor named Roji...',
@@ -455,9 +847,19 @@ export function buildBedroom(R) {
         R.later(0.45, () => a.openWardrobe());
       },
     },
-    { x: BX, z: -1.25, r: 1.3, label: 'Go to sleep', icon: 'moon', act: sleep },
-    { x: BX + 1.55, z: -2.2, r: 1.2, label: 'Story time in bed', icon: 'book', act: story },
-    { x: CX, z: -2.95, r: 1.2, label: 'Guess: girl or boy?', icon: 'baby', act: guess },
+    { x: BX, z: -1.2, r: 1.15, label: 'Go to sleep', icon: 'moon', act: sleep },
+    { x: BX + 1.55, z: -2.2, r: 1.1, label: 'Story time in bed', icon: 'book', act: story },
+    { x: CX, z: -2.95, r: 1.1, label: 'Guess: girl or boy?', icon: 'baby', act: guess },
+    {
+      x: BX - 1.4,
+      z: -0.9,
+      r: 1.05,
+      label: (a) => (R.tired?.(a) ? (a.playerId === 'roji' ? 'So tired... ask for a foot rub' : 'Roji is tired: rub her feet') : a.playerId === 'roji' ? 'Ask Homama for a foot rub' : "Rub Roji's feet"),
+      icon: 'heart',
+      act: massage,
+    },
+    { x: BX + 1.5, z: -0.6, r: 1.05, label: yap.label, icon: 'chat', act: (a) => yap.begin(a) },
+    { x: BX, z: 0.3, r: 1.05, label: 'Pillow fight!', icon: 'pillow', act: pillowFight },
   );
 
   setupGifts(R, { pillow: pillows.roji, under: { x: BX - 0.55, y: MT + 0.02, z: -4.0 }, slots, hot: { x: -0.15, z: -2.75 } });
@@ -466,15 +868,19 @@ export function buildBedroom(R) {
   R.upd((dt, t, a) => {
     const sleeping = R.is('sleep');
     const story = R.is('story');
-    const kr = sleeping || story ? 1 : 0;
-    const kh = sleeping ? 1 : 0;
-    const nr = damp(st.roji, kr, 12, dt);
+    const kr = sleeping ? st.cover : story ? 1 : 0;
+    const kh = sleeping && st.care?.lying ? 1 : 0;
+    const nr = sleeping ? kr : damp(st.roji, kr, 12, dt);
     const nh = damp(st.homama, kh, 12, dt);
-    if (Math.abs(nr - st.roji) > 0.002 || Math.abs(nh - st.homama) > 0.002) {
+    const bk = st.bottle;
+    if (Math.abs(nr - st.roji) > 0.002 || Math.abs(nh - st.homama) > 0.002 || Math.abs(bk - (st.bk ?? 0)) > 0.002) {
       st.roji = Math.abs(nr - kr) < 0.003 ? kr : nr;
       st.homama = Math.abs(nh - kh) < 0.003 ? kh : nh;
+      st.bk = bk;
       quilt.setK(1, true);
     }
+    // Pulled down to the foot until Homama tucks Roji in
+    qPivot.scale.z = sleeping ? 0.42 + 0.58 * st.cover : 1;
     // Wardrobe doors close again when the player walks away
     st.doorT += dt;
     if (st.doorsTarget && st.doorT > 1.5) {
@@ -490,7 +896,7 @@ export function buildBedroom(R) {
     lampShade.emissiveIntensity = sleeping ? 1.1 : 0.6;
     nightStar.emissiveIntensity = story ? 1.6 + Math.sin(t * 2) * 0.3 : sleeping ? 0.9 : 0.4;
     for (const z of zs) {
-      const show = sleeping || (story && z.who === 'roji' && st.line >= STORY.length - 1);
+      const show = (sleeping && (z.who === 'roji' || st.care?.lying)) || (story && z.who === 'roji' && st.line >= STORY.length - 1);
       z.s.visible = show;
       if (!show) continue;
       const k = (t * 0.35 + z.ph) % 1;
@@ -513,5 +919,10 @@ export function buildBedroom(R) {
     st.doorsTarget = 0;
     st.doors = 0;
     book.removeFromParent();
+    st.cover = 1;
+    st.bottle = 0;
+    pillows.roji.visible = true;
+    pillows.homama.visible = true;
+    restBottle();
   });
 }

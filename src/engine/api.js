@@ -14,6 +14,10 @@ export function createApi(g, space) {
   const W = (x, z, y = 0) => new THREE.Vector3(o().x + x, y, o().z + z);
   const toWorldSpec = (s) => (s ? { ...s, x: o().x + (s.x ?? 0), z: o().z + (s.z ?? 0) } : s);
   const api = {
+    // The shared game object (partnerBusy, physics, life events) for places that move the partner themselves
+    get game() {
+      return g;
+    },
     THREE,
     space,
     get id() {
