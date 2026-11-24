@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mat, umat, mesh, rng, canvasTexture, roundRect, FONT } from './util.js';
 import { decorateGround } from './engine/ground.js';
-import { PLACES } from './engine/manifest.js';
+import { PLACES, padOf } from './engine/manifest.js';
 
 // Flat strips on the ground (path, roads, the golden trail) overlap at crossings. Instead of tiny height
 // differences, which flicker, they skip the depth write and are drawn in a fixed order on top of the grass.
@@ -517,6 +517,7 @@ export class World {
         side *= -1;
         if (this.distanceToPath(x, z, false) < 2.2) continue;
         if (PLACES.some((pl) => !pl.dev && Math.abs(x - pl.slot[0]) < pl.size[0] / 2 + 0.8 && Math.abs(z - pl.slot[1]) < pl.size[1] / 2 + 0.8)) continue;
+        if (PLACES.some((pl) => !pl.dev && Math.hypot(x - padOf(pl)[0], z - padOf(pl)[1]) < 3.2)) continue;
         const g = new THREE.Group();
         const post = mesh(postGeo, postMat);
         post.position.y = 1.1;
@@ -714,7 +715,7 @@ export class World {
     this.cloudMat = cloudMat;
     const geo = new THREE.IcosahedronGeometry(1, 1);
     const spots = [
-      [-98, 2.5, 8], [-96, 4, -40], [76, 3, 16], [78, 4.5, -30], [-18, 3.5, 35], [14, 4, 34], [-40, 5, -138], [20, 5.5, -138], [40, 3.5, 34], [-62, 3.5, 32], [-98, 4, -100], [78, 4, -96],
+      [-98, 2.5, 8], [-96, 4, -40], [118, 3, 16], [118, 4.5, -30], [-18, 3.5, 35], [14, 4, 34], [-40, 5, -138], [20, 5.5, -138], [40, 3.5, 34], [-62, 3.5, 32], [-98, 4, -100], [118, 4, -96],
     ];
     for (const [x, y, z] of spots) {
       const g = new THREE.Group();
