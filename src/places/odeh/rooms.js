@@ -546,6 +546,7 @@ export function buildRooms(ictx, out) {
   tp.rotation.y = 0.8;
   g.add(tp);
   out.tent = { x: -13.0, z: -5.0 };
+  colliders.push({ type: 'circle', x: -13.0, z: -5.0, r: 0.5 }); // the tent is Sultan-sized: the big kids walk round it
   const horse = new THREE.Group();
   for (const z of [-0.2, 0.2]) {
     const rock = mesh(new THREE.TorusGeometry(0.62, 0.035, 5, 18, 1.6), mat('#c0392b'));

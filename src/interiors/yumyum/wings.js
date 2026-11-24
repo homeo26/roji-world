@@ -121,6 +121,7 @@ export function buildWings(S) {
   }
   // Rose bushes along the west wall's foot
   for (let i = 0; i < 7; i++) leafy(add, r, X0 + 0.45, 0.2, CW + 0.9 + i * 1.45, 5, 1.25);
+  col(X0 + 0.42, CW + 0.9 + 3 * 1.45, 0.42, 3 * 1.45 + 0.4);
   const cut = S.cutWalls[0];
   const cAdd = cut.add;
   for (const q of [-1, 1]) {

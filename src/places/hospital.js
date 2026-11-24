@@ -65,7 +65,7 @@ export default {
     add(at(k.tor(1.55, 0.09, C.coral, Math.PI, undefined, 24), 0, 5.55, 0.16));
     add(at(emblem(k, 1.25), 0, 6.15, 0.2));
     colliders.push({ type: 'box', x: 0, z: -4.0, hw: 7.2, hd: 3.4 });
-    colliders.push({ type: 'box', x: 0, z: -0.1, hw: 2.4, hd: 0.5 });
+    colliders.push({ type: 'box', x: 0, z: -0.04, hw: 2.4, hd: 0.58 });
 
     // Windows
     const glass = util.mat('#cfeeff', { rough: 0.15, emissive: '#bfe6ff', ei: 0.25 });
@@ -189,6 +189,7 @@ export default {
         b.scale.set(1.25, 0.8, 0.9);
         add(at(b, cx + dx, 0.3, -0.25));
       }
+      colliders.push({ type: 'box', x: cx, z: -0.3, hw: 2.72, hd: 0.4 });
     }
 
     // Rooftop: a helipad and a little garden

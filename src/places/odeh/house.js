@@ -422,6 +422,7 @@ export function buildHouse(ctx, out) {
     g.add(ch);
   }
 
-  colliders.push({ type: 'box', x: cx, z: cz, hw: w / 2, hd: d / 2 });
+  // The wall plus what hangs on its front (window boxes, the jasmine, the lantern)
+  colliders.push({ type: 'box', x: cx, z: cz + 0.13, hw: w / 2, hd: d / 2 + 0.13 });
   return out;
 }

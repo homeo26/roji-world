@@ -164,8 +164,7 @@ export class Station {
   }
 
   addCollider(c) {
-    if (c.type === 'box') this.world.addCollider({ ...c, x: c.x + this.origin.x, z: c.z + this.origin.z });
-    else this.world.addCollider({ type: 'circle', r: c.r, x: c.x + this.origin.x, z: c.z + this.origin.z });
+    this.world.addCollider({ ...c, x: c.x + this.origin.x, z: c.z + this.origin.z });
   }
 
   get unlocked() {
@@ -477,6 +476,7 @@ export function buildCinema(st) {
   st.addCollider({ type: 'circle', x: -3.4, z: 1.7, r: 0.7 });
   st.addCollider({ type: 'box', x: 3.3, z: 2.3, hw: 1.0, hd: 0.8 });
   for (const sx of [-1, 1]) for (const z of [1.9, 3.7]) st.addCollider({ type: 'circle', x: sx * 1.05, z, r: 0.12 });
+  for (const sx of [-1, 1]) st.addCollider({ type: 'box', x: sx * 1.05, z: 2.8, hw: 0.04, hd: 0.9 }); // the velvet ropes
 
   // Hearts floating up while Roji is near
   const heartGeo = new THREE.ExtrudeGeometry(heartShape(0.55), { depth: 0.12, bevelEnabled: true, bevelSize: 0.04, bevelThickness: 0.04, bevelSegments: 2 });
@@ -684,6 +684,10 @@ export function buildHorse(st) {
     st.addCollider({ type: 'circle', x: Math.cos(a) * R, z: Math.sin(a) * R, r: 0.2 });
   }
   st.addCollider({ type: 'box', x: 4.4, z: -1.4, hw: 0.9, hd: 0.8 });
+  for (const s of [-1, 1]) st.addCollider({ type: 'circle', x: Math.cos(Math.PI / 2 + s * gap / 2) * R, z: Math.sin(Math.PI / 2 + s * gap / 2) * R, r: 0.12 });
+  // The pony on its walk round the ring is solid too (it nudges kids aside); parked far away while ridden
+  const ponyCol = { type: 'circle', x: st.origin.x, z: st.origin.z, r: 0.55 };
+  st.world.addCollider(ponyCol);
 
   let angle = 0;
   const ringR = 1.95;
@@ -708,13 +712,18 @@ export function buildHorse(st) {
     badgeY: 4.2,
     dynamic: [pony.root],
     update(dt, t, near) {
-      if (ctl.ridden) return;
+      if (ctl.ridden) {
+        ponyCol.x = 1e5;
+        return;
+      }
       const speed = 0.32 + near * 0.55;
       angle += dt * speed;
       const x = Math.cos(angle) * ringR;
       const z = Math.sin(angle) * ringR;
       pony.root.position.set(x, 0, z);
       pony.root.rotation.y = Math.atan2(-Math.sin(angle), Math.cos(angle));
+      ponyCol.x = st.origin.x + x;
+      ponyCol.z = st.origin.z + z;
       const ph = t * (4 + near * 5);
       const amp = 0.35 + near * 0.25;
       pony.legs[0].rotation.x = Math.sin(ph) * amp;
@@ -874,7 +883,8 @@ export function buildFencing(st) {
   const spareMesh = mesh(new THREE.SphereGeometry(0.205, 16, 12, Math.PI / 2 - 0.95, 1.9, 0.5, 1.6), mat('#2a2f3a'));
   at(spareMesh, -3.9, 0.7, -0.5);
   g.add(spare, spareMesh);
-  st.addCollider({ type: 'box', x: -3.6, z: -0.6, hw: 1.0, hd: 0.4 });
+  // The bench sits at an angle: three round seats along it, low enough to hop onto
+  for (const dx of [-0.7, 0, 0.7]) st.addCollider({ type: 'circle', x: -3.6 + dx * Math.cos(0.3), z: -0.6 - dx * Math.sin(0.3), r: 0.3, h: 0.51 });
 
   let lastHit = -1;
   const pose = (f, lunge, guardUp) => {
@@ -1179,6 +1189,7 @@ export function buildClayCafe(st) {
       const sl = cyl(0.04, 0.05, 0.48, '#5a3d2b', 8);
       at(sl, sx, 0.25, sz);
       g.add(seat, sl);
+      st.addCollider({ type: 'circle', x: sx, z: sz, r: 0.24, h: 0.54 });
     }
   };
   table(-1.4, 2.4);
@@ -1251,6 +1262,7 @@ export function buildClayCafe(st) {
   const leaves = sphere(0.38, '#5aa84f', { flat: true }, 8);
   at(leaves, 2.55, 0.75, 1.1);
   g.add(plant, leaves);
+  st.addCollider({ type: 'circle', x: 2.55, z: 1.1, r: 0.32 });
 
   let shape = 0;
   return {

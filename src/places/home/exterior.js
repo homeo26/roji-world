@@ -643,8 +643,8 @@ export function buildExterior(ctx) {
     add(at(sph(rr, LEAF, { rough: 0.85 }, 14), x, rr * 0.75, z));
     add(at(sph(rr * 0.7, LEAF2, { rough: 0.85 }, 12), x + rr * 0.45, rr * 0.55, z + rr * 0.2));
     garden.bed(x - rr, x + rr, z - rr * 0.2, z + rr * 0.9, rr * 0.9, 5, Math.round(x * 10 + z), ['pom', 'rose'], ['#ffffff', '#ff8fb1', '#ffd75e']);
+    colliders.push({ type: 'circle', x: x + rr * 0.15, z: z + rr * 0.2, r: rr * 0.95 });
   }
-  colliders.push({ type: 'circle', x: -7.3, z: 3.4, r: 0.45 }, { type: 'circle', x: 7.3, z: 3.4, r: 0.45 });
   // Wheelbarrow full of flowers
   const wb = new THREE.Group();
   wb.add(rot(at(cyl(0.45, 0.32, 0.36, '#ef5b6f', 14), 0, 0.5, 0), 0, 0, 0));

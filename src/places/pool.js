@@ -362,6 +362,12 @@ export default {
     const stairZ = (i) => TOWER.z + TOWER.pd / 2 + (i - 0.5) * TOWER.stepD;
     for (let i = 1; i <= TOWER.steps; i++) colliders.push({ type: 'box', x: tcx, z: stairZ(i), hw: TOWER.stairW / 2, hd: TOWER.stepD / 2, h: TOWER.H - rise * i });
     colliders.push({ type: 'box', x: (BOARD_TIP + TOWER.x0) / 2, z: TOWER.z, hw: (TOWER.x0 - BOARD_TIP) / 2, hd: 0.31, h: BOARD_TOP });
+    // The handrails (models.js divingTower): along both sides of the stairs, and round the back and the
+    // far side of the platform, so nobody walks off the tower through them
+    const zs = TOWER.pd / 2 + TOWER.steps * TOWER.stepD;
+    for (const sx of [TOWER.pw / 2 - TOWER.stairW / 2 + 0.06, TOWER.pw / 2 + TOWER.stairW / 2 - 0.06]) colliders.push({ type: 'box', x: TOWER.x0 + sx, z: TOWER.z + (TOWER.pd / 2 - 0.1 + zs) / 2, hw: 0.04, hd: (zs - TOWER.pd / 2 + 0.1) / 2 });
+    colliders.push({ type: 'box', x: TOWER.x0 + (0.25 + TOWER.pw - 0.08) / 2, z: TOWER.z - TOWER.pd / 2 + 0.08, hw: (TOWER.pw - 0.33) / 2, hd: 0.04 });
+    colliders.push({ type: 'box', x: TOWER.x0 + TOWER.pw - 0.08, z: TOWER.z - 0.01, hw: 0.04, hd: (TOWER.pd - 0.18) / 2 });
 
     // ---------------------------------------------------------------- slide into the kids' area
     const sld = M.slide({ y0: SLIDE.y0, x0: SLIDE.x0, x1: SLIDE.x1, y1: SLIDE.y1 });

@@ -173,7 +173,7 @@ export function buildExtras(atlas) {
     s.position.set(x + 0.62, 0, z - 0.05);
     s.rotation.y = -0.35;
     add(s);
-    colliders.push({ type: 'circle', x: x + 0.62, z: z - 0.05, r: 0.18 });
+    colliders.push({ type: 'circle', x: x + 0.66, z: z - 0.08, r: 0.28 });
   }
 
   // ------------------------------------------------ treat stall on the feeding deck: acacia, carrots, lettuce

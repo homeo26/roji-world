@@ -301,6 +301,7 @@ export default {
     const barista = ctx.makeKid({ id: 'barista', name: 'Barista', gender: 'girl', skin: '#e3b08e', hair: '#7a4a26', hairstyle: 'buns', outfit: 'overalls', top: '#ffffff', bottom: '#8fd6c6', shoes: '#3b2b3f', accent: COL.sun });
     freezeKid(barista, { pose: 'stand', hands: 'stir' });
     barista.root.position.set(CX + 0.7, 0, CZ - 0.78);
+    colliders.push({ type: 'circle', x: CX + 0.7, z: CZ - 0.78, r: 0.3 });
     add(barista.root);
     const bApron = makeApron(COL.terra, '#fff7ee');
     bApron.scale.setScalar(0.9);
@@ -353,6 +354,7 @@ export default {
     for (const [x, c] of [[-6.8, COL.sun], [-6.1, COL.mint], [-5.4, '#ffffff']]) add(rot(at(rbox(0.42, 0.36, 0.14, c, 0.07), x, 0.7, ZB + 0.16), -0.2, 0, 0));
     col(-6.1, ZB + 0.33, 1.15, 0.32, 0.51);
     add(at(makePlant(0.8, COL.sun, 'tall'), -7.65, 0, ZB + 0.35));
+    colliders.push({ type: 'circle', x: -7.65, z: ZB + 0.35, r: 0.18 });
     // Tables
     const steamFrom = [];
     const table = (x, z, seats, decor) => {
@@ -385,6 +387,7 @@ export default {
     });
     add(at(makePlant(1.1, COL.mint, 'tall'), cx0 + 0.5, 0, -1.2));
     add(at(makePlant(0.9, COL.terra), cx0 + 0.5, 0, ZB + 0.6));
+    colliders.push({ type: 'circle', x: cx0 + 0.5, z: -1.2, r: 0.22 }, { type: 'circle', x: cx0 + 0.5, z: ZB + 0.6, r: 0.22 });
     bunting(cx0 + 0.3, cx1 - 0.3, H - 0.25, ZB + 0.2);
     lamp(-7.3, 2.0, COL.terra);
     lamp(-4.9, 2.0, COL.terra);
@@ -547,6 +550,7 @@ export default {
     }
     col(RX, RZ, 0.8, 0.27);
     add(at(makePlant(1.0, COL.cream2, 'round'), 6.0, 0, 3.6));
+    colliders.push({ type: 'circle', x: 6.0, z: 3.6, r: 0.24 });
     bunting(ROOMS.studio[0] + 0.3, SHELF.x - 1.6, H - 0.25, ZB + 0.2);
     bunting(SHELF.x + 1.6, ROOMS.studio[1] - 0.3, H - 0.25, ZB + 0.2);
     lamp(-1.65, 2.05, COL.terra);
@@ -653,6 +657,7 @@ export default {
     add(rot(at(fresh, FX, 0.42, FZ + 0.355), -0.1, 0, 0));
     add(at(makePlant(1.0, COL.terra, 'tall'), ROOMS.kiln[1] - 0.5, 0, 1.9));
     add(at(makePlant(0.8, COL.mint), ROOMS.kiln[0] + 0.6, 0, ZB + 0.5));
+    colliders.push({ type: 'circle', x: ROOMS.kiln[1] - 0.5, z: 1.9, r: 0.22 }, { type: 'circle', x: ROOMS.kiln[0] + 0.6, z: ZB + 0.5, r: 0.2 });
     lamp(KX + 1.3, 1.9, COL.sun);
     fairy(ROOMS.kiln[0] + 0.4, ROOMS.kiln[1] - 0.4, H - 0.28, ZB + 0.16);
 

@@ -81,6 +81,17 @@ export default {
       if (c) c.h = L2;
     };
 
+    // The goat wanders round its stake: a small collider follows it so kids do not walk through it
+    out.colliders.push({ type: 'circle', x: out.goat.pos.x, z: out.goat.pos.z, r: 0.36, tag: 'odeh-goat' });
+    let goatCol = null;
+    const moveGoat = () => {
+      goatCol ||= api.space.colliders?.find((c) => c.tag === 'odeh-goat') || null;
+      if (!goatCol) return;
+      const O = api.space.origin;
+      goatCol.x = O.x + out.goat.pos.x;
+      goatCol.z = O.z + out.goat.pos.z;
+    };
+
     let wasNear = true;
     return {
       group: g,
@@ -101,6 +112,7 @@ export default {
         out.fire.update(t, F.night());
         out.camel.update(dt, t);
         out.goat.update(dt, t);
+        moveGoat();
         out.well.update(dt);
         haloMat.opacity = 0.12 + F.night() * 0.75;
         outside.update(dt, t);

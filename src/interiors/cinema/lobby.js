@@ -192,6 +192,7 @@ export function buildLobby(R) {
   helper.head.add(hat);
   freeze(helper, { pose: 'stand', hands: 'hold' });
   helper.root.position.set(CX - 0.3, 0.3, ZB + 0.55);
+  col({ type: 'circle', x: CX - 0.3, z: ZB + 0.55, r: 0.3 });
   add(helper.root);
 
   // ---------------------------------------------------------------- ticket booth
@@ -258,6 +259,7 @@ export function buildLobby(R) {
     const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(a[0], 0.84, a[1]), new THREE.Vector3((a[0] + b[0]) / 2, 0.58, a[1]), new THREE.Vector3(b[0], 0.84, b[1]));
     add(mesh(new THREE.TubeGeometry(curve, 12, 0.035, 6), ropeMat));
   }
+  col({ type: 'box', x: (posts[0][0] + posts[2][0]) / 2, z: posts[0][1], hw: (posts[2][0] - posts[0][0]) / 2, hd: 0.04 }); // the rope itself
 
   // ---------------------------------------------------------------- sofa, cart, easel, plants, steps
   const SOFA = { x: -9.6, z: 2.6 };

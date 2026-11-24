@@ -78,9 +78,10 @@ export function hillColliders() {
   for (let i = 0; i < STEPS_B; i++) boxC(-S, S, Z.t2Front - 0.6 * (i + 1), Z.t2Front - 0.6 * i, L1 + STEP * (i + 1));
   // The landing in front of the door is its own piece (see odeh.js: kids coming out of the house)
   boxC(LANDING.x - LANDING.hw, LANDING.x + LANDING.hw, LANDING.z - LANDING.hd, LANDING.z + LANDING.hd, L2, 'odeh-landing');
-  // Sand slopes round the sides and the back: nobody walks into them
-  boxC(-12, T1.x0, Z.back - 1.4, Z.t1Front + 0.4, null);
-  boxC(T1.x1, 12, Z.back - 1.4, Z.t1Front + 0.4, null);
-  boxC(-12, 12, -15, Z.back, null);
+  // Sand slopes round the sides and the back: nobody walks into them. They cover the dunes in
+  // hill.js out to where the sand is ankle high (the dunes reach a little past the footprint).
+  boxC(-13.1, T1.x0, Z.back - 1.95, Z.t1Front + 0.84, null);
+  boxC(T1.x1, 13.1, Z.back - 1.95, Z.t1Front + 2.04, null);
+  boxC(-12.1, 12.1, Z.back - 1.95, Z.back, null);
   return c;
 }
