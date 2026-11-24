@@ -89,6 +89,7 @@ export class Activities {
     if (spec.focus) g.setFocus(spec.focus);
     if (spec.night !== undefined) g.setNight(spec.night);
     if (spec.music !== undefined) g.sound.setMusicLevel(spec.music);
+    g.life?.emit('activity', this.current);
     return this.current;
   }
 
@@ -113,5 +114,6 @@ export class Activities {
     if (c.night !== undefined) g.setNight(0);
     if (c.music !== undefined) g.sound.setMusicLevel(1);
     c.onEnd?.(silent);
+    g.life?.emit('activity-end', c);
   }
 }

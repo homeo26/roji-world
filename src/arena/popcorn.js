@@ -118,7 +118,7 @@ export default {
       bctx.textAlign = 'center';
       bctx.textBaseline = 'middle';
       bctx.fillStyle = '#ffd166';
-      fitText(bctx, 'Moon Bunny starts in', w / 2, h * 0.34, w * 0.8, h * 0.24, 600);
+      fitText(bctx, 'The film starts in', w / 2, h * 0.34, w * 0.8, h * 0.24, 600);
       bctx.fillStyle = sec <= 10 ? '#ff9eb5' : '#fff6d8';
       fitText(bctx, `0:${String(Math.max(0, sec)).padStart(2, '0')}`, w / 2, h * 0.7, w * 0.6, h * 0.38, 700);
       boardTex.needsUpdate = true;

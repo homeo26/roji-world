@@ -27,6 +27,8 @@ export class Spaces {
     this.inside = null;
     this.count = 0;
     this.failed = [];
+    this.npcs = [];
+    this.walkAreas = []; // world rects outside the island shore that kids may walk on (a pier)
   }
 
   buildCtx(space, extra = {}) {
@@ -36,7 +38,13 @@ export class Spaces {
       util,
       FONT: util.FONT,
       sign: makeSign,
-      makeKid: (look) => new Kid(look),
+      // Every extra person a place builds is listed in this.npcs ({ kid, space, look }), so town life
+      // modules can add chats and actions to them (see src/engine/life.js)
+      makeKid: (look) => {
+        const kid = new Kid(look);
+        this.npcs.push({ kid, space, look });
+        return kid;
+      },
       looks: g.looks,
       sound: g.sound,
       fx: g.fx,
@@ -110,6 +118,21 @@ export class Spaces {
     for (const w of inst.water || []) space.water.push({ ...w, x: O.x + w.x, z: O.z + w.z });
     for (const z of inst.zones || []) space.zones.push({ ...z, x: O.x + z.x, z: O.z + z.z });
     for (const h of inst.hotspots || []) space.hotspots.push(this.hot(space, h));
+    if (space.kind === 'place') for (const w of inst.walk || []) this.walkAreas.push({ x: O.x + w.x, z: O.z + w.z, hw: w.hw, hd: w.hd });
+  }
+
+  // Add a hotspot to a space at run time (town life modules). Returns a function that removes it.
+  addHotspot(space, h) {
+    const hs = this.hot(space, h);
+    space.hotspots.push(hs);
+    return () => {
+      const i = space.hotspots.indexOf(hs);
+      if (i >= 0) space.hotspots.splice(i, 1);
+    };
+  }
+
+  onWalkway(x, z, pad = 0) {
+    return this.walkAreas.some((w) => Math.abs(x - w.x) <= w.hw + pad && Math.abs(z - w.z) <= w.hd + pad);
   }
 
   hot(space, h) {
@@ -163,6 +186,7 @@ export class Spaces {
     space.api = createApi(this.g, space);
     const inst = rec.def.build(this.buildCtx(space));
     space.inst = inst;
+    for (const c of inst.cutaway || []) if (!inst.dynamic?.includes(c.object)) (inst.dynamic ||= []).push(c.object);
     this.attach(space, inst);
     const ex = inst.exit || { x: 0, z: (inst.size?.d ?? 10) / 2 - 0.6 };
     space.hotspots.push(this.hot(space, { x: ex.x, z: ex.z, r: 1.3, icon: 'door', label: 'Go outside', act: () => this.exit() }));
@@ -244,9 +268,27 @@ export class Spaces {
     return null;
   }
 
+  // Interiors with rooms behind rooms: a wall listed in `cutaway` ({ object, x, z, hw, low }) sinks to a
+  // low stub while the player is behind it (further from the camera), so the room stays in view.
+  cutaway(space, playerPos, dt) {
+    const list = space.inst.cutaway;
+    if (!list?.length) return;
+    const O = space.origin;
+    const px = playerPos.x - O.x;
+    const pz = playerPos.z - O.z;
+    for (const c of list) {
+      const behind = pz < c.z - 0.2 && Math.abs(px - c.x) < (c.hw ?? 3) + 2.5;
+      const want = behind ? c.low ?? 0.16 : 1;
+      const s = c.object.scale;
+      s.y += (want - s.y) * (1 - Math.exp(-10 * dt));
+      c.object.visible = s.y > 0.02;
+    }
+  }
+
   update(dt, t, playerPos) {
     for (const rec of Object.values(this.interiors)) if (rec.space) rec.space.inst.group.visible = rec.space === this.inside;
     if (this.inside) {
+      this.cutaway(this.inside, playerPos, dt);
       this.inside.inst.update?.(dt, t, this.inside.api);
       return;
     }

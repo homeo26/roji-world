@@ -82,11 +82,12 @@ export class UI {
 
     // Dance and hand-holding dock (desktop) and the touch buttons
     const dock = $('dock');
-    const emoteHtml = Object.entries(EMOTES)
+    const wheel = Object.entries(EMOTES).filter(([, v]) => v.wheel !== false);
+    const emoteHtml = wheel
       .map(([k, v], i) => `<button class="dock-btn" data-emote="${k}" title="${v.name} (${i + 1})" aria-label="${v.name}">${svgIcon(EMOTE_ICONS[k], 20)}<kbd>${i + 1}</kbd></button>`)
       .join('');
     dock.innerHTML = `${emoteHtml}<span class="dock-sep"></span><button class="dock-btn" id="btn-hands" title="Hold hands (H)" aria-label="Hold hands">${svgIcon('hands', 20)}<kbd>H</kbd></button>`;
-    $('emote-wheel').innerHTML = Object.entries(EMOTES)
+    $('emote-wheel').innerHTML = wheel
       .map(([k, v]) => `<button class="wheel-btn" data-emote="${k}">${svgIcon(EMOTE_ICONS[k], 22)}<span>${v.name}</span></button>`)
       .join('');
     for (const el of [dock, $('emote-wheel')]) {
