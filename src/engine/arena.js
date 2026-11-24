@@ -4,7 +4,7 @@ import { Kid } from '../kid.js';
 import { Effects } from '../fx.js';
 import { Car } from '../car.js';
 import { ARENAS } from './manifest.js';
-import { choose } from './choose.js';
+import { choose, closeChoices } from './choose.js';
 
 // Runs a 3D minigame in its own scene, with the same renderer, characters and controls as the town.
 // A game module (src/arena/<id>.js) default-exports:
@@ -383,6 +383,7 @@ export class ArenaHost {
     if (!c) return;
     this.dispose(c);
     this.current = null;
+    closeChoices();
     clearTimeout(this.msgTimer);
     this.$('.a-msg').classList.remove('on');
     this.el.classList.add('hidden');
