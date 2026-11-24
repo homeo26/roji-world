@@ -271,13 +271,13 @@ class People {
     return false;
   }
 
-  freeAt(x, z, space) {
+  freeAt(x, z, space, feet = 0) {
     if (space.kind === 'interior' && space.bounds) {
       const b = space.bounds;
       if (x < b.x0 + 0.4 || x > b.x1 - 0.4 || z < b.z0 + 0.4 || z > b.z1 - 0.2) return false;
     }
     const p = this.v3.set(x, 0, z);
-    this.game.physics.resolve(p, 0.32, this.v2.set(0, 0, 0), { feet: 0 });
+    this.game.physics.resolve(p, 0.32, this.v2.set(0, 0, 0), { feet });
     return Math.hypot(p.x - x, p.z - z) < 0.03;
   }
 
@@ -289,10 +289,10 @@ class People {
       for (const d of [1.0, 1.35, 1.7, 2.05]) {
         const x = rec.pos.x + Math.sin(a) * d;
         const z = rec.pos.z + Math.cos(a) * d;
-        if (!this.freeAt(x, z, rec.space)) continue;
+        if (!this.freeAt(x, z, rec.space, rec.pos.y)) continue;
         if (this.otherHotNear(x, z, 0.8)) continue;
         if (this.list.some((r) => r !== rec && r.off && r.active && Math.hypot(r.pos.x + r.off.x - x, r.pos.z + r.off.z - z) < 0.8)) continue;
-        if (!this.openToward(x, z, rec.space)) continue;
+        if (!this.openToward(x, z, rec.space, rec.pos.y)) continue;
         return new this.THREE.Vector3(Math.sin(a) * d, 0, Math.cos(a) * d);
       }
     }
@@ -300,7 +300,7 @@ class People {
   }
 
   // Can a kid walk up to this spot from the open floor on the camera side? (Not behind a counter.)
-  openToward(x, z, space) {
+  openToward(x, z, space, feet = 0) {
     const b = space.kind === 'interior' ? space.bounds : null;
     for (const a of [0, 0.6, -0.6, 1.2, -1.2]) {
       let ok = true;
@@ -308,7 +308,7 @@ class People {
         const px = x + Math.sin(a) * d;
         const pz = z + Math.cos(a) * d;
         if (b && (pz > b.z1 - 0.3 || px < b.x0 || px > b.x1)) break;
-        ok = this.freeAt(px, pz, { kind: 'place' });
+        ok = this.freeAt(px, pz, { kind: 'place' }, feet);
       }
       if (ok) return true;
     }

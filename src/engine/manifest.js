@@ -18,6 +18,7 @@ export const PLACES = [
   { id: 'ski', module: '../places/ski.js', slot: [-14, -106], size: [56, 30] },
   { id: 'cycling', module: '../places/cycling.js', slot: [46, 10], size: [24, 16] },
   { id: 'picnic', module: '../places/picnic.js', slot: [46, -14], size: [22, 18] },
+  { id: 'odeh', module: '../places/odeh.js', slot: [-71, -45], size: [24, 30] },
   { id: 'harbour', module: '../places/harbour.js', slot: [84, 8], size: [30, 12] },
   { id: 'example', module: '../places/example.js', slot: [0, 0], size: [14, 10], dev: true },
 ];
