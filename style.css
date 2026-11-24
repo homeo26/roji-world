@@ -699,7 +699,7 @@ body.night-time #minimap {
   bottom: max(14px, env(safe-area-inset-bottom));
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 6px;
   background: var(--paper);
   border-radius: 999px;
@@ -742,7 +742,80 @@ body.playing #dock {
   width: 1px;
   height: 24px;
   background: var(--line);
-  margin: 0 4px;
+  margin: 0 3px;
+}
+.dock-btn em {
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--rose);
+  color: #fff;
+  font: 600 0.6rem/16px var(--font);
+  font-style: normal;
+}
+.dock-btn.on em {
+  background: var(--gold);
+  color: var(--ink);
+}
+/* Every dance, opened from the More button */
+#dock .dock-more {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: 338px;
+  padding: 10px 8px 8px;
+  background: var(--paper);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  animation: dock-more-in 0.22s cubic-bezier(0.2, 1.3, 0.4, 1);
+  transform-origin: 30% 100%;
+}
+#dock .dock-more.hidden {
+  display: none;
+}
+#dock .dock-more-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 8px;
+  font-size: 0.9rem;
+}
+#dock .dock-more-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+#dock .dock-more-head svg {
+  color: var(--rose);
+}
+#dock .dock-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+#dock .wheel-btn {
+  height: 58px;
+  cursor: pointer;
+  color: var(--ink);
+  transition: background 0.15s, transform 0.15s;
+}
+#dock .wheel-btn:hover,
+#dock .wheel-btn:focus-visible {
+  background: #ffe1e6;
+  transform: translateY(-2px);
+  outline: none;
+}
+@keyframes dock-more-in {
+  from {
+    transform: scale(0.85) translateY(8px);
+    opacity: 0;
+  }
 }
 
 /* Context prompt */
@@ -1215,8 +1288,8 @@ body.touch #jump-btn {
   right: max(18px, env(safe-area-inset-right));
   bottom: calc(max(18px, env(safe-area-inset-bottom)) + 136px);
   display: grid;
-  grid-template-columns: repeat(3, 70px);
-  gap: 6px;
+  grid-template-columns: repeat(8, 60px);
+  gap: 5px;
   padding: 8px;
   background: var(--paper);
   border-radius: 20px;
@@ -1225,17 +1298,58 @@ body.touch #jump-btn {
 #emote-wheel.hidden {
   display: none;
 }
+@media (max-width: 600px) {
+  #emote-wheel {
+    grid-template-columns: repeat(4, 60px);
+  }
+}
 .wheel-btn {
+  position: relative;
+  height: 52px;
   border: 0;
   border-radius: 14px;
   background: var(--paper-2);
+  color: var(--ink);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 6px 2px;
-  font-size: 0.72rem;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  font-family: var(--font);
+  font-size: 0.66rem;
   font-weight: 600;
+  line-height: 1.05;
+  touch-action: manipulation;
+}
+.wheel-btn span {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wheel-btn:active {
+  background: #ffe1e6;
+}
+.wheel-btn i {
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  display: grid;
+  color: var(--rose);
+}
+.wheel-btn kbd {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 0.56rem;
+  border-radius: 5px;
+}
+#emote-wheel .wheel-btn kbd {
+  display: none;
 }
 
 /* Rotate overlay (phones held upright) */

@@ -667,7 +667,7 @@ function celebrate(result) {
   } else if (result && !result.quit) P().kid.emote('wave');
 }
 
-const EMOTE_KEYS = ['wave', 'dance', 'spin', 'cheer', 'heart', 'bow'];
+const EMOTE_KEYS = ['wave', 'dance', 'spin', 'cheer', 'heart', 'bow', 'dabke', 'slow', 'twirl', 'robot'];
 function emote(type) {
   if (!started || mount || game.activities.active) return;
   waypoints = [];
@@ -995,7 +995,7 @@ const input = new Input(renderer.domElement, {
     if (k === 'j') ui.toggleJournal();
     if (k === '=' || k === '+') zoom = clamp(zoom - 0.1, 0.55, 1.8);
     if (k === '-') zoom = clamp(zoom + 0.1, 0.55, 1.8);
-    const n = Number(k);
+    const n = k === '0' ? 10 : Number(k);
     if (n >= 1 && n <= EMOTE_KEYS.length) emote(EMOTE_KEYS[n - 1]);
   },
 });
