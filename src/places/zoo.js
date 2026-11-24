@@ -4,9 +4,12 @@ import { Flamingo, Penguin, Tortoise, Butterfly } from './zoo/critters.js';
 import { makeAtlas } from './zoo/labels.js';
 import { skinify, bakeColors } from './zoo/rig.js';
 import { buildScenery, DECK, POND, GARDEN, PHOTO, TREE, BENCHES, HOUSE, FEEDER, TROUGH, LOG } from './zoo/scenery.js';
+import { buildExtras, ladderColliders, LADDER, SHOP, makeCrown, makePlush } from './zoo/extras.js';
+import { makeActs } from './zoo/acts.js';
 
 // The Island Zoo: Jodi (serious) and Jouri (silly) in a big giraffe enclosure with a raised feeding deck,
-// plus flamingos, penguins, a tortoise and a zoo keeper.
+// plus flamingos, penguins, a tortoise, a zoo keeper and a little visitor. The activity corners along
+// the fence (birthday, brushing, bath, height chart, newspaper, disco, treat stall) live in zoo/acts.js.
 
 const GB = { x0: -10.4, x1: 4.3, z0: -8.7, z1: -3.55 };
 const OBSTACLES = [
@@ -17,10 +20,12 @@ const OBSTACLES = [
   { x: LOG.x, z: LOG.z, r: 1.15 },
 ];
 const FENCE_Z = -2.6;
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 const KEEPER_LOOK = { id: 'keeper', name: 'Keeper', gender: 'girl', skin: '#e3b08e', hair: '#4a2c1a', hairstyle: 'bob', outfit: 'overalls', top: '#fff3df', bottom: '#7a9a4f', shoes: '#7a4a26', accent: '#ffd166' };
+const VISITOR_LOOK = { id: 'zoo-visitor', name: 'Little visitor', gender: 'girl', skin: '#c98f68', hair: '#2a1a13', hairstyle: 'buns', outfit: 'skirt', top: '#ffd166', bottom: '#6fb8ff', shoes: '#ef5b6f', accent: '#ff8fb1' };
 const ROUTE = [
-  { x: -9.4, z: -1.2, face: Math.PI, wait: 4 },
+  { x: -9.6, z: 0.95, face: Math.PI, wait: 4 },
   { x: -6.2, z: -0.1 },
   { x: -5.6, z: 1.9 },
   { x: -0.2, z: 2.0, wait: 1.5 },
@@ -44,12 +49,31 @@ const FACTS = [
   () => 'Flamingos stand on one leg to keep the other one warm.',
   () => 'The tortoise is our oldest friend here. Say hello slowly.',
   (p, q, id) => (id === 'roji' ? `${q} says you are the best doctor on the island, Roji.` : `Roji says you fixed our ticket machine, Homama. Thank you!`),
+  () => 'Jodi reads the newspaper every morning. Jouri eats it every morning.',
+  () => 'Jouri thinks she is very good at hide and seek. The tree is very thin.',
+  () => 'Their birthdays are one day apart. Jodi is older, and she never lets Jouri forget it.',
+  () => {
+    let best = 0;
+    try {
+      best = JSON.parse(localStorage.getItem('roji-arena-giraffes-best') || '0') || 0;
+    } catch {
+      /* ignore */
+    }
+    return best ? `Your best at Leaf Catch is ${best}. Jodi still talks about it.` : 'Try Leaf Catch from the zoo card. Jouri catches, Jodi judges.';
+  },
+  () => 'Someone carved two letters in the acacia tree. I wonder who.',
 ];
 
 export default {
   id: 'zoo',
-  stop: { title: 'Island Zoo', tag: 'Meet Jodi and Jouri', icon: 'zoo-giraffe', color: '#e38e3d', text: 'Feed the giraffes from the deck, pet them and take a photo. Jodi is very serious. Jouri is very silly.' },
+  stop: { title: 'Island Zoo', tag: 'Meet Jodi and Jouri', icon: 'zoo-giraffe', color: '#e38e3d', text: 'Feed, brush and bathe the giraffes, measure them, sing for their birthday and dance at the giraffe disco. Jodi is very serious. Jouri is very silly.' },
   icons: {
+    'zoo-cake': 'M4 20h16 M5 20v-7h14v7 M5 15.5c2 1.5 3.5 1.5 5 0s3.5-1.5 5 0 3 1.5 4 0 M9 13V9.5 M15 13V9.5 M9 7.5c-.8-.9 0-2 0-2.5.9.8 1 1.7 0 2.5z M15 7.5c-.8-.9 0-2 0-2.5.9.8 1 1.7 0 2.5z',
+    'zoo-brush': 'M4 20l7-7 M9.5 11.5l3 3 M12 9l5-5 3 3-5 5z M13.5 7.5l3 3',
+    'zoo-drop': 'M12 3c3.5 4.5 6 7.6 6 10.5a6 6 0 0 1-12 0C6 10.6 8.5 7.5 12 3z M9.5 14a2.5 2.5 0 0 0 2.5 2.5',
+    'zoo-ruler': 'M8 3h5v18H8z M13 6h-2.5 M13 9h-1.5 M13 12h-2.5 M13 15h-1.5 M13 18h-2.5 M17 5v14 M15.5 6.5 17 5l1.5 1.5 M15.5 17.5 17 19l1.5-1.5',
+    'zoo-paper': 'M5 4h11v15a2 2 0 0 0 2 2H7a2 2 0 0 1-2-2z M16 8h3v11a2 2 0 0 1-2 2 M8 8h5 M8 11h5 M8 14h5 M8 17h3',
+    'zoo-gift': 'M4 9h16v4H4z M5.5 13h13v7h-13z M12 9v11 M12 9c-1.5-3-5-3.5-5-1.2C7 9 9.5 9 12 9z M12 9c1.5-3 5-3.5 5-1.2C17 9 14.5 9 12 9z',
     'zoo-giraffe': 'M9.5 21 10 10 M14 21l-.5-9 M10 10c0-3 2-5 4.5-5H17a2 2 0 0 1 0 4h-3.5 M12.2 5.3 11.5 2.8 M14.8 5l.6-2.4 M10.8 15h.01 M12.6 18h.01 M15.6 6.9h.01',
     'zoo-leaf': 'M5 19c0-8 5-14 14-14 0 9-6 14-14 14z M5 19l7-7',
     'zoo-camera': 'M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
@@ -63,16 +87,19 @@ export default {
     const dynamic = [];
     const atlas = makeAtlas();
     const scenery = buildScenery(atlas);
+    const extras = buildExtras(atlas);
+    scenery.group.add(extras.group);
     group.add(scenery.group);
     for (const im of scenery.instanced) {
       group.add(im);
       dynamic.push(im);
     }
-    const colliders = [...scenery.colliders];
+    const colliders = [...scenery.colliders, ...extras.colliders, ...ladderColliders(LADDER.x, LADDER.z)];
+    const obstacles = [...OBSTACLES, ...extras.obstacles];
 
     // ------------------------------------------------ animals
-    const jodi = new Giraffe(JODI, { home: { x: -4.2, z: -5.6, yaw: 0.3 }, bounds: GB, obstacles: OBSTACLES });
-    const jouri = new Giraffe(JOURI, { home: { x: 0.6, z: -5.0, yaw: -0.5 }, bounds: GB, obstacles: OBSTACLES });
+    const jodi = new Giraffe(JODI, { home: { x: -4.2, z: -5.6, yaw: 0.3 }, bounds: GB, obstacles });
+    const jouri = new Giraffe(JOURI, { home: { x: 0.6, z: -5.0, yaw: -0.5 }, bounds: GB, obstacles });
     const giraffes = [jodi, jouri];
     const flamingos = [new Flamingo(POND.x - 0.95, POND.z - 0.1, 0.5, 1), new Flamingo(POND.x + 0.2, POND.z - 0.55, -0.3, 2), new Flamingo(POND.x + 1.1, POND.z + 0.45, 0.9, 3)];
     const poolSpec = { ice: { x0: 6.6, x1: 11.1, z0: -9.0, z1: -6.55, y: 0.52 }, water: { x0: 6.6, x1: 11.1, z0: -5.95, z1: -3.15, y: 0.33 }, avoid: { x: 10.4, z: -8.4, r: 0.95 } };
@@ -106,6 +133,60 @@ export default {
     const kp = { pos: new THREE.Vector3(ROUTE[0].x, 0, ROUTE[0].z), yaw: Math.PI, idx: 0, wait: 2, speed: 0, talk: 0, turn: 0, waved: 0 };
     colliders.push({ type: 'circle', x: kp.pos.x, z: kp.pos.z, r: 0.3, tag: 'zoo-keeper' });
     colliders.push({ type: 'circle', x: tortoise.pos.x, z: tortoise.pos.z, r: 0.36, h: 0.36, tag: 'zoo-tortoise' });
+
+    // A little visitor with a giraffe balloon, watching from the end of the fence
+    const visitor = ctx.makeKid(VISITOR_LOOK);
+    visitor.root.scale.setScalar(0.8);
+    const balloonPivot = new THREE.Group();
+    balloonPivot.position.set(0, -0.27, 0);
+    const str = mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.8, 4), mat('#ffffff'));
+    str.position.y = 0.4;
+    const balloon = mesh(new THREE.SphereGeometry(0.17, 16, 12), mat('#ffc15e', { rough: 0.35 }));
+    balloon.position.y = 0.95;
+    balloon.scale.set(1, 1.15, 1);
+    balloonPivot.add(str, balloon);
+    for (const [bx, by, bz, r] of [[0.08, 1.02, 0.12, 0.05], [-0.1, 0.92, 0.11, 0.04], [0.02, 0.85, 0.15, 0.035], [-0.04, 1.1, 0.09, 0.03]]) {
+      const sp = mesh(new THREE.SphereGeometry(r, 8, 6), mat('#c9772e'));
+      sp.position.set(bx, by, bz);
+      sp.scale.set(1, 1, 0.35);
+      sp.lookAt(0, 0.95, 0.6);
+      balloonPivot.add(sp);
+    }
+    visitor.arms[0].add(balloonPivot);
+    // A plaster on her knee, hidden until Doctor Roji puts it on
+    const plaster = mesh(new THREE.BoxGeometry(0.075, 0.035, 0.02), mat('#fff0c9'));
+    plaster.position.set(0, -0.12, 0.054);
+    const plasterDot = mesh(new THREE.SphereGeometry(0.008, 6, 4), mat('#e38e3d'));
+    plasterDot.position.set(0.015, 0, 0.011);
+    plaster.add(plasterDot);
+    visitor.legs[0].add(plaster);
+    // Her blob shadow is enough; no shadow-map pass for a small extra character
+    for (const m of skinify(visitor.root, { rough: 0.6 })) m.castShadow = false;
+    // Bound at full size; scaled to nothing until it is put on
+    if (!ctx.api.load('plaster', false)) plaster.scale.setScalar(0.001);
+    group.add(visitor.root);
+    dynamic.push(visitor.root);
+    const vs = { pos: new THREE.Vector3(5.55, 0, -1.15), yaw: -2.3, waved: -99, near: false };
+    visitor.root.position.copy(vs.pos);
+    colliders.push({ type: 'circle', x: vs.pos.x, z: vs.pos.z, r: 0.26 });
+
+    // Jouri's golden leaf crown and the champions' rosette, once Leaf Catch earns three stars
+    const leafCrown = makeCrown();
+    leafCrown.position.set(0, 0.38, -0.03);
+    leafCrown.visible = false;
+    jouri.head.add(leafCrown);
+    const rosette = atlas.plane('champion', 0.3, 0.3);
+    rosette.position.set(2.06, 1.36, -2.39);
+    rosette.visible = false;
+    group.add(rosette);
+    dynamic.push(rosette);
+    const champion = () => {
+      try {
+        return JSON.parse(localStorage.getItem('roji-arena-giraffes-crown') || 'false') === true;
+      } catch {
+        return false;
+      }
+    };
 
     // Little puffs: sneezes, sighs and leaf crumbs. One instanced mesh, scaled to zero when idle.
     const PUFFS = 24;
@@ -221,6 +302,7 @@ export default {
       fencePoint: () => ({ x: clamp(playerLocal.x, GB.x0 + 0.5, GB.x1 - 0.3), z: -3.8 }),
       onSilly: g === jouri ? () => {
         if (!jodi.script && ['stand', 'nod', 'stroll'].includes(jodi.beh?.name) && Math.hypot(jodi.pos.x - jouri.pos.x, jodi.pos.z - jouri.pos.z) < 9 && Math.random() < 0.6) jodi.trigger('sigh', 3);
+        if (!scene && Math.hypot(vs.pos.x - jouri.pos.x, vs.pos.z - jouri.pos.z) < 11 && Math.random() < 0.55) visitor.emote('cheer');
       } : null,
     }));
 
@@ -742,9 +824,199 @@ export default {
       later(0.6, () => api.toast(`${name(api)} and ${name(api, 'partner')} rest on the bench and listen to the zoo.`, 2600));
     }
 
+    // ------------------------------------------------ NPCs watching the scenes
+    let watchAt = null;
+    let party = false;
+    const npcNear = (p) => Math.hypot(p.x - playerLocal.x, p.z - playerLocal.z) < 12;
+    function watch(kind, at) {
+      if (kind === 'look') watchAt = at ? at.clone() : null;
+      else if (kind === 'done') {
+        watchAt = null;
+        if (party) {
+          party = false;
+          for (const k of [keeper, visitor]) {
+            k.danceLoop = false;
+            k.cancelEmote();
+          }
+        }
+      } else if (kind === 'dance') {
+        party = true;
+        for (const [k, p] of [[keeper, kp.pos], [visitor, vs.pos]]) {
+          if (!npcNear(p)) continue;
+          k.danceLoop = true;
+          k.emote('dance');
+        }
+      } else {
+        // cheer or laugh
+        if (npcNear(kp.pos) && kp.speed < 0.3) later(0.3, () => keeper.emote(kind === 'laugh' ? 'spin' : 'cheer'));
+        if (npcNear(vs.pos)) later(0.15, () => visitor.emote('cheer'));
+      }
+    }
+
+    // ------------------------------------------------ the new activities (zoo/acts.js)
+    const Z = {
+      atlas,
+      group,
+      dynamic,
+      jodi,
+      jouri,
+      giraffes,
+      puff,
+      say,
+      tone,
+      later,
+      begin,
+      get scene() {
+        return scene;
+      },
+      name,
+      freeGiraffe,
+      watch,
+      kidsOnDeck,
+      api0,
+    };
+    const acts = makeActs(Z);
+    let choosing = false;
+    async function chooseTreat(api, G) {
+      if (scene || choosing) return;
+      choosing = true;
+      const jo = G === jodi;
+      const id = await api.choose({
+        title: `A treat for ${G.name}`,
+        text: jo ? 'Jodi likes her food neat.' : 'Jouri likes everything, very fast.',
+        options: [
+          { id: 'leaves', label: 'Acacia leaves', sub: 'Their favourite' },
+          { id: 'carrot', label: 'A carrot', sub: 'Crunchy' },
+          { id: 'lettuce', label: 'Lettuce', sub: 'Fresh and leafy' },
+        ],
+      });
+      choosing = false;
+      if (!id || scene) return;
+      if (id === 'leaves') feed(api, G);
+      else acts.feedTreat(api, G, id);
+    }
+
+    // The gift shop: Homama buys Roji the baby giraffe (and other small kindnesses on later visits)
+    function giftShop(api) {
+      if (scene) return;
+      const n = (api.load('shop', 0) || 0) + 1;
+      api.save('shop', n);
+      const kx = SHOP.x;
+      const kz = SHOP.z + 0.95;
+      const homamaIsPlayer = api.playerId === 'homama';
+      const s = begin(
+        api,
+        {
+          label: 'Leave the shop',
+          seats: [
+            { who: 'homama', x: kx + (homamaIsPlayer ? -0.4 : 0.4), z: kz, y: 0, yaw: Math.PI, pose: 'stand' },
+            { who: 'roji', x: kx + (homamaIsPlayer ? 0.4 : -0.4), z: kz + 0.1, y: 0, yaw: Math.PI, pose: 'stand' },
+          ],
+          focus: { x: kx, z: kz - 0.5, y: 1.3, zoom: 0.5 },
+        },
+        { k: 0, done: {} },
+      );
+      const H = api.homama;
+      const R = api.roji;
+      const plush = makePlush();
+      bakeColors(plush);
+      plush.scale.setScalar(1.3);
+      const v = n % 2 === 1 ? 'plush' : 'keyring';
+      s.step = (dt) => {
+        s.k += dt;
+        const once = (key, fn) => !s.done[key] && ((s.done[key] = true), fn());
+        if (v === 'plush') {
+          if (s.k > 0.8) once('buy', () => {
+            say('pop');
+            api.sound?.ui?.('coin');
+            api.carry(H, plush);
+            plush.position.set(0, 0.02, 0);
+          });
+          if (s.k > 1.5) {
+            const hp = api.localPos(H);
+            const rp = api.localPos(R);
+            H.yaw = util.dampAngle(H.yaw, Math.atan2(rp.x - hp.x, rp.z - hp.z), 8, dt);
+            R.yaw = util.dampAngle(R.yaw, Math.atan2(hp.x - rp.x, hp.z - rp.z), 8, dt);
+            H.kid.root.rotation.y = H.yaw;
+            R.kid.root.rotation.y = R.yaw;
+          }
+          if (s.k > 2.4) once('give', () => {
+            H.kid.carry(null);
+            api.carry(R, plush);
+            api.emote(R, 'heart');
+            api.fx.heartsAt(R.kid.root.localToWorld(new THREE.Vector3(0, 1.6, 0)), 4);
+            api.toast(n === 1 ? 'Homama buys Roji the baby giraffe from the gift shop. <b>She hugs it straight away.</b>' : 'Homama buys Roji another baby giraffe, so the first one is not lonely.', 3600);
+          });
+        } else {
+          if (s.k > 0.8) once('buy', () => {
+            api.sound?.ui?.('coin');
+            api.emote(R, 'wave');
+          });
+          if (s.k > 1.8) once('give', () => {
+            api.emote(H, 'heart');
+            api.toast('Roji buys Homama a little giraffe keyring. <b>He clips it on straight away.</b>', 3400);
+          });
+        }
+        if (s.k > 5) api.endActivity();
+      };
+    }
+
+    // Say hello to the little visitor: Doctor Roji has plasters, Homama has jokes
+    function hello(api) {
+      if (scene) return;
+      const n = (api.load('hello', 0) || 0) + 1;
+      api.save('hello', n);
+      const yaw = Math.atan2(vs.pos.x - (vs.pos.x - 0.6), vs.pos.z - (vs.pos.z + 0.35));
+      const s = begin(
+        api,
+        {
+          label: 'Say goodbye',
+          seats: [
+            { who: 'player', x: vs.pos.x - 0.6, z: vs.pos.z + 0.35, y: 0, yaw, pose: 'stand' },
+            { who: 'partner', x: vs.pos.x - 1.3, z: vs.pos.z + 0.75, y: 0, yaw: yaw - 0.2, pose: 'stand' },
+          ],
+          focus: { x: vs.pos.x - 0.5, z: vs.pos.z, y: 1.0, zoom: 0.45 },
+        },
+        { k: 0, done: {} },
+      );
+      vs.talk = 4.5;
+      const roji = api.playerId === 'roji';
+      const fixed = api.load('plaster', false);
+      s.step = (dt) => {
+        s.k += dt;
+        const once = (key, fn) => !s.done[key] && ((s.done[key] = true), fn());
+        once('hi', () => visitor.emote('wave'));
+        if (roji && !fixed) {
+          if (s.k > 0.6 && s.k < 2.2) api.player.kid.squash = 0.86;
+          if (s.k > 1.6) once('fix', () => {
+            plaster.scale.setScalar(1);
+            api.save('plaster', true);
+            api.sound?.ui?.('good');
+            api.toast('The little visitor scraped her knee. <b>Doctor Roji puts on a plaster with giraffes on it.</b>', 3600);
+          });
+          if (s.k > 2.4) once('yay', () => visitor.emote('cheer'));
+        } else if (roji) {
+          once('t', () => api.toast(pick(['She shows Roji her giraffe plaster. It is still her favourite.', 'She says she wants to be a doctor too, just like Roji.', 'She asks Roji if giraffes ever catch a cold. Roji says Jouri sneezes a lot.']), 3400));
+          if (s.k > 1.2) once('yay', () => visitor.emote(n % 2 ? 'bow' : 'cheer'));
+        } else {
+          if (s.k > 0.6) once('t', () => {
+            const i = n % 3;
+            if (i === 0) {
+              api.player.kid.squash = 0.75;
+              puff(api.localPos(api.player).add(new THREE.Vector3(0, 1.2, 0.3)), '#ffffff', 6, 1, 0.06, 0.2);
+              say('sneeze');
+            }
+            api.toast(['Homama does his best Jouri sneeze. She laughs so hard her balloon bobs.', 'Homama tells her that Roji is a real doctor. Her eyes go very wide.', 'Homama asks who her favourite giraffe is. "Jouri!" she says, of course.'][i], 3400);
+          });
+          if (s.k > 1.4) once('yay', () => visitor.emote('cheer'));
+        }
+        if (s.k > 3.6) api.endActivity();
+      };
+    }
+
     const hotspots = [
-      { x: -3.85, z: -1.6, r: 1.05, label: 'Feed Jodi', icon: 'zoo-leaf', act: (api) => feed(api, jodi) },
-      { x: -2.15, z: -1.6, r: 1.05, label: 'Feed Jouri', icon: 'zoo-leaf', act: (api) => feed(api, jouri) },
+      { x: -3.85, z: -1.6, r: 1.05, label: 'Feed Jodi', icon: 'zoo-leaf', when: () => !scene, act: (api) => chooseTreat(api, jodi) },
+      { x: -2.15, z: -1.6, r: 1.05, label: 'Feed Jouri', icon: 'zoo-leaf', when: () => !scene, act: (api) => chooseTreat(api, jouri) },
       { r: 1.25, label: 'Pet Jodi', icon: 'hand', track: () => petSpot(jodi), when: () => !scene, act: (api) => pet(api, jodi) },
       { r: 1.25, label: 'Pet Jouri', icon: 'hand', track: () => petSpot(jouri), when: () => !scene, act: (api) => pet(api, jouri) },
       { x: PHOTO.x, z: PHOTO.z, r: 1.3, label: 'Take a photo', icon: 'zoo-camera', act: photo },
@@ -791,12 +1063,15 @@ export default {
         },
       },
       { x: BENCHES[0].x, z: BENCHES[0].z + 0.8, r: 1.0, label: 'Sit on the bench', icon: 'smile', act: sitBench },
+      { x: SHOP.x, z: SHOP.z + 0.95, r: 1.1, label: 'Visit the gift shop', icon: 'zoo-gift', when: () => !scene, act: giftShop },
+      { r: 1.15, label: 'Say hello', icon: 'smile', track: () => ({ x: vs.pos.x - 0.45, z: vs.pos.z + 0.5 }), when: () => !scene, act: hello },
+      ...acts.hotspots,
     ];
 
     // Everything static becomes a few vertex-coloured meshes
     dynamic.push(...bakeColors(scenery.group));
     // Handles for headless checks (dev.html)
-    group.userData.zoo = { jodi, jouri, flamingos, penguins, tortoise, butterflies, keeper: kp, get scene() { return scene; } };
+    group.userData.zoo = { jodi, jouri, flamingos, penguins, tortoise, butterflies, keeper: kp, visitor: vs, acts, get scene() { return scene; } };
 
     // ------------------------------------------------ per frame
     let keeperCol = null;
@@ -810,6 +1085,10 @@ export default {
       if (kp.talk > 0) {
         kp.talk -= dt;
         face = Math.atan2(P.x - kp.pos.x, P.z - kp.pos.z);
+      } else if ((watchAt || party) && dP < 12) {
+        // Stop and watch whatever Roji and Homama are doing with the giraffes
+        const w = watchAt || P;
+        face = Math.atan2(w.x - kp.pos.x, w.z - kp.pos.z);
       } else if (kp.wait > 0) {
         kp.wait -= dt;
         face = dP < 2.6 ? Math.atan2(P.x - kp.pos.x, P.z - kp.pos.z) : (target.face ?? null);
@@ -831,6 +1110,10 @@ export default {
         }
       }
       const prev = kp.yaw;
+      if (party && dP < 12 && kp.speed < 0.3 && !keeper.emoteType) {
+        keeper.danceLoop = true;
+        keeper.emote('dance');
+      }
       if (face !== null) kp.yaw = util.dampAngle(kp.yaw, face, 6, dt);
       kp.speed = damp(kp.speed, want, 6, dt);
       kp.pos.x += Math.sin(kp.yaw) * kp.speed * dt;
@@ -856,6 +1139,37 @@ export default {
       }
     }
 
+    const vq = new THREE.Quaternion();
+    const vq2 = new THREE.Quaternion();
+    let champT = 0;
+    function moveVisitor(dt, t) {
+      const P = playerLocal;
+      const dP = Math.hypot(P.x - vs.pos.x, P.z - vs.pos.z);
+      let face = -2.3;
+      if (vs.talk > 0) vs.talk -= dt;
+      if (vs.talk > 0 || dP < 3.2) face = Math.atan2(P.x - vs.pos.x, P.z - vs.pos.z);
+      else if (watchAt) face = Math.atan2(watchAt.x - vs.pos.x, watchAt.z - vs.pos.z);
+      else face = Math.atan2(jouri.pos.x - vs.pos.x, jouri.pos.z - vs.pos.z);
+      const near = dP < 3.2;
+      if (near && !vs.near && t - vs.waved > 12 && !scene) {
+        vs.waved = t;
+        visitor.emote('wave');
+      }
+      vs.near = near;
+      const prev = vs.yaw;
+      vs.yaw = util.dampAngle(vs.yaw, face, 4, dt);
+      visitor.root.position.copy(vs.pos);
+      visitor.root.rotation.set(0, vs.yaw, 0);
+      visitor.update(dt, t, 0, 0, (vs.yaw - prev) / Math.max(dt, 1e-3));
+      // The balloon stays upright whatever her arm does, bobbing on its string
+      visitor.root.updateMatrixWorld(true);
+      visitor.arms[0].getWorldQuaternion(vq).invert();
+      visitor.root.getWorldQuaternion(vq2);
+      balloonPivot.quaternion.copy(vq.multiply(vq2));
+      balloonPivot.rotateZ(Math.sin(t * 1.3) * 0.08);
+      balloonPivot.rotateX(Math.sin(t * 1.1 + 1) * 0.06);
+    }
+
     function update(dt, t, api) {
       playerLocal = api.localPos(api.player);
       for (let i = timers.length - 1; i >= 0; i--) {
@@ -863,6 +1177,13 @@ export default {
         if (timers[i].t <= 0) timers.splice(i, 1)[0].fn();
       }
       if (scene) scene.step?.(dt, t);
+      champT -= dt;
+      if (champT <= 0) {
+        champT = 2;
+        const c = champion();
+        leafCrown.visible = c;
+        rosette.visible = c;
+      }
       const atFence = !scene && playerLocal.z > -2.7 && playerLocal.z < 1.0 && playerLocal.x > -11 && playerLocal.x < 5.3 && playerLocal.y < 0.5;
       giraffes.forEach((g, i) => {
         const e = envs[i];
@@ -878,6 +1199,8 @@ export default {
       const kids = [api.localPos(api.player), api.localPos(api.partner), kp.pos];
       tortoise.update(dt, t, kids);
       moveKeeper(dt, t, api);
+      moveVisitor(dt, t);
+      acts.update(dt, t);
       for (let i = 0; i < PUFFS; i++) {
         const p = puffs[i];
         if (p.life <= 0) continue;

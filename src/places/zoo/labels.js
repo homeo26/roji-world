@@ -6,8 +6,25 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 // atlas.plane(id, w, h) -> a plane showing that label; atlas.sign(id, opts) -> a wooden sign with it.
 
 const W = 1024;
-const H = 1024;
+const H = 2048;
 const REGIONS = {
+  // v4: the activity corners and the easter eggs live in the lower half
+  calendar: [0, 1024, 384, 384],
+  adopt: [384, 1024, 384, 192],
+  drawing: [384, 1216, 384, 192],
+  treats: [768, 1024, 256, 96],
+  times: [768, 1120, 256, 96],
+  gift: [768, 1216, 256, 96],
+  bowlJodi: [768, 1312, 128, 64],
+  bowlJouri: [896, 1312, 128, 64],
+  initials: [768, 1376, 128, 128],
+  champion: [896, 1376, 128, 128],
+  brush: [0, 1408, 384, 96],
+  bath: [384, 1408, 384, 96],
+  disco: [0, 1504, 384, 96],
+  birthday: [384, 1504, 640, 128],
+  wishes: [0, 1600, 384, 96],
+  plush: [0, 1696, 256, 96],
   arch: [0, 0, 1024, 256],
   jodi: [0, 256, 512, 320],
   jouri: [512, 256, 512, 320],
@@ -327,6 +344,240 @@ function tag(label, color) {
 DRAW.tagJodi = tag('Jodi 4.5 m', '#a8562c');
 DRAW.tagJouri = tag('Jouri 4.0 m', '#e38e3d');
 DRAW.tagKids = tag('You 1.4 m', '#ef5b6f');
+
+// ------------------------------------------------ v4 labels
+function plainSign(label, border, size = 54) {
+  return (ctx, w, h) => {
+    board(ctx, w, h, border, 22);
+    text(ctx, label, w / 2, h / 2 + 3, fit(ctx, label, w - 50, size));
+  };
+}
+DRAW.treats = plainSign('Treats', '#7fae4e');
+DRAW.times = plainSign('Island Times', '#ef5b6f', 44);
+DRAW.gift = plainSign('Gift shop', '#ff8fb1');
+DRAW.brush = plainSign('Neck brushing', '#21a99a');
+DRAW.bath = plainSign('Bath time', '#3f7bf0');
+DRAW.disco = plainSign('Giraffe Disco', '#8b5cf6');
+DRAW.wishes = plainSign('Birthday corner', '#ef5b6f', 50);
+DRAW.plush = (ctx, w, h) => {
+  ctx.fillStyle = '#fff6d6';
+  roundRect(ctx, 4, 4, w - 8, h - 8, 18);
+  ctx.fill();
+  ctx.fillStyle = '#e38e3d';
+  ctx.beginPath();
+  ctx.arc(30, h / 2, 9, 0, Math.PI * 2);
+  ctx.fill();
+  text(ctx, 'Baby giraffe', w / 2 + 14, h / 2 + 2, 34);
+};
+
+function bowlTag(label, color) {
+  return (ctx, w, h) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, h);
+    text(ctx, label, w / 2, h / 2 + 2, 34, '#ffffff', 700);
+  };
+}
+DRAW.bowlJodi = bowlTag('Jodi', '#2c3e66');
+DRAW.bowlJouri = bowlTag('Jouri', '#ef5b6f');
+
+DRAW.calendar = (ctx, w, h) => {
+  ctx.fillStyle = '#fffaf0';
+  roundRect(ctx, 6, 6, w - 12, h - 12, 22);
+  ctx.fill();
+  ctx.fillStyle = '#ef5b6f';
+  roundRect(ctx, 6, 6, w - 12, 86, 22);
+  ctx.fill();
+  ctx.fillRect(6, 60, w - 12, 32);
+  for (const x of [90, w - 90]) {
+    ctx.fillStyle = '#5a4a50';
+    ctx.fillRect(x - 6, 0, 12, 30);
+  }
+  text(ctx, 'May', w / 2, 52, 50, '#ffffff', 700);
+  ctx.font = `600 22px ${FONT}`;
+  const cw = (w - 40) / 7;
+  for (let d = 1; d <= 31; d++) {
+    const i = (d + 2) % 7;
+    const j = Math.floor((d + 2) / 7);
+    const x = 20 + cw * (i + 0.5);
+    const y = 122 + j * 46;
+    const mine = d === 3 ? '#21a99a' : d === 4 ? '#ff8fb1' : null;
+    if (mine) {
+      ctx.strokeStyle = mine;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(x, y, 19, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    text(ctx, String(d), x, y + 1, 22, mine || '#7b5a3f', mine ? 700 : 500);
+  }
+  text(ctx, 'Jodi 3rd    Jouri 4th', w / 2, h - 30, 26, '#4a3423', 600);
+};
+
+DRAW.adopt = (ctx, w, h) => {
+  ctx.fillStyle = '#f2d27a';
+  roundRect(ctx, 4, 4, w - 8, h - 8, 26);
+  ctx.fill();
+  ctx.fillStyle = CREAM;
+  roundRect(ctx, 16, 16, w - 32, h - 32, 18);
+  ctx.fill();
+  text(ctx, 'Jodi and Jouri', w / 2, 52, 36, '#7b4f2f', 700);
+  text(ctx, 'were adopted with love by', w / 2, 94, 22, '#7b5a3f', 500);
+  text(ctx, 'Roji + Homama', w / 2, 138, 40, '#ef5b6f', 700);
+};
+
+DRAW.drawing = (ctx, w, h) => {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,209,102,0.7)';
+  ctx.fillRect(10, 0, 50, 18);
+  ctx.fillRect(w - 60, 0, 50, 18);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // sun
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.arc(38, 48, 18, 0, Math.PI * 2);
+  ctx.fill();
+  // two giraffes, crayon style
+  const giraffe = (x, s, col) => {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(x, 170);
+    ctx.lineTo(x, 140);
+    ctx.moveTo(x + 34 * s, 170);
+    ctx.lineTo(x + 34 * s, 140);
+    ctx.moveTo(x - 4 * s, 140);
+    ctx.lineTo(x + 38 * s, 140);
+    ctx.moveTo(x + 34 * s, 140);
+    ctx.lineTo(x + 44 * s, 76);
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.ellipse(x + 50 * s, 70, 13, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#a8562c';
+    for (const [dx, dy] of [[10, 136], [24, 142], [40, 110]]) {
+      ctx.beginPath();
+      ctx.arc(x + dx * s, dy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  giraffe(56, 1, '#e8b24a');
+  giraffe(w - 56, -1, '#f0a040');
+  // Roji (pink dress) and Homama (blue tee), holding hands
+  const kid = (x, top, bottom, hair) => {
+    ctx.fillStyle = '#f6d8c6';
+    ctx.beginPath();
+    ctx.arc(x, 96, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.arc(x, 90, 16, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = top;
+    ctx.beginPath();
+    ctx.moveTo(x - 14, 150);
+    ctx.lineTo(x + 14, 150);
+    ctx.lineTo(x + 9, 114);
+    ctx.lineTo(x - 9, 114);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = bottom;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, 150);
+    ctx.lineTo(x - 7, 172);
+    ctx.moveTo(x + 6, 150);
+    ctx.lineTo(x + 7, 172);
+    ctx.stroke();
+  };
+  kid(w / 2 - 26, '#ef5b6f', '#f6d8c6', '#2a1a13');
+  kid(w / 2 + 26, '#3f7bf0', '#2c3e66', '#141010');
+  ctx.strokeStyle = '#f6d8c6';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(w / 2 - 14, 126);
+  ctx.lineTo(w / 2 + 14, 126);
+  ctx.stroke();
+  // a heart above them
+  ctx.fillStyle = '#ef5b6f';
+  ctx.beginPath();
+  const hx = w / 2;
+  const hy = 52;
+  ctx.moveTo(hx, hy + 14);
+  ctx.bezierCurveTo(hx - 26, hy - 4, hx - 12, hy - 22, hx, hy - 8);
+  ctx.bezierCurveTo(hx + 12, hy - 22, hx + 26, hy - 4, hx, hy + 14);
+  ctx.fill();
+  ctx.strokeStyle = '#9fd070';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(8, 176);
+  ctx.lineTo(w - 8, 176);
+  ctx.stroke();
+};
+
+DRAW.initials = (ctx, w, h) => {
+  ctx.fillStyle = '#8b5e3c';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#5e3c22';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  const cx = w / 2;
+  const cy = h / 2 - 4;
+  ctx.moveTo(cx, cy + 42);
+  ctx.bezierCurveTo(cx - 70, cy - 8, cx - 30, cy - 60, cx, cy - 22);
+  ctx.bezierCurveTo(cx + 30, cy - 60, cx + 70, cy - 8, cx, cy + 42);
+  ctx.stroke();
+  text(ctx, 'R + H', cx, cy + 4, 30, '#5e3c22', 700);
+};
+
+DRAW.champion = (ctx, w, h) => {
+  ctx.fillStyle = '#ef5b6f';
+  ctx.beginPath();
+  ctx.moveTo(40, 70);
+  ctx.lineTo(26, 126);
+  ctx.lineTo(48, 112);
+  ctx.lineTo(58, 128);
+  ctx.lineTo(64, 74);
+  ctx.moveTo(88, 70);
+  ctx.lineTo(102, 126);
+  ctx.lineTo(80, 112);
+  ctx.lineTo(70, 128);
+  ctx.lineTo(64, 74);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  for (let k = 0; k < 24; k++) {
+    const a = (k / 24) * Math.PI * 2;
+    const r = k % 2 ? 46 : 52;
+    ctx.lineTo(w / 2 + Math.cos(a) * r, 58 + Math.sin(a) * r);
+  }
+  ctx.fill();
+  ctx.fillStyle = '#fff6d6';
+  ctx.beginPath();
+  ctx.arc(w / 2, 58, 36, 0, Math.PI * 2);
+  ctx.fill();
+  text(ctx, 'Leaf', w / 2, 46, 22, '#7b4f2f', 700);
+  text(ctx, 'Catch', w / 2, 70, 22, '#7b4f2f', 700);
+};
+
+DRAW.birthday = (ctx, w, h) => {
+  ctx.fillStyle = '#fff6d6';
+  roundRect(ctx, 4, 4, w - 8, h - 8, 40);
+  ctx.fill();
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#ff8fb1';
+  ctx.stroke();
+  const cols = ['#ef5b6f', '#ffd166', '#21a99a', '#8b5cf6'];
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = cols[i % 4];
+    ctx.beginPath();
+    ctx.arc(30 + i * 53, i % 2 ? 22 : h - 22, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  text(ctx, 'Happy birthday, Jodi and Jouri', w / 2, h / 2 + 3, fit(ctx, 'Happy birthday, Jodi and Jouri', w - 60, 52));
+};
 
 export function makeAtlas() {
   const tex = canvasTexture(W, H, (ctx) => {

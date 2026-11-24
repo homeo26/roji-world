@@ -261,10 +261,10 @@ export function buildScenery(atlas) {
     leaf.scale.set(1, 0.55, 1);
     wb.add(leaf);
   }
-  wb.position.set(-10.5, 0, -1.2);
+  wb.position.set(-10.55, 0, 2.75);
   wb.rotation.y = 0.6;
   add(wb);
-  colliders.push({ type: 'circle', x: -10.5, z: -1.2, r: 0.5, h: 0.7 });
+  colliders.push({ type: 'circle', x: -10.55, z: 2.75, r: 0.5, h: 0.7 });
 
   // ------------------------------------------------ instanced flowers and tufts
   instanced.push(...buildFlowers(r));
@@ -304,7 +304,7 @@ function buildHouse(add, wall) {
   add(win);
   const winTrim = at(mesh(G('winTrim', () => new THREE.TorusGeometry(0.32, 0.05, 6, 20)), mat(WOOD)), x, 3.85, front + 0.05);
   add(winTrim);
-  for (const [dx, dy, s] of [[-1.15, 2.6, 0.2], [-1.0, 1.0, 0.16], [1.15, 2.0, 0.22], [1.05, 0.75, 0.14], [-1.2, 1.8, 0.12], [1.2, 3.05, 0.13]]) {
+  for (const [dx, dy, s] of [[-1.15, 2.6, 0.2], [-1.25, 0.7, 0.12], [1.15, 2.0, 0.22], [1.05, 0.75, 0.14], [-0.95, 3.1, 0.12], [1.2, 3.05, 0.13]]) {
     const sp = at(sph(s, '#e9b77a', 10), x + dx, dy, front + 0.02);
     sp.scale.set(1, 0.85, 0.12);
     add(sp);

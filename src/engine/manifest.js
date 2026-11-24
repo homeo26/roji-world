@@ -53,6 +53,7 @@ export const ARENAS = [
   { id: 'drivinglesson', module: '../arena/drivinglesson.js', place: 'driving' },
   { id: 'patients', module: '../arena/patients.js', place: 'hospital' },
   { id: 'coding', module: '../arena/coding.js', place: 'tech' },
+  { id: 'giraffes', module: '../arena/giraffes.js', place: 'zoo' },
   { id: 'example', module: '../arena/example.js', place: 'example', dev: true },
 ];
 
