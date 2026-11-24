@@ -112,6 +112,8 @@ const game = {
   onExitInterior: (space) => onExitInterior(space),
   playArena: (id, opts) => playArena(id, opts),
   openWardrobe: () => openWardrobe(),
+  setHolding: (on) => (!!on !== holding ? toggleHands() : null),
+  phase: () => daylight.label().phase,
 };
 game.life = new Life();
 game.partnerBusy = null;
