@@ -917,6 +917,8 @@ function onEnterInterior(space) {
 }
 function onExitInterior(space) {
   placePair(space.returnTo, 0);
+  lift = 0; // the inside view shift does not carry outside
+  camera.clearViewOffset();
   setTimeout(() => game.life.emit('exit', space), 0);
   holdSign = 0;
   holdGrip = false;
@@ -1031,6 +1033,24 @@ const aspectZoom = () => (camera.aspect < 0.8 ? 1.55 : camera.aspect < 1.2 ? 1.2
 const cardEl = document.getElementById('card');
 const liftTmp = new THREE.Vector3();
 let lift = 0;
+// Inside: when the back wall's top would sit under the stamps bar, slide the view down into the empty
+// band below the floor's front edge (never past it), so signs on the back wall stay readable.
+const journeyEl = document.getElementById('journey');
+let barBottom = 0;
+const insideBox = new THREE.Box3();
+function insideDrop(h) {
+  const s = spaces.inside;
+  const b = s.bounds;
+  if (s.wallTop === undefined) s.wallTop = clamp(insideBox.setFromObject(s.inst.group).max.y, 2.4, 4.2);
+  if (frameCount % 20 === 0 || !barBottom) barBottom = journeyEl.getBoundingClientRect().bottom;
+  const x = clamp(camLook.x, b.x0 + 1, b.x1 - 1);
+  liftTmp.set(x, s.wallTop, b.z0).project(camera);
+  const topPx = ((1 - liftTmp.y) / 2) * h + lift;
+  liftTmp.set(x, 0, b.z1).project(camera);
+  const frontPx = ((1 - liftTmp.y) / 2) * h + lift;
+  if (topPx > h * 0.5 || frontPx < 0) return 0;
+  return clamp(barBottom + 10 - topPx, 0, Math.min(h - frontPx - 6, h * 0.14));
+}
 function updateLift(target, dt) {
   const h = window.innerHeight;
   let want = 0;
@@ -1039,9 +1059,9 @@ function updateLift(target, dt) {
     liftTmp.copy(target).project(camera);
     const feetFull = ((1 - liftTmp.y) / 2) * h + lift;
     want = clamp(feetFull - (top - 14), 0, h * 0.3);
-  }
+  } else if (spaces.inside && introBlend > 0.98) want = -insideDrop(h);
   lift = damp(lift, want, 5, dt);
-  if (lift > 0.5) camera.setViewOffset(window.innerWidth, h, 0, lift, window.innerWidth, h);
+  if (Math.abs(lift) > 0.5) camera.setViewOffset(window.innerWidth, h, 0, lift, window.innerWidth, h);
   else if (camera.view?.enabled) {
     lift = 0;
     camera.clearViewOffset();

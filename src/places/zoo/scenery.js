@@ -243,7 +243,8 @@ export function buildScenery(atlas) {
       ball.rotation.set(r() * 3, r() * 3, 0);
       add(ball);
     }
-    colliders.push({ type: 'circle', x, z, r: 0.35 * s });
+    // The low crown hangs at head height, so block the kids at its edge, not only at the trunk
+    colliders.push({ type: 'circle', x: x + 0.2 * s, z: z + 0.1 * s, r: 0.85 * s });
   }
 
   // Keeper's wheelbarrow full of leaves

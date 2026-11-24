@@ -249,7 +249,7 @@ export default {
       flowers.push({ x: 8.4 + x, z: -2.2 - y, c: FLOWER[i % 2 ? 0 : Math.floor(R() * FLOWER.length)], h: 0.36 + R() * 0.08 });
     }
     add(at(tree(0.95), 10.0, 0, -6.2));
-    colliders.push({ type: 'circle', x: 10.0, z: -6.2, r: 0.3 });
+    colliders.push({ type: 'circle', x: 10.2, z: -6.1, r: 0.85 }); // the low crown, not only the trunk
     add(at(bush(0.9), 5.2, 0, -5.6));
     add(at(bush(0.7, C.leafDark), -4.6, 0, -6.4));
 
@@ -262,7 +262,7 @@ export default {
     K.bunting(g, new THREE.Vector3(-2.2, 2.4, -11.7), new THREE.Vector3(2.8, 2.4, -11.7), { n: 9, sag: 0.35 });
     for (const [x, z, s, k] of [[-14.9, -12.0, 1.0, 'round'], [15.0, -11.9, 1.05, 'blossom'], [-0.4, -12.2, 0.75, 'blossom'], [15.1, 10.3, 0.85, 'round'], [-15.1, 11.4, 0.8, 'blossom']]) {
       add(at(tree(s, k), x, 0, z));
-      colliders.push({ type: 'circle', x, z, r: 0.3 * s });
+      colliders.push({ type: 'circle', x: x + 0.2 * s, z: z + 0.1 * s, r: 0.9 * s }); // the low crown, not only the trunk
     }
     for (const [x, z, s] of [[-12.4, -12.4, 0.8], [12.0, -12.5, 0.9], [7.6, -12.5, 0.7], [-7.8, -12.4, 0.75]]) add(at(bush(s, s > 0.78 ? C.leaf : C.leafDark), x, 0, z));
 
