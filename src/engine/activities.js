@@ -69,7 +69,7 @@ export class Activities {
     a.seated = false;
     if (at) {
       a.pos.set(at.x, 0, at.z);
-      a.y = 0;
+      a.y = this.g.physics?.support ? this.g.physics.support(at.x, at.z, 0.3, (at.y ?? 0) + 0.3, 0) : 0;
     }
     a.vy = 0; // without an exit point the kid keeps its height and settles onto what is below
     k.root.rotation.set(0, a.yaw, 0);

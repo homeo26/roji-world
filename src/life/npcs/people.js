@@ -342,7 +342,7 @@ export function actionLabel(id, prof, rec) {
       bug: T('Help with the bug', 'Two heads are better'),
       coffee: T('Bring a coffee', 'A little treat'),
       latte: T('Order a latte', 'Spanish latte, please'),
-      play: T(`Play with ${them}`, 'Hop hop hop'),
+      play: T(`Tickle ${them}`, 'Hop hop hop'),
     }[id] || T(id, '')
   );
 }
