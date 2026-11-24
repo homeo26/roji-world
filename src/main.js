@@ -1317,6 +1317,8 @@ function updateCompanion(dt) {
     const d = Math.hypot(dx, dz);
     if (d > 30) {
       fx.poof(c.pos);
+      // On a pier the spot beside the player may be over the sea: land right behind them instead
+      if (spaces.onWalkway(p.pos.x, p.pos.z) && !spaces.onWalkway(target.x, target.z)) target.copy(p.pos).addScaledVector(fwd, -0.7);
       c.pos.set(target.x, 0, target.z);
       c.y = p.y;
       fx.poof(c.pos);

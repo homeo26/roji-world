@@ -18,6 +18,7 @@ export const PLACES = [
   { id: 'ski', module: '../places/ski.js', slot: [-14, -106], size: [56, 30] },
   { id: 'cycling', module: '../places/cycling.js', slot: [46, 10], size: [24, 16] },
   { id: 'picnic', module: '../places/picnic.js', slot: [46, -14], size: [22, 18] },
+  { id: 'harbour', module: '../places/harbour.js', slot: [84, 8], size: [30, 12] },
   { id: 'example', module: '../places/example.js', slot: [0, 0], size: [14, 10], dev: true },
 ];
 
@@ -53,6 +54,7 @@ export const ARENAS = [
   { id: 'drivinglesson', module: '../arena/drivinglesson.js', place: 'driving' },
   { id: 'patients', module: '../arena/patients.js', place: 'hospital' },
   { id: 'coding', module: '../arena/coding.js', place: 'tech' },
+  { id: 'fishing', module: '../arena/fishing.js', place: 'harbour' },
   { id: 'giraffes', module: '../arena/giraffes.js', place: 'zoo' },
   { id: 'example', module: '../arena/example.js', place: 'example', dev: true },
 ];
