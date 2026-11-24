@@ -1,648 +1,233 @@
-// Driving Lesson: Roji drives the little learner car round Abu Sanad's practice course.
-// Point the stick, the arrows or the mouse where to go (like the car in town), hold the brake (E or the
-// Brake button) to stop, Space honks. Six tasks in order, stars for smooth driving and a licence meter
-// that fills over several lessons. Homama cheers at the roadside (or rides along when he is the player).
+// Driving Lesson: Abu Sanad's course of eight short lessons at Little Wheels Driving School.
+// Roji works through them one by one (each unlocks the next) and earns her licence in the driving test.
+// Playing as Homama, he takes the same course as a refresher, with Roji cheering at the roadside.
+// Point the stick, the arrows or the mouse where to go, hold the brake (E or Brake), Space honks,
+// R switches to Reverse in the parking and hill lessons, L switches on the headlights at night.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { damp, dampAngle, clamp, mat, umat, mesh, rng, bakeStatic, roundRect } from '../util.js';
+import { damp, dampAngle, clamp, umat, mesh, roundRect, bakeStatic } from '../util.js';
 import { Physics } from '../engine/physics.js';
-import { C, kit, colorBake, bakeLiveKid, Atlas, signPost, makeTrafficLight, lightMats, setLight, makeCone, makeDuck, makeNora, learnerize, tree, addFlowers, paintText, drawWheelBadge, drawChibi, heartPath, ROJI_PHOTO } from '../places/driving/kit.js';
+import { C, kit, colorBake, bakeLiveKid, learnerize, setLight, makeAbuSanad, paintText, heartPath } from '../places/driving/kit.js';
+import { buildWorld, heightAt, RC, R_OUT, R_IN, ZEBRA, POND, DUCK_Z, SCHOOL } from './drivinglesson/world.js';
+import { RingTraffic, Crossing, Fox, Tractor, Ducks, makeUmbrella } from './drivinglesson/people.js';
+import { LESSONS } from './drivinglesson/lessons.js';
+import { makeUI, STAR } from './drivinglesson/ui.js';
 
 const MAX_SPEED = 6.4;
-const ROAD_W = 4.6;
-const RC = { x: 19, z: -10 }; // roundabout centre
-const R_IN = 4.2;
-const R_OUT = 9.2;
-const R_LANE = 6.7;
-const GATE_Z = 24;
-const STOP_Z = 12;
-const LIGHT_Z = 1;
-const ZEBRA = { x0: 16.7, x1: 21.3, z0: 7.0, z1: 9.2 };
-const DUCK_Z = 8.1;
-const POND = { x: 26.8, z: 8.6, r: 1.6 };
-const LOT = { x0: 10.5, x1: 28.5, z0: 20, z1: 33 };
-const BAY = { x: 22.5, z: 29.4 };
-const BAYS = [13.5, 16.5, 19.5, 22.5, 25.5];
-const PARKED = [[13.5, C.lilac], [19.5, C.pink], [25.5, C.mint]];
-const FENCE = { x0: -10, x1: 34, z0: -23, z1: 41 };
-const START = { x: 0, z: 35, yaw: Math.PI };
+const MAX_REVERSE = 2.6;
+const WHEELBASE = 1.75;
 const FRONT = 1.35; // car centre to bumper
-
-const STAR = (on, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" style="vertical-align:-2px"><path d="M12 2.5l2.9 6 6.6.8-4.9 4.5 1.3 6.5L12 17l-5.9 3.3 1.3-6.5-4.9-4.5 6.6-.8z" fill="${on ? '#ffd166' : '#eadfd8'}" stroke="${on ? '#e0a83a' : '#d8cbc2'}" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
-
-const CSS = `
-#arena .dl-layer { position: absolute; inset: 0; pointer-events: none; font-family: var(--font, 'Fredoka', system-ui, sans-serif); color: #3b2b3f; }
-#arena .dl-list { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 58px); left: max(12px, env(safe-area-inset-left)); background: rgba(255,250,244,.93); border-radius: 18px; padding: 10px 14px 10px 12px; box-shadow: 0 6px 18px rgba(60,30,40,.15); font-size: .86rem; min-width: 200px; }
-#arena .dl-list h4 { margin: 0 0 6px; font-size: .9rem; color: #21a99a; }
-#arena .dl-list ol { list-style: none; margin: 0; padding: 0; }
-#arena .dl-list li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 10px; color: #a8969f; transition: background .25s, color .25s; }
-#arena .dl-list li i { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #e2d4cc; display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 700; color: #fff; }
-#arena .dl-list li.now { background: #fff1c2; color: #3b2b3f; font-weight: 700; }
-#arena .dl-list li.now i { border-color: #f4a742; background: #ffd166; }
-#arena .dl-list li.done { color: #3b2b3f; }
-#arena .dl-list li.done i { border-color: #3fbf9f; background: #3fbf9f; }
-#arena .dl-smooth { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #ead9cf; display: flex; align-items: center; gap: 4px; font-size: .8rem; color: #7a6470; }
-#arena .dl-smooth span { margin-left: auto; }
-#arena .dl-say { position: absolute; left: 50%; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 44px); transform: translateX(-50%); background: #fffaf4; border-radius: 20px; padding: 9px 16px; box-shadow: 0 8px 22px rgba(60,30,40,.18); font-size: 1rem; max-width: min(560px, 80vw); text-align: center; transition: opacity .25s, transform .25s; }
-#arena .dl-say b { color: #21a99a; margin-right: 6px; }
-#arena .dl-say.who-homama b { color: #3f7bf0; }
-#arena .dl-say.hide { opacity: 0; transform: translateX(-50%) translateY(8px); }
-#arena .dl-pop { position: absolute; left: 50%; top: 27%; transform: translate(-50%, -50%) scale(.6); font-weight: 700; font-size: clamp(1.3rem, 4vw, 2.3rem); color: #fff; text-shadow: 0 3px 0 rgba(0,0,0,.16), 0 8px 20px rgba(0,0,0,.22); opacity: 0; transition: opacity .18s, transform .25s cubic-bezier(.2,1.5,.4,1); white-space: nowrap; }
-#arena .dl-pop.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-#arena .dl-lic { display: inline-flex; align-items: center; gap: 7px; font-size: .85rem; }
-#arena .dl-lic i { display: block; width: clamp(60px, 11vw, 110px); height: 10px; border-radius: 99px; background: #f0e2d8; overflow: hidden; }
-#arena .dl-lic i b { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #ffd166, #ef5b6f); transition: width .8s cubic-bezier(.2,1,.3,1); }
-#arena .dl-card { position: absolute; left: 50%; top: 33%; transform: translate(-50%, -50%) scale(.4) rotate(-8deg); opacity: 0; transition: transform .6s cubic-bezier(.2,1.5,.4,1), opacity .3s; background: #fffaf4; border-radius: 22px; padding: 10px; box-shadow: 0 20px 50px rgba(40,20,30,.35); }
-#arena .dl-card.on { transform: translate(-50%, -50%) scale(1) rotate(-3deg); opacity: 1; }
-#arena .dl-card canvas { display: block; width: min(340px, 40vw); height: auto; border-radius: 14px; }
-#arena .dl-res { display: block; margin: 2px 0 10px; }
-#arena .a-btn.dl-hot { animation: dl-hot .5s ease-in-out infinite alternate; }
-@keyframes dl-hot { from { box-shadow: 0 0 0 0 rgba(255,209,102,.95), 0 6px 18px rgba(60,30,40,.2); } to { box-shadow: 0 0 0 12px rgba(255,209,102,0), 0 6px 18px rgba(60,30,40,.2); transform: scale(1.08); } }
-#arena .dl-res .stars { display: flex; justify-content: center; gap: 6px; margin-bottom: 6px; }
-#arena .dl-res .bar { display: block; width: 80%; margin: 8px auto 2px; height: 12px; border-radius: 99px; background: #f0e2d8; overflow: hidden; }
-#arena .dl-res .bar b { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #ffd166, #ef5b6f); }
-body.touch #arena .dl-say { bottom: max(12px, env(safe-area-inset-bottom)); max-width: 42vw; font-size: .82rem; padding: 7px 12px; }
-@media (max-height: 520px) {
-  #arena .dl-list { top: calc(max(8px, env(safe-area-inset-top)) + 50px); padding: 6px 10px 7px 8px; font-size: .7rem; min-width: 0; border-radius: 14px; }
-  #arena .dl-list h4 { font-size: .74rem; margin-bottom: 3px; }
-  #arena .dl-list li { padding: 1px 5px; gap: 6px; }
-  #arena .dl-list li i { width: 12px; height: 12px; font-size: 9px; }
-  #arena .dl-smooth { margin-top: 3px; padding-top: 3px; font-size: .68rem; }
-  #arena .dl-pop { top: 30%; }
-  #arena .dl-card { top: 27%; padding: 6px; border-radius: 16px; }
-  #arena .dl-card canvas { width: min(250px, 30vw); border-radius: 11px; }
-}
-#arena .dl-list { transition: opacity .4s; }
-#arena .dl-layer.party .dl-list { opacity: 0; }
-`;
-
-const TASKS = [
-  { id: 'gate', label: 'Drive through the cone gate', say: 'Follow the arrow and drive through the cone gate.' },
-  { id: 'stop', label: 'Stop at the stop line', say: 'Hold the brake and stop right at the white line.' },
-  { id: 'light', label: 'Wait for the green light', say: 'The light is red. Stop at the line and wait for green.' },
-  { id: 'round', label: 'Go round the roundabout', say: 'Go all the way round the roundabout, then take the exit by the ducks.' },
-  { id: 'ducks', label: 'Let the ducks cross', say: 'Duck crossing! Stop before the stripes and let them cross.' },
-  { id: 'park', label: 'Park in the bay', say: 'Last one! Park in the glowing bay, nice and straight.' },
+const N = LESSONS.length;
+const PAINTS = [
+  { id: 'sun', color: C.sun, need: 0, name: 'Sunshine' },
+  { id: 'pink', color: C.pink, need: 6, name: 'Bubblegum' },
+  { id: 'mint', color: C.mint, need: 12, name: 'Mint' },
+  { id: 'sky', color: C.sky, need: 18, name: 'Sky' },
+  { id: 'lilac', color: C.lilac, need: 24, name: 'Lilac' },
 ];
-
+const GOOD = {
+  first: 'Your very first drive, and every cone is still standing!',
+  roundabout: 'You gave way like a pro. The ducks are impressed too.',
+  school: 'Slow, careful and kind. The children waved at you!',
+  parking: 'Parked like you have done it for years.',
+  rain: 'Not one slide in the rain. Lovely, gentle driving.',
+  night: 'Lights on, eyes open. The fox will tell all his friends.',
+  hill: 'No rolling back, not a scratch on the bridge. Wonderful.',
+};
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const toward = (v, t, d) => (v < t ? Math.min(t, v + d) : Math.max(t, v - d));
+
+// ---------------------------------------------------------------- progress (old one-lesson saves keep loading)
+function loadCourse(ctx, who) {
+  const key = who === 'roji' ? 'course' : 'hcourse';
+  const c = ctx.load(key, null);
+  const fresh = { v: 2, stars: Array(N).fill(0), best: Array(N).fill(null), done: Array(N).fill(false), paint: 'sun' };
+  if (c && Array.isArray(c.stars)) {
+    for (const k of ['stars', 'best', 'done']) fresh[k] = fresh[k].map((v, i) => (c[k]?.[i] ?? v));
+    fresh.paint = PAINTS.some((p) => p.id === c.paint) ? c.paint : 'sun';
+    return fresh;
+  }
+  if (who === 'roji') {
+    const oldLic = +ctx.load('licence', 0) || 0;
+    const oldLessons = +ctx.load('lessons', 0) || 0;
+    const oldBest = clamp(+ctx.load('best', 0) || 0, 1, 3);
+    const k = oldLic >= 100 ? N : Math.min(N - 1, oldLessons);
+    for (let i = 0; i < k; i++) {
+      fresh.done[i] = true;
+      fresh.stars[i] = oldBest;
+    }
+  }
+  return fresh;
+}
+const licenceOf = (c, old = 0) => (c.done[N - 1] ? 100 : Math.max(Math.min(95, +old || 0), Math.round((c.done.slice(0, N - 1).filter(Boolean).length / (N - 1)) * 90)));
+const totalStars = (c) => c.stars.reduce((a, b) => a + b, 0);
+const isOpen = (c, i, who) => who === 'homama' || i === 0 || c.done[i - 1] || c.done[i];
 
 export default {
   id: 'drivinglesson',
   title: 'Driving Lesson',
-  tagline: 'Six little tasks with Abu Sanad',
+  tagline: "Abu Sanad's course of eight lessons",
 
   async start(ctx) {
     const { scene, camera, hud, input, sound, fx } = ctx;
     const env = ctx.env.outdoor({ fog: [70, 190], shadow: 22 });
     const k = kit();
-    const { box, rbox, cyl, sph, at } = k;
-    const world = new THREE.Group();
-    scene.add(world);
-    const keep = []; // animated objects that must not be merged
-    const physics = new Physics();
-    const R = rng(21);
-    const atlas = new Atlas(8, 4, 256);
-    const cells = {};
-    const flowers = [];
-    const add = (o, x, y, z, ry = 0) => (at(o, x, y, z, ry), world.add(o), o);
-    const timers = [];
-    const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+    const { cyl, rbox, at } = k;
     const meIsRoji = ctx.me === 'roji';
+    const who = meIsRoji ? 'roji' : 'homama';
+    const NAME = meIsRoji ? 'Roji' : 'Homama';
+    const FAN = meIsRoji ? 'Homama' : 'Roji';
+    const timers = [];
+    const later = (ms, fn) => timers.push(setTimeout(() => !disposed && fn(), ms));
+    let disposed = false;
 
-    // ---------------------------------------------------------------- ground and roads
-    const grass = mesh(new THREE.PlaneGeometry(160, 160), mat('#9ad06a', { rough: 0.95 }), { cast: false });
-    grass.rotation.x = -Math.PI / 2;
-    add(grass, 12, 0, 8);
-    const samplePath = (segs) => {
-      const pts = [];
-      for (const s of segs) {
-        if (s.arc) {
-          const { cx, cz, r, a0, a1 } = s;
-          const n = Math.ceil((Math.abs(a1 - a0) * r) / 0.5);
-          for (let i = pts.length ? 1 : 0; i <= n; i++) {
-            const a = a0 + ((a1 - a0) * i) / n;
-            pts.push(new THREE.Vector3(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r));
-          }
-        } else {
-          const [ax, az, bx, bz] = s;
-          const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5);
-          for (let i = pts.length ? 1 : 0; i <= n; i++) pts.push(new THREE.Vector3(ax + ((bx - ax) * i) / n, 0, az + ((bz - az) * i) / n));
-        }
-      }
-      return pts;
-    };
-    const road1 = samplePath([[0, 39, 0, -2], { arc: true, cx: 8, cz: -2, r: 8, a0: Math.PI, a1: Math.PI * 1.5 }, [8, -10, 11, -10]]);
-    const road2 = samplePath([[19, -1.5, 19, 21]]);
-    const roadTex = (() => {
-      const cv = document.createElement('canvas');
-      cv.width = 256;
-      cv.height = 128;
-      const c = cv.getContext('2d');
-      c.fillStyle = '#bcb3ca';
-      c.fillRect(0, 0, 256, 128);
-      for (let i = 0; i < 500; i++) {
-        c.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(70,60,95,0.07)';
-        c.fillRect(R() * 256, R() * 128, 3, 3);
-      }
-      c.fillStyle = '#fffaf0';
-      c.fillRect(0, 4, 256, 5);
-      c.fillRect(0, 119, 256, 5);
-      c.fillRect(0, 61, 128, 6);
-      const t = new THREE.CanvasTexture(cv);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.wrapS = THREE.RepeatWrapping;
-      t.anisotropy = 8;
-      return t;
-    })();
-    const ribbon = (pts, width, y, uvLen = 4) => {
-      const pos = [];
-      const uv = [];
-      const nrm = [];
-      const idx = [];
-      let s = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        const a = pts[Math.max(0, i - 1)];
-        const b = pts[Math.min(pts.length - 1, i + 1)];
-        let tx = b.x - a.x;
-        let tz = b.z - a.z;
-        const l = Math.hypot(tx, tz) || 1;
-        tx /= l;
-        tz /= l;
-        if (i) s += p.distanceTo(pts[i - 1]);
-        pos.push(p.x - tz * width * 0.5, y, p.z + tx * width * 0.5, p.x + tz * width * 0.5, y, p.z - tx * width * 0.5);
-        uv.push(s / uvLen, 1, s / uvLen, 0);
-        nrm.push(0, 1, 0, 0, 1, 0);
-        if (i) {
-          const q = (i - 1) * 2;
-          idx.push(q, q + 2, q + 1, q + 1, q + 2, q + 3);
-        }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-      g.setIndex(idx);
-      return g;
-    };
-    const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 });
-    const curbMat = mat('#efe6da', { rough: 0.9 });
-    for (const pts of [road1, road2]) {
-      world.add(mesh(ribbon(pts, ROAD_W + 0.8, 0.02), curbMat, { cast: false }));
-      world.add(mesh(ribbon(pts, ROAD_W, 0.03), roadMat, { cast: false }));
-    }
-    // Roundabout: painted ring, lane dashes and arrows going anticlockwise
-    const ringTex = (() => {
-      const S = 1024;
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = S;
-      const c = cv.getContext('2d');
-      const px = S / (R_OUT * 2);
-      const X = (x) => S / 2 + x * px;
-      c.fillStyle = '#efe6da';
-      c.beginPath();
-      c.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = '#bcb3ca';
-      c.beginPath();
-      c.arc(S / 2, S / 2, (R_OUT - 0.4) * px, 0, Math.PI * 2);
-      c.fill();
-      for (let i = 0; i < 2600; i++) {
-        c.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(70,60,95,0.07)';
-        c.fillRect(R() * S, R() * S, 3, 3);
-      }
-      c.strokeStyle = '#fffaf0';
-      c.lineWidth = 0.12 * px;
-      c.beginPath();
-      c.arc(S / 2, S / 2, (R_OUT - 0.6) * px, 0, Math.PI * 2);
-      c.stroke();
-      c.setLineDash([0.9 * px, 0.7 * px]);
-      c.beginPath();
-      c.arc(S / 2, S / 2, R_LANE * px, 0, Math.PI * 2);
-      c.stroke();
-      c.setLineDash([]);
-      for (let i = 0; i < 6; i++) {
-        const th = (i / 6) * Math.PI * 2 + 0.5;
-        const r = (R_LANE + R_IN) / 2 + 0.3;
-        c.save();
-        c.translate(X(Math.cos(th) * r), X(Math.sin(th) * r));
-        c.rotate(Math.atan2(-Math.cos(th), Math.sin(th)));
-        c.fillStyle = '#fffaf0';
-        c.fillRect(-0.7 * px, -0.12 * px, 0.8 * px, 0.24 * px);
-        c.beginPath();
-        c.moveTo(0.6 * px, 0);
-        c.lineTo(0.05 * px, -0.42 * px);
-        c.lineTo(0.05 * px, 0.42 * px);
-        c.fill();
-        c.restore();
-      }
-      const t = new THREE.CanvasTexture(cv);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 8;
-      return t;
-    })();
-    const ringDisc = mesh(new THREE.CircleGeometry(R_OUT, 64), new THREE.MeshStandardMaterial({ map: ringTex, roughness: 0.9 }), { cast: false });
-    ringDisc.rotation.x = -Math.PI / 2;
-    add(ringDisc, RC.x, 0.04, RC.z);
-    // The island: a raised round garden with a tree and a fountain of flowers
-    add(cyl(R_IN, R_IN + 0.1, 0.34, C.cream, 40), RC.x, 0.17, RC.z);
-    add(cyl(R_IN - 0.25, R_IN - 0.25, 0.04, C.leaf, 40), RC.x, 0.35, RC.z);
-    add(tree(k, 1.0, 0), RC.x - 0.4, 0.34, RC.z - 0.3);
-    add(tree(k, 0.7, 2), RC.x + 1.6, 0.34, RC.z + 1.1);
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2;
-      flowers.push([RC.x + Math.cos(a) * (R_IN - 0.55), 0.35, RC.z + Math.sin(a) * (R_IN - 0.55), i % 6, 1.1]);
-      if (i % 2) flowers.push([RC.x + Math.cos(a + 0.05) * (R_IN - 1.1), 0.35, RC.z + Math.sin(a + 0.05) * (R_IN - 1.1), (i + 3) % 6, 1]);
-    }
-    physics.add({ type: 'circle', x: RC.x, z: RC.z, r: R_IN + 0.05 });
-    // Car park
-    const LW = LOT.x1 - LOT.x0;
-    const LD = LOT.z1 - LOT.z0;
-    const lotTex = (() => {
-      const W = 1024;
-      const H = Math.round((W * LD) / LW);
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const c = cv.getContext('2d');
-      const sx = W / LW;
-      const X = (x) => (x - LOT.x0) * sx;
-      const Z = (z) => (z - LOT.z0) * sx;
-      c.fillStyle = '#efe6da';
-      c.fillRect(0, 0, W, H);
-      c.fillStyle = '#bcb3ca';
-      roundRect(c, 0.4 * sx, 0.4 * sx, W - 0.8 * sx, H - 0.8 * sx, 1.2 * sx);
-      c.fill();
-      for (let i = 0; i < 2400; i++) {
-        c.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(70,60,95,0.07)';
-        c.fillRect(R() * W, R() * H, 3, 3);
-      }
-      c.fillStyle = '#fffaf0';
-      for (let i = 0; i <= BAYS.length; i++) c.fillRect(X(12 + i * 3) - 0.06 * sx, Z(27), 0.12 * sx, 4.8 * sx);
-      c.fillRect(X(12), Z(27) - 0.06 * sx, 15 * sx, 0.12 * sx);
-      paintText(c, 'P', X(15), Z(23.4), 2.6 * sx, 'rgba(255,250,240,0.9)');
-      c.fillStyle = 'rgba(255,250,240,0.9)';
-      const arrow = (x, z, ang) => {
-        c.save();
-        c.translate(X(x), Z(z));
-        c.rotate(ang);
-        c.fillRect(-0.7 * sx, -0.12 * sx, 0.8 * sx, 0.24 * sx);
-        c.beginPath();
-        c.moveTo(0.6 * sx, 0);
-        c.lineTo(0.05 * sx, -0.42 * sx);
-        c.lineTo(0.05 * sx, 0.42 * sx);
-        c.fill();
-        c.restore();
-      };
-      arrow(21.5, 23.5, 0);
-      arrow(24.5, 23.5, 0);
-      c.fillStyle = 'rgba(239,91,111,0.85)';
-      heartPath(c, X(BAY.x), Z(31.2), 0.4 * sx);
-      c.fill();
-      const t = new THREE.CanvasTexture(cv);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 8;
-      return t;
-    })();
-    const lot = mesh(new THREE.PlaneGeometry(LW, LD), new THREE.MeshStandardMaterial({ map: lotTex, roughness: 0.9 }), { cast: false });
-    lot.rotation.x = -Math.PI / 2;
-    add(lot, (LOT.x0 + LOT.x1) / 2, 0.035, (LOT.z0 + LOT.z1) / 2);
-    // Road paint: stop line, light line, zebra stripes and painted words
-    const white = mat('#fffaf0', { rough: 0.8 });
-    add(mesh(new THREE.BoxGeometry(ROAD_W, 0.012, 0.36), white, { cast: false }), 0, 0.04, STOP_Z);
-    add(mesh(new THREE.BoxGeometry(ROAD_W, 0.012, 0.36), white, { cast: false }), 0, 0.04, LIGHT_Z);
-    for (let i = 0; i < 6; i++) add(mesh(k.geo('zebra', () => new THREE.BoxGeometry(0.46, 0.012, ZEBRA.z1 - ZEBRA.z0)), white, { cast: false }), ZEBRA.x0 + 0.2 + i * 0.84, 0.04, (ZEBRA.z0 + ZEBRA.z1) / 2);
-    for (let i = 0; i < 6; i++) add(mesh(k.geo('give', () => new THREE.BoxGeometry(0.45, 0.012, 0.2)), white, { cast: false }), 17.0 + i * 0.8, 0.04, 6.3);
-    cells.stopWord = atlas.add((c, w, h) => paintText(c, 'STOP', w / 2, h / 2 + 4, h * 0.5, '#fffaf0'), 2);
-    cells.slowWord = atlas.add((c, w, h) => paintText(c, 'SLOW', w / 2, h / 2 + 4, h * 0.5, '#fffaf0'), 2);
-    const word = (cell, x, z) => {
-      const p = atlas.plane(2.6, 1.3, cell);
-      p.rotation.x = -Math.PI / 2;
-      add(p, x, 0.045, z);
-    };
-    word(cells.stopWord, 0, 13.6);
-    word(cells.slowWord, 19, 3.6);
+    // ---------------------------------------------------------------- the world and everyone in it
+    const physics = new Physics();
+    const W = buildWorld(ctx);
+    for (const c of W.colliders) physics.add(c);
+    const rails = W.colliders.filter((c) => c.rail);
+    const traffic = new RingTraffic(ctx, k, physics);
+    const crossing = new Crossing(ctx, k, physics);
+    const fox = new Fox(ctx, k);
+    const tractor = new Tractor(ctx, k, physics);
+    const ducks = new Ducks(W.ducks, { zebra: ZEBRA, pond: POND, duckZ: DUCK_Z });
 
-    // ---------------------------------------------------------------- signs, light, gate, ducks' home
-    const lampMats = lightMats(umat);
-    setLight(lampMats, 'red');
-    add(makeTrafficLight(k, lampMats, { pole: 2.3 }), 3.1, 0, LIGHT_Z + 0.2);
-    physics.add({ type: 'circle', x: 3.1, z: LIGHT_Z + 0.2, r: 0.2 });
-    const signs = [
-      ['stop', 3.0, STOP_Z + 0.4, 0.78, 1.5],
-      ['roundabout', -3.1, 1.4, 0.68, 1.5],
-      ['duck', 15.6, 4.6, 0.72, 1.5],
-      ['zebra', 22.5, 5.4, 0.6, 1.5],
-      ['parking', 11.6, 19.0, 0.62, 1.6],
-      ['speed20', -3.0, 30.0, 0.6, 1.5],
-      ['lights', -3.0, 7.0, 0.66, 1.5],
-    ];
-    for (const [kind, x, z, s, p] of signs) {
-      add(signPost(k, atlas, cells, kind, { size: s, post: p }), x, 0, z);
-      physics.add({ type: 'circle', x, z, r: 0.15 });
-    }
-    // Balloon arch over the cone gate
-    const arch = new THREE.InstancedMesh(new THREE.SphereGeometry(0.3, 14, 10), new THREE.MeshStandardMaterial({ roughness: 0.35 }), 25);
-    const m4 = new THREE.Matrix4();
-    const tmpC = new THREE.Color();
-    const archCols = [C.rose, C.sun, C.sky, C.mint, C.pink, C.white];
-    for (let i = 0; i < 25; i++) {
-      const a = (i / 24) * Math.PI;
-      m4.makeTranslation(Math.cos(a) * 3.3, 0.25 + Math.sin(a) * 3.4, GATE_Z);
-      arch.setMatrixAt(i, m4);
-      arch.setColorAt(i, tmpC.set(archCols[i % archCols.length]));
-    }
-    arch.castShadow = true;
-    world.add(arch);
-    cells.gateWord = atlas.add((c, w, h) => {
-      c.fillStyle = '#ffffff';
-      roundRect(c, 4, 50, w - 8, h - 100, 50);
-      c.fill();
-      paintText(c, 'Cone gate', w / 2, h / 2 + 4, h * 0.24, C.rose);
-    }, 2);
-    add(atlas.plane(1.6, 0.8, cells.gateWord, { cast: true }), 0, 3.75, GATE_Z + 0.32);
-    // The start board
-    cells.startBoard = atlas.add((c, w, h) => {
-      c.fillStyle = '#ffffff';
-      roundRect(c, 4, 4, w - 8, h - 8, 40);
-      c.fill();
-      c.lineWidth = 10;
-      c.strokeStyle = C.sunDeep;
-      c.stroke();
-      drawWheelBadge(c, 90, h / 2, 54);
-      paintText(c, 'Little Wheels', w * 0.6, h * 0.38, h * 0.26, C.teal);
-      paintText(c, 'PRACTICE COURSE', w * 0.6, h * 0.7, h * 0.14, C.ink, 600);
-    }, 3);
-    const board = new THREE.Group();
-    board.add(at(rbox(3.2, 1.2, 0.12, C.woodDark, 0.05), 0, 1.6, -0.07));
-    board.add(at(atlas.plane(3.0, 1.0, cells.startBoard), 0, 1.6, 0.0));
-    for (const s of [-1, 1]) board.add(at(box(0.14, 1.6, 0.14, C.woodDark), s * 1.2, 0.8, -0.1));
-    add(board, -4.6, 0, 36.2, 0.3);
-    physics.add({ type: 'box', x: -4.6, z: 36.1, hw: 1.5, hd: 0.3 });
-    // Ducks' little house and pond
-    const hut = new THREE.Group();
-    hut.add(at(rbox(1.3, 0.9, 1.0, C.peach, 0.06), 0, 0.45, 0));
-    for (const s of [-1, 1]) {
-      const r = rbox(0.9, 0.08, 1.2, C.rose, 0.03);
-      r.rotation.z = s * -0.6;
-      hut.add(at(r, s * 0.34, 1.08, 0));
-    }
-    const hole = at(cyl(0.24, 0.24, 0.04, C.ink, 16), 0, 0.42, 0.5);
-    hole.rotation.x = Math.PI / 2;
-    hut.add(hole);
-    hut.add(at(k.heart(0.18, 0.03, C.white), 0, 0.72, 0.52));
-    add(hut, 13.4, 0, 9.6, 0.4);
-    physics.add({ type: 'circle', x: 13.4, z: 9.6, r: 0.8 });
-    add(cyl(POND.r + 0.25, POND.r + 0.3, 0.2, C.cream, 28), POND.x, 0.1, POND.z);
-    add(cyl(POND.r, POND.r, 0.04, '#7fcfe0', 28, { rough: 0.15 }), POND.x, 0.19, POND.z);
-    for (const [a, rr] of [[0.5, 1.0], [2.6, 0.8], [4.4, 1.1]]) add(cyl(0.22, 0.22, 0.02, C.leaf, 12), POND.x + Math.cos(a) * rr, 0.215, POND.z + Math.sin(a) * rr);
-    physics.add({ type: 'circle', x: POND.x, z: POND.z, r: POND.r + 0.25 });
-    // Parked cars in the other bays
-    for (const [x, colr] of PARKED) {
-      const pc = ctx.models.car(colr);
-      pc.root.position.set(x, 0, BAY.z);
-      pc.update(0, 0);
-      world.add(pc.root);
-      physics.add({ type: 'box', x, z: BAY.z, hw: 0.86, hd: 1.42 });
-    }
-    // A low flower border behind the bays (low, so the camera sees over it) with round bushes at the ends
-    add(rbox(LW - 0.4, 0.22, 0.7, C.cream, 0.06), (LOT.x0 + LOT.x1) / 2, 0.11, LOT.z1 + 0.45);
-    add(box(LW - 0.7, 0.04, 0.5, '#9a6a45'), (LOT.x0 + LOT.x1) / 2, 0.23, LOT.z1 + 0.45);
-    for (let x = LOT.x0 + 0.5; x < LOT.x1 - 0.4; x += 0.28) flowers.push([x, 0.24, LOT.z1 + 0.45 + (R() - 0.5) * 0.3, Math.floor(R() * 7), 1.1]);
-    for (const x of [LOT.x0 - 0.6, LOT.x1 + 0.6]) {
-      const b = sph(0.7, C.leaf, { rough: 0.9 }, 12);
-      b.scale.set(1.1, 0.85, 1);
-      add(b, x, 0.5, LOT.z1 + 0.4);
-    }
-    physics.add({ type: 'box', x: (LOT.x0 + LOT.x1) / 2, z: LOT.z1 + 0.45, hw: LW / 2, hd: 0.35 });
-    // Bay highlight
-    const glowMat = new THREE.MeshBasicMaterial({ color: '#ffd166', transparent: true, opacity: 0.8, depthWrite: false });
-    const bayGlow = new THREE.Group();
-    for (const [w, d, x, z] of [[3.0, 0.16, 0, -2.4], [3.0, 0.16, 0, 2.4], [0.16, 4.8, -1.5, 0], [0.16, 4.8, 1.5, 0]]) bayGlow.add(at(mesh(new THREE.BoxGeometry(w, 0.02, d), glowMat, { cast: false }), x, 0.06, z));
-    const bayFill = mesh(new THREE.PlaneGeometry(2.9, 4.7), new THREE.MeshBasicMaterial({ color: '#ffe9a8', transparent: true, opacity: 0.25, depthWrite: false }), { cast: false });
-    bayFill.rotation.x = -Math.PI / 2;
-    bayGlow.add(at(bayFill, 0, 0.055, 0));
-    add(bayGlow, BAY.x, 0, BAY.z);
-    keep.push(bayGlow);
-    // Zone strip (stop here) moved per task
-    // A soft "stop here" box: dashed sun-yellow outline and a pale fill
-    const zoneTex = (() => {
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = 256;
-      const c = cv.getContext('2d');
-      c.fillStyle = 'rgba(255,244,190,0.55)';
-      c.fillRect(0, 0, 256, 256);
-      c.strokeStyle = '#ffd166';
-      c.lineWidth = 18;
-      c.setLineDash([34, 22]);
-      c.strokeRect(9, 9, 238, 238);
-      const t = new THREE.CanvasTexture(cv);
-      t.colorSpace = THREE.SRGBColorSpace;
-      return t;
-    })();
-    const zoneMat = new THREE.MeshBasicMaterial({ map: zoneTex, transparent: true, opacity: 0.9, depthWrite: false });
-    const zone = mesh(new THREE.PlaneGeometry(1, 1), zoneMat, { cast: false });
-    zone.rotation.x = -Math.PI / 2;
-    zone.visible = false;
-    world.add(zone);
-    keep.push(zone);
-    const showZone = (x, z0, z1, w = ROAD_W - 0.3) => {
-      zone.visible = true;
-      zone.position.set(x, 0.05, (z0 + z1) / 2);
-      zone.scale.set(w, Math.abs(z1 - z0), 1);
-    };
-
-    // ---------------------------------------------------------------- cones (knockable, one instanced mesh)
-    const coneProto = makeCone(k);
-    const coneBaked = colorBake(coneProto)[0];
-    const CONES = [
-      [-2.5, GATE_Z - 1], [-2.5, GATE_Z], [-2.5, GATE_Z + 1], [2.5, GATE_Z - 1], [2.5, GATE_Z], [2.5, GATE_Z + 1],
-      [-2.6, STOP_Z - 1.2], [2.6, STOP_Z - 2.2], [-2.6, 18], [2.6, 18],
-      [16.3, 14], [21.7, 14], [16.3, 18], [21.7, 18],
-      [20.7, 27.0], [24.3, 27.0],
-    ].map(([x, z]) => ({ x, z, vx: 0, vz: 0, tip: 0, tipDir: 0, ry: R() * 6, hit: false, y: 0, vy: 0 }));
-    const cones = new THREE.InstancedMesh(coneBaked.geometry, coneBaked.material, CONES.length);
-    cones.castShadow = true;
-    cones.receiveShadow = true;
-    world.add(cones);
-    keep.push(cones);
-    const cq = new THREE.Quaternion();
-    const ce = new THREE.Euler();
-    const cv3 = new THREE.Vector3();
-    const one = new THREE.Vector3(1, 1, 1);
-    const drawCones = () => {
-      CONES.forEach((c, i) => {
-        ce.set(c.tip * Math.cos(c.tipDir), c.ry, c.tip * Math.sin(c.tipDir), 'YXZ');
-        m4.compose(cv3.set(c.x, 0.04 + c.y + Math.sin(c.tip) * 0.18, c.z), cq.setFromEuler(ce), one);
-        cones.setMatrixAt(i, m4);
-      });
-      cones.instanceMatrix.needsUpdate = true;
-    };
-    drawCones();
-
-    // ---------------------------------------------------------------- fence, trees and flowers
-    const posts = [];
-    const fenceLine = (x0, z0, x1, z1) => {
-      const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 1.2);
-      for (let i = 0; i <= n; i++) posts.push([x0 + ((x1 - x0) * i) / n, z0 + ((z1 - z0) * i) / n]);
-      const len = Math.hypot(x1 - x0, z1 - z0);
-      for (const y of [0.32, 0.62]) {
-        const rail = box(len, 0.08, 0.06, C.white);
-        rail.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
-        add(rail, (x0 + x1) / 2, y, (z0 + z1) / 2);
-      }
-    };
-    fenceLine(FENCE.x0, FENCE.z0, FENCE.x1, FENCE.z0);
-    fenceLine(FENCE.x1, FENCE.z0, FENCE.x1, FENCE.z1);
-    fenceLine(FENCE.x0, FENCE.z1, FENCE.x1, FENCE.z1);
-    fenceLine(FENCE.x0, FENCE.z0, FENCE.x0, FENCE.z1);
-    const postGeo = new THREE.BoxGeometry(0.12, 0.85, 0.08);
-    postGeo.translate(0, 0.42, 0);
-    const postMesh = new THREE.InstancedMesh(postGeo, mat(C.white), posts.length);
-    posts.forEach(([x, z], i) => postMesh.setMatrixAt(i, m4.makeTranslation(x, 0, z)));
-    postMesh.castShadow = true;
-    world.add(postMesh);
-    for (const [x, z, hw, hd] of [[(FENCE.x0 + FENCE.x1) / 2, FENCE.z0, 23, 0.2], [(FENCE.x0 + FENCE.x1) / 2, FENCE.z1, 23, 0.2], [FENCE.x0, (FENCE.z0 + FENCE.z1) / 2, 0.2, 33], [FENCE.x1, (FENCE.z0 + FENCE.z1) / 2, 0.2, 33]]) physics.add({ type: 'box', x, z, hw, hd });
-
-    const distTo = (pts, x, z) => {
-      let best = Infinity;
-      for (let i = 0; i < pts.length; i += 2) best = Math.min(best, (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2);
-      return Math.sqrt(best);
-    };
-    const onRoad = (x, z, pad = 0) =>
-      distTo(road1, x, z) < ROAD_W / 2 + 0.5 + pad ||
-      distTo(road2, x, z) < ROAD_W / 2 + 0.5 + pad ||
-      Math.hypot(x - RC.x, z - RC.z) < R_OUT + 0.3 + pad ||
-      (x > LOT.x0 - pad && x < LOT.x1 + pad && z > LOT.z0 - pad && z < LOT.z1 + pad);
-    const blocked = (x, z) =>
-      onRoad(x, z, 3.4) || Math.hypot(x - POND.x, z - POND.z) < POND.r + 1.5 || Math.hypot(x - 13.4, z - 9.6) < 2.2 || Math.hypot(x + 4.6, z - 36.2) < 2.5 || (x > -7 && x < -2 && z > 27 && z < 33);
-    let placed = 0;
-    for (let i = 0; i < 500 && placed < 56; i++) {
-      const x = -16 + R() * 56;
-      const z = -30 + R() * 78;
-      if (blocked(x, z)) continue;
-      const inside = x > FENCE.x0 + 1 && x < FENCE.x1 - 1 && z > FENCE.z0 + 1 && z < FENCE.z1 - 1;
-      const nearFence = Math.min(Math.abs(x - FENCE.x0), Math.abs(x - FENCE.x1), Math.abs(z - FENCE.z0), Math.abs(z - FENCE.z1)) < 1.6;
-      if (nearFence) continue;
-      const s = 0.65 + R() * 0.4;
-      add(tree(k, s, placed % 3, 11), x, 0, z);
-      if (inside) physics.add({ type: 'circle', x, z, r: 0.3 * s });
-      placed++;
-    }
-    for (let i = 0; i < 170; i++) {
-      const x = -9 + R() * 42;
-      const z = -22 + R() * 62;
-      if (onRoad(x, z, 0.6)) continue;
-      flowers.push([x, 0, z, Math.floor(R() * 7), 0.9 + R() * 0.4]);
-    }
-    for (let i = 0; i < 30; i++) {
-      const x = -8 + R() * 40;
-      const z = -20 + R() * 58;
-      if (blocked(x, z)) continue;
-      const b = sph(0.5, i % 2 ? C.leaf : C.leafDark, { rough: 0.9 }, 12);
-      b.scale.set(1.3, 0.8, 1);
-      add(b, x, 0.32, z);
-      for (let j = 0; j < 6; j++) flowers.push([x + (R() - 0.5) * 1.6, 0, z + 0.5 + R() * 0.4, Math.floor(R() * 7), 0.9]);
-    }
-    // Bunting along the start straight and beside the duck road
-    const flagGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.17, 0, 0), new THREE.Vector3(0.17, 0, 0), new THREE.Vector3(0, -0.32, 0)]);
-    flagGeo.setIndex([0, 2, 1]);
-    flagGeo.computeVertexNormals();
-    const flagCols = [C.rose, C.sun, C.mint, C.sky, C.pink, C.white];
-    const bunting = (x0, z0, x1, z1) => {
-      for (const [x, z] of [[x0, z0], [x1, z1]]) {
-        add(cyl(0.05, 0.06, 2.8, C.white, 8), x, 1.4, z);
-        add(sph(0.08, C.sun, undefined, 8), x, 2.84, z);
-        physics.add({ type: 'circle', x, z, r: 0.12 });
-      }
-      const n = Math.round(Math.hypot(x1 - x0, z1 - z0) / 0.55);
-      const ry = Math.atan2(x1 - x0, z1 - z0) + Math.PI / 2;
-      for (let i = 1; i < n; i++) {
-        const f = i / n;
-        // Each flag swings out a little from the rope, so it shows from the camera above
-        const pivot = new THREE.Group();
-        pivot.rotation.y = ry;
-        const fl = mesh(flagGeo, mat(flagCols[i % flagCols.length], { rough: 0.7, side: THREE.DoubleSide }), { cast: false });
-        fl.rotation.x = -0.95;
-        pivot.add(fl);
-        add(pivot, x0 + (x1 - x0) * f, 2.7 - Math.sin(f * Math.PI) * 0.4, z0 + (z1 - z0) * f);
-      }
-    };
-    bunting(-3.4, 33, -3.4, 27.5);
-    bunting(-3.4, 20.5, -3.4, 14.5);
-    bunting(3.4, 33, 3.4, 27.5);
-    bunting(22.6, 11.5, 22.6, 17.5);
-    bunting(15.4, 11.5, 15.4, 17.5);
-    addFlowers(world, flowers, R);
-
-    // ---------------------------------------------------------------- the learner car and its people
-    const car = ctx.models.car(C.sun);
-    learnerize(car, atlas, cells);
-    world.add(car.root);
-    keep.push(car.root);
+    let course = loadCourse(ctx, who);
+    const paintColor = () => (PAINTS.find((p) => p.id === course.paint) || PAINTS[0]).color;
+    const car = ctx.models.car(paintColor());
+    learnerize(car, W.atlas, W.cells);
+    car.root.rotation.order = 'YXZ';
+    scene.add(car.root);
     const brakeMat = umat('#e5484d', { emissive: '#ff3b3b', ei: 0.4 });
     car.root.traverse((o) => {
       if (o.isMesh && o.material?.emissive && o.material.color.getHexString() === 'e5484d') o.material = brakeMat;
     });
-    const roji = ctx.makeKid('roji');
-    roji.pose = 'drive';
-    car.body.add(roji.root);
-    roji.root.position.set(0.33, 0.66, -0.25);
-    const nora = makeNora(ctx.makeKid, { scale: meIsRoji ? 1.04 : 1.12 });
-    const homama = ctx.makeKid('homama');
-    const passenger = meIsRoji ? nora : homama;
-    const fanKid = meIsRoji ? homama : nora;
-    passenger.pose = 'sit';
-    car.body.add(passenger.root);
-    passenger.root.position.set(-0.33, 0.66, -0.25);
-    // Homama's banner on two poles, held over his head
-    let banner = null;
-    if (meIsRoji) {
-      cells.banner = atlas.add((c, w, h) => {
-        c.fillStyle = C.rose;
-        roundRect(c, 4, 20, w - 8, h - 40, 40);
-        c.fill();
-        c.lineWidth = 8;
-        c.strokeStyle = '#ffffff';
-        c.setLineDash([16, 12]);
-        roundRect(c, 18, 34, w - 36, h - 68, 30);
-        c.stroke();
-        c.setLineDash([]);
-        paintText(c, 'GO ROJI!', w / 2, h / 2 + 6, h * 0.42, '#ffffff');
-        c.fillStyle = C.sun;
-        heartPath(c, 46, h / 2 + 10, 26);
-        c.fill();
-        heartPath(c, w - 46, h / 2 + 10, 26);
-        c.fill();
-      }, 2);
-      banner = new THREE.Group();
-      banner.add(at(atlas.plane(0.96, 0.48, cells.banner, { cast: true }), 0, 1.78, 0.06));
-      banner.add(at(rbox(1.0, 0.52, 0.03, C.white, 0.02), 0, 1.78, 0.04));
-      for (const s of [-1, 1]) banner.add(at(cyl(0.018, 0.018, 1.08, C.woodDark, 6), s * 0.34, 1.48, 0.02));
-      homama.body.add(banner);
+    // Merge the car body (paint, brake lights and headlights keep their own materials, so they still change)
+    colorBake(car.body, [car.wheelSteer]);
+    bakeStatic(car.body, [car.wheelSteer], mergeGeometries);
+    for (const w of car.wheels) colorBake(w.spin);
+    // Wipers (rain lesson)
+    const wipers = new THREE.Group();
+    wipers.position.set(0, 0.99, 0.46);
+    wipers.rotation.x = -0.35;
+    const blades = [];
+    for (const x of [0.32, -0.28]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, 0, 0.02);
+      const blade = mesh(new THREE.BoxGeometry(0.03, 0.42, 0.02), umat(C.ink, { rough: 0.5 }), { cast: false });
+      blade.position.y = 0.2;
+      pivot.add(blade);
+      wipers.add(pivot);
+      blades.push(pivot);
     }
-    if (banner) colorBake(banner);
-    for (const kd of [roji, nora, homama]) bakeLiveKid(kd, banner ? [banner] : []);
-    const fan = { kid: fanKid, pos: new THREE.Vector3(-4.6, 0, 30.5), yaw: Math.PI / 2, target: new THREE.Vector3(-4.6, 0, 30.5), speed: 0 };
+    wipers.visible = false;
+    car.body.add(wipers);
+    // Headlights (night lesson): a spot light and two soft beams
+    const head = new THREE.SpotLight('#fff1c8', 0, 26, 0.62, 0.65, 1.2);
+    head.position.set(0, 0.7, 1.2);
+    head.target.position.set(0, 0, 9);
+    car.root.add(head, head.target);
+    const beamTex = (() => {
+      const cv = document.createElement('canvas');
+      cv.width = 4;
+      cv.height = 64;
+      const c = cv.getContext('2d');
+      const g = c.createLinearGradient(0, 0, 0, 64);
+      g.addColorStop(0, 'rgba(255,240,200,0)');
+      g.addColorStop(1, 'rgba(255,240,200,0.55)');
+      c.fillStyle = g;
+      c.fillRect(0, 0, 4, 64);
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    })();
+    const beamMat = new THREE.MeshBasicMaterial({ map: beamTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0.32 });
+    const beamGeo = new THREE.CylinderGeometry(0.1, 1.5, 6.5, 14, 1, true);
+    beamGeo.rotateX(Math.PI / 2);
+    beamGeo.translate(0, 0, 3.3);
+    const beams = new THREE.Group();
+    for (const x of [0.5, -0.5]) {
+      const b = mesh(beamGeo, beamMat, { cast: false, receive: false });
+      b.position.set(x, 0.62, 1.32);
+      b.rotation.x = 0.1;
+      b.renderOrder = 3;
+      beams.add(b);
+    }
+    beams.visible = false;
+    car.root.add(beams);
+    // The people: the driver, Abu Sanad beside them and the other one cheering at the roadside
+    const driver = ctx.makeKid(ctx.me);
+    const abu = makeAbuSanad(ctx.makeKid, { scale: 1.04 });
+    const fanKid = ctx.makeKid(ctx.partner);
+    W.cells.banner = W.atlas.add((c, w, h) => {
+      c.fillStyle = C.rose;
+      roundRect(c, 4, 20, w - 8, h - 40, 40);
+      c.fill();
+      c.lineWidth = 8;
+      c.strokeStyle = '#ffffff';
+      c.setLineDash([16, 12]);
+      roundRect(c, 18, 34, w - 36, h - 68, 30);
+      c.stroke();
+      c.setLineDash([]);
+      paintText(c, `GO ${NAME.toUpperCase()}!`, w / 2, h / 2 + 6, h * (meIsRoji ? 0.42 : 0.3), '#ffffff');
+      c.fillStyle = C.sun;
+      heartPath(c, 46, h / 2 + 10, 26);
+      c.fill();
+      heartPath(c, w - 46, h / 2 + 10, 26);
+      c.fill();
+    }, 2);
+    const banner = new THREE.Group();
+    banner.add(at(W.atlas.plane(0.96, 0.48, W.cells.banner, { cast: true }), 0, 1.78, 0.06));
+    banner.add(at(rbox(1.0, 0.52, 0.03, C.white, 0.02), 0, 1.78, 0.04));
+    for (const s of [-1, 1]) banner.add(at(cyl(0.018, 0.018, 1.08, C.woodDark, 6), s * 0.34, 1.48, 0.02));
+    fanKid.body.add(banner);
+    colorBake(banner);
+    const umbrella = makeUmbrella(k, meIsRoji ? C.sky : C.rose);
+    colorBake(umbrella);
+    bakeLiveKid(driver);
+    bakeLiveKid(abu);
+    bakeLiveKid(fanKid, [banner]);
     scene.add(fanKid.root);
+    const fan = { pos: new THREE.Vector3(-4.6, 0, 34), yaw: Math.PI / 2, target: new THREE.Vector3(-4.6, 0, 34), speed: 0 };
     const fanCol = physics.add({ type: 'circle', x: fan.pos.x, z: fan.pos.z, r: 0.45 });
-    const SPOTS = { gate: [-4.6, 21.8], stop: [-4.4, 10.6], light: [-4.8, 3.6], round: [8.6, 1.4], ducks: [23.6, 4.4], park: [28.0, 24.0] };
-
-    // ---------------------------------------------------------------- ducks
-    const ducks = [];
-    for (let i = 0; i < 4; i++) {
-      const d = makeDuck(k, i === 0 ? { color: C.white, size: 1.3 } : { color: C.sun, size: 0.75 });
-      colorBake(d);
-      const x = 13.9 - i * 0.65;
-      d.position.set(x, 0, DUCK_Z + 0.4);
-      d.rotation.y = Math.PI / 2;
-      world.add(d);
-      keep.push(d);
-      ducks.push({ g: d, x, z: DUCK_Z, hop: 0, swimA: i * 1.6, done: false });
+    function seatKids() {
+      car.body.add(driver.root);
+      driver.pose = 'drive';
+      driver.root.rotation.set(0, 0, 0);
+      driver.root.position.set(0.33, 0.66, -0.25);
+      car.body.add(abu.root);
+      abu.pose = 'sit';
+      abu.root.rotation.set(0, 0, 0);
+      abu.root.position.set(-0.33, 0.66, -0.25);
+      out = false;
     }
-    let duckState = 'home'; // home | walking | scared | pond
-    let duckSpeed = 1.6;
+    let out = false;
+    seatKids();
+
+    // Rain and night extras
+    const RAIN_N = 1400;
+    const rainPos = new Float32Array(RAIN_N * 6);
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+    const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: '#d8e8f4', transparent: true, opacity: 0.55 }));
+    rain.frustumCulled = false;
+    rain.visible = false;
+    scene.add(rain);
+    const drops = Array.from({ length: RAIN_N }, () => [Math.random() * 40 - 20, Math.random() * 14, Math.random() * 32 - 16]);
+    const fliesGeo = new THREE.BufferGeometry();
+    const flyBase = [];
+    for (let i = 0; i < 90; i++) {
+      const x = -8 + Math.random() * 40;
+      const z = -18 + Math.random() * 60;
+      if (W.onRoad(x, z, 0.4)) continue;
+      flyBase.push([x, 0.4 + Math.random() * 1.2, z, Math.random() * 6]);
+    }
+    const flyPos = new Float32Array(flyBase.length * 3);
+    fliesGeo.setAttribute('position', new THREE.BufferAttribute(flyPos, 3));
+    const flies = new THREE.Points(fliesGeo, new THREE.PointsMaterial({ color: '#fff3a0', size: 0.16, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+    flies.frustumCulled = false;
+    flies.visible = false;
+    scene.add(flies);
 
     // ---------------------------------------------------------------- guide arrow and target beacon
     const chev = new THREE.Shape();
@@ -656,342 +241,639 @@ export default {
     chev.closePath();
     const arrowGeo = new THREE.ExtrudeGeometry(chev, { depth: 0.12, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03, bevelSegments: 1 });
     arrowGeo.rotateX(-Math.PI / 2);
-    arrowGeo.translate(0, 0, 0);
     const arrowMat = umat('#ffd166', { emissive: '#ffb020', ei: 0.55, rough: 0.4 });
     const guide = mesh(arrowGeo, arrowMat, { cast: false });
     scene.add(guide);
     const beacon = new THREE.Group();
     const bcone = mesh(new THREE.ConeGeometry(0.45, 0.7, 4), arrowMat);
     bcone.rotation.x = Math.PI;
-    beacon.add(at(bcone, 0, 0, 0));
+    beacon.add(bcone);
     beacon.add(at(mesh(new THREE.BoxGeometry(0.3, 0.6, 0.3), arrowMat), 0, 0.6, 0));
     scene.add(beacon);
 
-    // Merge the static scenery
-    colorBake(world, keep);
-    bakeStatic(world, keep, mergeGeometries);
-
     // ---------------------------------------------------------------- HUD
-    const style = document.createElement('style');
-    style.textContent = CSS;
-    document.head.appendChild(style);
-    const layer = document.createElement('div');
-    layer.className = 'dl-layer';
-    layer.innerHTML = `
-      <div class="dl-list"><h4>Lesson with Abu Sanad</h4><ol>${TASKS.map((t, i) => `<li data-i="${i}"><i></i><span>${t.label}</span></li>`).join('')}</ol><div class="dl-smooth">Smooth driving<span></span></div></div>
-      <div class="dl-say hide"><b>Abu Sanad</b><span></span></div>
-      <div class="dl-pop"></div>
-      <div class="dl-card"><canvas width="760" height="460"></canvas></div>`;
-    (document.getElementById('arena') || document.body).appendChild(layer);
-    const $ = (s) => layer.querySelector(s);
-    const items = [...layer.querySelectorAll('.dl-list li')];
-    const sayEl = $('.dl-say');
-    const popEl = $('.dl-pop');
-    let popTimer = 0;
-    const pop = (html, color = '#fff', ms = 1100) => {
-      popEl.innerHTML = html;
-      popEl.style.color = color;
-      popEl.classList.remove('on');
-      void popEl.offsetWidth;
-      popEl.classList.add('on');
-      clearTimeout(popTimer);
-      popTimer = setTimeout(() => popEl.classList.remove('on'), ms);
+    const ui = makeUI(ctx);
+    const meter = () => {
+      if (meIsRoji) {
+        const p = licenceOf(course, ctx.load('licence', 0));
+        ui.meter(`<span class="dl-lic">${p >= 100 ? 'Licence!' : 'Licence'} <i><b style="width:${Math.max(4, p)}%"></b></i></span>`);
+      } else ui.meter(`<span class="dl-lic">Refresher ${STAR(true, 15)} ${totalStars(course)}</span>`);
     };
-    let sayTimer = 0;
-    let sayTemp = false; // a short remark is showing; the task instruction comes back after it
-    const say = (text, who = 'Abu Sanad', ms = 0) => {
-      sayEl.querySelector('b').textContent = who;
-      sayEl.querySelector('span').textContent = text;
-      sayEl.className = `dl-say${who === 'Homama' ? ' who-homama' : ''}`;
-      clearTimeout(sayTimer);
-      sayTemp = !!ms;
-      if (ms)
-        sayTimer = setTimeout(() => {
-          sayTemp = false;
-          if (!disposed && phase === 'drive' && taskI < TASKS.length) say(TASKS[taskI].say);
-        }, ms);
-    };
-    const drawList = () => {
-      items.forEach((li, i) => {
-        li.className = i < taskI ? 'done' : i === taskI ? 'now' : '';
-        li.querySelector('i').textContent = i < taskI ? '\u2713' : '';
-      });
-      const stars = starsNow();
-      $('.dl-smooth span').innerHTML = [1, 2, 3].map((n) => STAR(n <= stars, 15)).join('');
-    };
-    const startProgress = clamp(ctx.load('licence', 0), 0, 100);
-    const lessonNo = ctx.load('lessons', 0) + 1;
-    const hadLicence = startProgress >= 100;
-    const meter = (p) => hud.score(`<span class="dl-lic">${p >= 100 ? 'Licence!' : 'Licence'} <i><b style="width:${Math.max(4, p)}%"></b></i></span>`);
-    meter(startProgress);
-    hud.buttons({ action: 'Brake', jump: 'Honk' });
-    hud.hint('Arrows, WASD or hold the mouse to steer. Hold E to brake. Space honks.');
+    meter();
 
     // ---------------------------------------------------------------- state
-    let disposed = false;
-    let phase = 'intro'; // intro | drive | done | licence
+    let phase = 'menu'; // menu | intro | count | drive | done | licence | result
     let phaseT = 0;
-    let taskI = 0;
+    let L = null;
+    let li = 0;
+    let tasks = [];
+    let ti = 0;
     let wps = [];
     let wpI = 0;
+    let task = null;
+    let advance = null;
     let oops = 0;
+    let faults = [];
+    let missed = [];
+    let lessonT = 0;
+    let coneHits = 0;
+    let gear = 'D';
+    let lights = false;
+    let envNow = 'day';
+    let limit = null;
+    let overT = 0;
+    let overCd = 0;
     let bumpCd = 0;
+    let offT = 0;
     let offCd = 0;
-    let lightState = 'red';
-    let lightWait = 0;
-    let lightT = 0;
-    let ringAcc = 0;
-    let ringPrev = null;
-    let wrongSaid = false;
-    let leftEarly = false;
-    let parkT = 0;
-    let crookedCd = 0;
-    let stopSaid = false;
-    let duckWaitSaid = false;
-    let scared = false;
+    let stuckT = 0;
     let honkCd = 0;
+    let beepT = 0;
+    let cheerCd = 0;
+    let kissCd = 0;
+    let passengerCheer = 0;
+    let writeT = 0;
+    let slipping = false;
     let hotBrake = false;
-    const starsNow = () => (oops <= 0.5 ? 3 : oops <= 2 ? 2 : 1);
-    const ringPt = (th) => [RC.x + Math.cos(th) * R_LANE, RC.z + Math.sin(th) * R_LANE];
-    const WAYPOINTS = {
-      gate: [[0, GATE_Z - 1]],
-      stop: [[0, STOP_Z - 0.5]],
-      light: [[0, LIGHT_Z - 0.5], [0, -4]],
-      round: [[2.3, -7.6], [9, -10], ...Array.from({ length: 10 }, (_, i) => ringPt(Math.PI - ((i + 1) * Math.PI) / 4))],
-      ducks: [[19, 1.2], [19, ZEBRA.z0]],
-      park: [[19.5, 22.5], [BAY.x, 25.4], [BAY.x, BAY.z]],
-    };
-    const BEACON = { gate: [0, GATE_Z, 5.0], stop: [0, STOP_Z + 0.6, 2.6], light: [3.1, LIGHT_Z + 0.2, 4.2], round: [RC.x, RC.z, 5.2], ducks: [19, DUCK_Z, 2.6], park: [BAY.x, BAY.z, 2.6] };
+    let lastResult = null;
+    let lapAcc = 0;
+    let lapPrev = null;
+    let lapEgg = false;
+    let lightState = 'red';
+    let brakeHeld = false;
+    const vel = new THREE.Vector3();
+    const tmp = new THREE.Vector3();
+    const tmp2 = new THREE.Vector3();
+    const q = new THREE.Vector3();
+    const cones = [];
+    const m4 = new THREE.Matrix4();
+    const cq = new THREE.Quaternion();
+    const ce = new THREE.Euler();
+    const one = new THREE.Vector3(1, 1, 1);
+    const splashCd = new Map();
+
+    const front = () => tmp.set(car.root.position.x + Math.sin(car.yaw) * FRONT, 0, car.root.position.z + Math.cos(car.yaw) * FRONT);
     const sfx = {
       tone: (f, d, o) => sound?.ctx && !sound.muted && sound.tone(f, sound.ctx.currentTime, d, o),
       quack(n = 2) {
         for (let i = 0; i < n; i++) later(i * 170, () => sfx.tone(560 + Math.random() * 140, 0.12, { type: 'square', gain: 0.04, slideTo: 370 }));
       },
-      bonk() {
-        sfx.tone(180, 0.12, { type: 'triangle', gain: 0.08, slideTo: 120 });
-      },
+      bonk: () => sfx.tone(180, 0.12, { type: 'triangle', gain: 0.08, slideTo: 120 }),
+      thump: () => sfx.tone(110, 0.1, { type: 'sine', gain: 0.1, slideTo: 70 }),
       chime() {
         [72, 76, 79].forEach((n, i) => later(i * 90, () => sfx.tone(440 * Math.pow(2, (n - 69) / 12), 0.25, { type: 'triangle', gain: 0.05 })));
       },
+      beep: () => sfx.tone(1180, 0.08, { type: 'square', gain: 0.025 }),
+      tick: () => sfx.tone(1500, 0.05, { type: 'triangle', gain: 0.04 }),
+      splash() {
+        for (let i = 0; i < 4; i++) later(i * 40, () => sfx.tone(900 - i * 150 + Math.random() * 200, 0.12, { type: 'triangle', gain: 0.03, slideTo: 300 }));
+      },
     };
-    const OOPS_LINES = ['Oops! Gentle, gentle.', 'Bump! Everyone okay? Good.', 'Easy does it, Roji.'];
-    let oopsI = 0;
-    const addOops = (n, line) => {
-      oops += n;
-      sfx.bonk();
-      say(line || OOPS_LINES[oopsI++ % OOPS_LINES.length], 'Abu Sanad', 2600);
-      drawList();
-    };
-
-    function setTask(i) {
-      taskI = i;
-      drawList();
-      zone.visible = false;
-      bayGlow.visible = false;
-      if (i >= TASKS.length) return;
-      const t = TASKS[i];
-      wps = WAYPOINTS[t.id];
-      wpI = 0;
-      if (!sayTemp) say(t.say);
-      later(i === 0 ? 0 : 1500, () => phase === 'drive' && taskI === i && fan.target.set(SPOTS[t.id][0], 0, SPOTS[t.id][1]));
-      if (t.id === 'stop') showZone(0, STOP_Z + 0.1, STOP_Z + 3.1);
-      if (t.id === 'light') showZone(0, LIGHT_Z + 0.1, LIGHT_Z + 3.6);
-      if (t.id === 'park') bayGlow.visible = true;
-      if (t.id === 'round') {
-        ringAcc = 0;
-        ringPrev = null;
+    const sayTask = () => !disposed && phase === 'drive' && task && ui.say(task.say);
+    const say = (text, whoSays = 'Abu Sanad', ms = 0) => ui.say(text, whoSays, ms, sayTask);
+    const starsNow = () => {
+      if (L?.test) {
+        const serious = faults.filter((f) => f.serious).length;
+        const minor = faults.length - serious;
+        return serious || minor > 3 ? 0 : minor <= 1 ? 3 : minor === 2 ? 2 : 1;
       }
-      if (t.id === 'ducks') showZone(19, ZEBRA.z0 - 2.6, ZEBRA.z0 - 0.15, ROAD_W - 0.3);
+      return oops <= 0.5 ? 3 : oops <= 2 ? 2 : 1;
+    };
+    const refreshStars = () => {
+      if (L?.test) {
+        const serious = faults.filter((f) => f.serious).length;
+        ui.setMarks(true, faults.length - serious, serious);
+      } else {
+        ui.setMarks(false);
+        ui.setStars(starsNow());
+      }
+    };
+    const OOPS = ['Oops! Gentle, gentle.', 'Bump! Everyone okay? Good.', `Easy does it, ${NAME}.`];
+    let oopsI = 0;
+    function addOops(n, line, fault) {
+      if (phase !== 'drive') return;
+      oops += n;
+      dbg.log.push(`${lessonT.toFixed(1)} ${n} ${fault || line || 'bump'}`);
+      sfx.bonk();
+      say(line || OOPS[oopsI++ % OOPS.length], 'Abu Sanad', 2800);
+      if (L.test) {
+        faults.push({ text: fault || line || 'Bump', serious: n >= 1 });
+        later(350, () => sfx.tick());
+        writeT = 1.2;
+      }
+      refreshStars();
     }
-    function complete(text, praise = true) {
-      if (praise) {
-        pop(text, '#fff6c8');
-        sound.ui('good');
-        fx.burst(car.root.position.clone().setY(2.2), ['#ffd166', '#ffffff', '#7fd8bf', '#ff9eb5'], 22);
-      } else pop(text, '#ffe1e6');
-      roji.squash = 1.18;
-      cheer();
-      setTask(taskI + 1);
-      if (taskI >= TASKS.length) finishLesson();
+    function setEnv(kind) {
+      envNow = kind;
+      const night = kind === 'night';
+      const wet = kind === 'rain';
+      const sky = night ? '#22305a' : wet ? '#9fb4c2' : '#a6dde2';
+      scene.background.set(sky);
+      scene.fog.color.set(sky);
+      scene.fog.near = night ? 30 : wet ? 40 : 70;
+      scene.fog.far = night ? 110 : wet ? 140 : 190;
+      env.hemi.intensity = night ? 0.42 : wet ? 1.05 : 1.35;
+      env.hemi.color.set(night ? '#9fb2f0' : '#fff6ea');
+      env.hemi.groundColor.set(night ? '#2f3e48' : '#7fae74');
+      env.sun.intensity = night ? 0.5 : wet ? 1.0 : 2.5;
+      env.sun.color.set(night ? '#a9bcff' : wet ? '#e8eef5' : '#fff0d8');
+      W.bulbMat.emissiveIntensity = night ? 3.2 : 0.25;
+      W.pools.visible = night;
+      W.fairy.visible = night;
+      W.winMat.emissive.set(night ? '#ffcf7a' : '#bfe6ff');
+      W.winMat.emissiveIntensity = night ? 1.3 : 0.25;
+      W.puddleGroup.visible = wet;
+      for (const m of W.wetMats) {
+        m.roughness = wet ? 0.38 : 0.9;
+        m.color.setScalar(wet ? 0.8 : 1);
+      }
+      rain.visible = wet;
+      wipers.visible = wet;
+      flies.visible = night;
+      car.headMat.emissiveIntensity = night ? (lights ? 3 : 0.3) : 0.6;
+      setLights(lights);
+      fanKid.carry(wet ? umbrella : null);
+      banner.visible = !wet;
     }
-    function cheer() {
-      if (fanKid.pose === 'stand' && fan.speed < 0.5) fanKid.emote(meIsRoji ? 'cheer' : 'wave');
-      passengerCheer = 1.4;
-      const lines = meIsRoji ? ['Yay, Roji!', 'Woo! That was perfect!', 'You are amazing, Roji!', 'Go go go, Roji!'] : ['Great job, Roji!', 'Smooth! I could not do it better.', 'You are a natural, Roji!', 'High five, Roji!'];
-      later(400, () => !disposed && phase === 'drive' && say(lines[(taskI + R() * 4) % 4 | 0], 'Homama', 1700));
+    function setLights(on) {
+      lights = on;
+      const night = envNow === 'night';
+      head.intensity = on && night ? 60 : 0;
+      beams.visible = on && night;
+      car.headMat.emissiveIntensity = on ? 3 : night ? 0.3 : 0.6;
+      document.querySelector('#arena .a-btn[data-b="lights"]')?.classList.toggle('dl-on', on);
     }
-    let passengerCheer = 0;
+    function setLightState(s) {
+      lightState = s;
+      setLight(W.lampMats, s);
+    }
+    function setCones(list) {
+      cones.length = 0;
+      for (const [x, z] of list) cones.push({ x, z, vx: 0, vz: 0, vy: 0, y: 0, tip: 0, tipDir: 0, ry: Math.random() * 6, hit: false });
+      W.cones.count = cones.length;
+      drawCones();
+    }
+    function drawCones() {
+      cones.forEach((c, i) => {
+        ce.set(c.tip * Math.cos(c.tipDir), c.ry, c.tip * Math.sin(c.tipDir), 'YXZ');
+        m4.compose(q.set(c.x, 0.04 + c.y + Math.sin(c.tip) * 0.18, c.z), cq.setFromEuler(ce), one);
+        W.cones.setMatrixAt(i, m4);
+      });
+      W.cones.instanceMatrix.needsUpdate = true;
+    }
+    function placeCar(x, z, yaw) {
+      car.root.position.set(x, heightAt(x, z), z);
+      car.yaw = yaw;
+      car.speed = 0;
+      car.steer = 0;
+      vel.set(0, 0, 0);
+      car.update(0, 0);
+    }
 
-    // ---------------------------------------------------------------- lesson end
-    let gained = 0;
-    let newProgress = startProgress;
+    // ---------------------------------------------------------------- the game API the lessons use
+    const G = {
+      get p() {
+        return car.root.position;
+      },
+      get yaw() {
+        return car.yaw;
+      },
+      get spd() {
+        return car.speed;
+      },
+      get sp() {
+        return Math.abs(car.speed);
+      },
+      front: () => front().clone(),
+      get wp() {
+        return wps[Math.min(wpI, wps.length - 1)];
+      },
+      get wpI() {
+        return wpI;
+      },
+      set wpI(v) {
+        wpI = Math.min(v, wps.length - 1);
+      },
+      get light() {
+        return lightState;
+      },
+      get lights() {
+        return lights;
+      },
+      get gear() {
+        return gear;
+      },
+      get coneHits() {
+        return coneHits;
+      },
+      get slipping() {
+        return slipping;
+      },
+      get strict() {
+        return !!L?.test;
+      },
+      get brakeHeld() {
+        return brakeHeld;
+      },
+      name: NAME,
+      traffic,
+      crossing,
+      fox,
+      tractor,
+      ducks,
+      onSplash: null,
+      onRail: null,
+      setLight: setLightState,
+      setLights,
+      setLimit: (v) => (limit = v),
+      say,
+      pop: (html, color) => ui.pop(html, color),
+      chime: () => sfx.chime(),
+      quack: (n) => sfx.quack(n),
+      oops: addOops,
+      zone: (x0, z0, x1, z1) => W.showZone(x0, z0, x1, z1),
+      hideZone: () => W.hideZone(),
+      bay: (x, z, w, d, nose = null) => W.showBay(x, z, w, d, nose),
+      hideBay: () => W.hideBay(),
+      done(text, praise = true) {
+        if (advance) return;
+        advance = { text, praise };
+      },
+    };
+
+    // ---------------------------------------------------------------- lesson flow
+    function setTaskI(i) {
+      ti = i;
+      W.hideZone();
+      W.hideBay();
+      G.onSplash = null;
+      G.onRail = null;
+      ui.setTask(i, missed);
+      task = tasks[i] || null;
+      if (!task) return;
+      wps = task.wps || [];
+      wpI = 0;
+      task.begin?.(G);
+      say(task.say);
+      const f = task.fan;
+      if (f) later(i === 0 ? 0 : 900, () => phase === 'drive' && ti === i && fan.target.set(f[0], 0, f[1]));
+    }
+    function completeTask({ text, praise }) {
+      missed[ti] = !praise;
+      if (praise) {
+        ui.pop(text, '#fff6c8');
+        sound.ui('good');
+        fx.burst(car.root.position.clone().setY(car.root.position.y + 2.2), ['#ffd166', '#ffffff', '#7fd8bf', '#ff9eb5'], 22);
+        driver.squash = 1.18;
+        if (!L.test) passengerCheer = 1.4;
+        cheer();
+      } else ui.pop(text, '#ffe1e6');
+      setTaskI(ti + 1);
+      if (ti >= tasks.length) finishLesson();
+    }
+    const CHEERS = meIsRoji
+      ? ['Yay, Roji!', 'Woo! That was perfect!', 'You are amazing, Roji!', 'That is my Roji!', 'Smooth! I could not do it better.']
+      : ['Go Homama!', 'So smooth, Homama!', 'Show-off! I love it.', 'That is my Homama!', 'Look at you go, Homama!'];
+    function cheer(force = false) {
+      if (!force && (cheerCd > 0 || Math.random() < 0.45)) return;
+      cheerCd = 11;
+      if (fanKid.pose === 'stand' && fan.speed < 0.5) fanKid.emote('cheer');
+      later(350, () => phase === 'drive' && say(CHEERS[(Math.random() * CHEERS.length) | 0], FAN, 1700));
+    }
+    function beginLesson(i) {
+      ui.closeCard();
+      ui.licenceCard(NAME, false);
+      li = i;
+      L = LESSONS[i];
+      tasks = L.tasks();
+      oops = 0;
+      faults = [];
+      missed = [];
+      lessonT = 0;
+      coneHits = 0;
+      gear = 'D';
+      limit = null;
+      overT = offT = stuckT = 0;
+      slipping = false;
+      lapAcc = 0;
+      lapPrev = null;
+      seatKids();
+      setLights(false);
+      setEnv(L.env);
+      setLightState(L.light || 'red');
+      traffic.setup(L.traffic || 0, { night: L.env === 'night' });
+      crossing.reset();
+      fox.hide();
+      tractor.park();
+      if (L.id === 'roundabout') ducks.home();
+      else ducks.pond();
+      setCones(tasks.flatMap((t) => t.cones || []));
+      placeCar(...L.start);
+      const f0 = tasks[0].fan || [L.start[0] - 4, L.start[1]];
+      fan.pos.set(f0[0], heightAt(f0[0], f0[1]), f0[1]);
+      fan.target.copy(fan.pos);
+      ui.setList(L.test ? 'Test with Abu Sanad' : `Lesson ${i + 1}: ${L.title}`, tasks.map((t) => t.label));
+      refreshStars();
+      ui.mode('drive');
+      hud.buttons({ action: 'Brake', jump: 'Honk', extra: [L.reverse ? { id: 'gear', label: 'Reverse' } : null, L.lights ? { id: 'lights', label: 'Lights' } : null].filter(Boolean) });
+      hud.hint(`Arrows, WASD or hold the mouse to steer. Hold E to brake.${L.reverse ? ' R: reverse.' : ''}${L.lights ? ' L: lights.' : ''} Space honks.`);
+      phase = 'count';
+      phaseT = 0;
+      advance = null;
+      setTaskI(0);
+      say(L.test ? `This is your test, ${NAME}. I will be quiet and mark my sheet. Good luck!` : `Hi ${NAME}! Seatbelt on? ${L.tip}`);
+      hud.message(L.test ? 'Driving test' : `Lesson ${i + 1}`, 1400);
+      sound.ui('swoosh');
+      meter();
+    }
     function finishLesson() {
       phase = 'done';
       phaseT = 0;
-      zone.visible = false;
-      bayGlow.visible = false;
+      W.hideZone();
+      W.hideBay();
+      limit = null;
       const stars = starsNow();
-      gained = hadLicence ? 0 : 20 + stars * 5;
-      newProgress = Math.min(100, startProgress + gained);
-      ctx.save('licence', newProgress);
-      ctx.save('lessons', lessonNo);
-      ctx.save('best', Math.max(stars, ctx.load('best', 0)));
-      later(500, () => meter(newProgress));
+      const pass = !L.test || stars > 0;
+      const wasOpen = li + 1 < N && isOpen(course, li + 1, who);
+      const before = totalStars(course);
+      const licBefore = licenceOf(course, ctx.load('licence', 0));
+      const hadLicence = course.done[N - 1];
+      const prevBest = course.best[li];
+      const t = Math.round(lessonT * 10) / 10;
+      let newBest = false;
+      if (pass) {
+        course.done[li] = true;
+        course.stars[li] = Math.max(course.stars[li], stars);
+        if (prevBest == null || t < prevBest) {
+          newBest = prevBest != null;
+          course.best[li] = t;
+        }
+      }
+      const after = totalStars(course);
+      const paint = PAINTS.find((p) => p.need > before && p.need <= after);
+      ctx.save(who === 'roji' ? 'course' : 'hcourse', course);
+      let lic = null;
+      if (meIsRoji) {
+        lic = licenceOf(course, ctx.load('licence', 0));
+        ctx.save('licence', lic);
+        ctx.save('lessons', course.done.filter(Boolean).length);
+        ctx.save('best', Math.max(...course.stars));
+      }
+      const firstLicence = meIsRoji && L.test && pass && !hadLicence;
+      const unlocked = firstLicence ? 'Licence: done! Roji is a certified driver.' : pass && li + 1 < N && !wasOpen ? `Unlocked: ${LESSONS[li + 1].title}` : paint ? `New car colour: ${paint.name}!` : '';
+      const abuLine = L.test
+        ? pass
+          ? meIsRoji
+            ? hadLicence
+              ? 'Passed again! Still safe, kind and careful.'
+              : 'You passed! Safe, kind and careful. I am signing your licence now.'
+            : 'Refresher passed. Still a safe, kind and careful driver, Homama.'
+          : 'Not this time. Look at my sheet, practise those, and try again. You are so close.'
+        : stars === 3
+          ? GOOD[L.id] || `Not a single wobble. You are a natural, ${NAME}.`
+          : stars === 2
+            ? 'Very good! A tiny bit gentler next time.'
+            : 'Every driver starts somewhere. You are getting better!';
+      const fanLine = meIsRoji
+        ? L.test
+          ? pass
+            ? 'You did it, Roji! I knew you would!'
+            : 'You were so close. We will practise together, Roji.'
+          : ['', 'Every lesson makes you better, Roji.', 'So proud of you, Roji!', 'You are amazing, Roji! Smooth as butter.'][stars]
+        : L.test
+          ? pass
+            ? 'Refresher passed! Will you drive me to the beach?'
+            : 'Tough marks! Again, Homama?'
+          : ['', 'Still my favourite driver, Homama.', 'Smooth! I am taking notes, Homama.', 'Show-off! That was perfect, Homama.'][stars];
+      lastResult = {
+        lesson: L,
+        i: li,
+        who,
+        stars,
+        pass,
+        test: !!L.test,
+        title: L.test ? (pass ? (meIsRoji ? 'You passed!' : 'Refresher passed!') : 'Not this time') : ['', 'Lesson done!', 'Lovely driving!', 'Super smooth!'][stars],
+        abu: abuLine,
+        fan: fanLine,
+        fanWho: FAN,
+        time: t,
+        best: course.best[li],
+        newBest,
+        unlocked,
+        faults: faults.slice(),
+        licence: lic,
+        gained: lic != null ? lic - licBefore : 0,
+        canNext: pass && li + 1 < N,
+        nextIsTest: li + 1 === N - 1,
+        firstLicence,
+      };
       sfx.chime();
-      fx.heartsAt(car.root.position.clone().setY(2.4), 5);
-      say(stars === 3 ? 'Parked! Smooth as butter. Lesson complete!' : 'Parked! Lesson complete. Well done, Roji!');
+      fx.heartsAt(car.root.position.clone().setY(car.root.position.y + 2.4), 5);
+      say(L.test ? (pass ? 'That is the end of the test. Pull up... and let me add up my marks.' : 'That is the end of the test. Let me add up my marks.') : stars === 3 ? 'Lesson complete! Smooth as butter.' : `Lesson complete. Well done, ${NAME}!`);
+      // A small loving moment at the roadside
+      later(700, () => {
+        if (disposed || phase !== 'done') return;
+        if (fanKid.pose === 'stand') fanKid.emote(pass ? 'heart' : 'wave');
+        if (pass) say(fanLine, FAN, 0);
+      });
+      meter();
+      hud.hint('');
+      document.querySelector('#arena .a-btn[data-b="action"]')?.classList.remove('dl-hot');
+      hotBrake = false;
     }
     function showResult() {
-      const stars = starsNow();
-      const titles = ['', 'Lesson done!', 'Lovely driving!', 'Super smooth!'];
-      const lines = {
-        3: 'Abu Sanad: "Not a single wobble. You are a natural, Roji."',
-        2: 'Abu Sanad: "Very good! A tiny bit gentler next time."',
-        1: 'Abu Sanad: "Every driver starts somewhere. You are getting better!"',
-      };
-      const extra = meIsRoji ? 'Homama waves his GO ROJI! banner.' : 'Homama: "I am so proud of you, Roji!"';
-      const bar = hadLicence ? '<b>Licence: got it!</b> This was a practice drive.' : `Licence progress <b>${newProgress}%</b> (+${gained})<span class="bar"><b style="width:${newProgress}%"></b></span>`;
-      ctx.finish({
-        win: true,
-        title: titles[stars],
-        text: `<span class="dl-res"><span class="stars">${[1, 2, 3].map((n) => STAR(n <= stars, 34)).join('')}</span>${lines[stars]}<br>${extra}<br>${bar}</span>`,
-        stars,
-        licence: false,
+      phase = 'result';
+      ui.mode('menu');
+      hud.buttons({ action: null, jump: null, stick: false });
+      hud.hint('');
+      const r = lastResult;
+      ui.result(r, {
+        next: () => showIntro(r.i + 1),
+        again: () => beginLesson(r.i),
+        course: () => showCourse(),
+        exit: () => ctx.end({ win: r.pass, stars: r.stars, licence: !!r.firstLicence || (r.test && r.pass && meIsRoji), lesson: r.lesson.id }),
       });
     }
-    // The big moment: Roji gets her licence
-    const cardCv = $('.dl-card canvas');
-    function drawLicenceCard() {
-      const c = cardCv.getContext('2d');
-      const w = cardCv.width;
-      const h = cardCv.height;
-      const gr = c.createLinearGradient(0, 0, w, h);
-      gr.addColorStop(0, '#fff6dc');
-      gr.addColorStop(1, '#ffe1ea');
-      c.fillStyle = gr;
-      roundRect(c, 0, 0, w, h, 34);
-      c.fill();
-      c.fillStyle = C.teal;
-      roundRect(c, 0, 0, w, 96, 34);
-      c.fill();
-      c.fillRect(0, 60, w, 36);
-      drawWheelBadge(c, 62, 48, 32);
-      paintText(c, 'DRIVING LICENCE', w / 2 + 24, 50, 46, '#ffffff');
-      c.fillStyle = '#ffffff';
-      roundRect(c, 40, 130, 220, 260, 20);
-      c.fill();
-      c.save();
-      c.beginPath();
-      c.rect(40, 130, 220, 260);
-      c.clip();
-      c.fillStyle = '#cfe9ff';
-      c.fillRect(40, 130, 220, 260);
-      drawChibi(c, 150, 250, 88, ROJI_PHOTO);
-      c.restore();
-      paintText(c, 'Name', 300, 160, 26, '#8a7480', 600, 'left');
-      paintText(c, 'Roji', 300, 205, 58, C.ink, 700, 'left');
-      paintText(c, 'Certified driver', 300, 262, 34, C.rose, 700, 'left');
-      paintText(c, 'Little Wheels Driving School', 300, 306, 24, '#6a5662', 600, 'left');
-      paintText(c, 'Cheered on by Homama', 300, 344, 24, C.blue, 600, 'left');
-      c.fillStyle = C.rose;
-      heartPath(c, w - 70, h - 70, 40);
-      c.fill();
+    function nextLesson() {
+      const i = course.done.findIndex((d, k) => !d && isOpen(course, k, who));
+      return i < 0 ? -1 : i;
     }
+    function showCourse() {
+      phase = 'menu';
+      phaseT = 0;
+      ui.mode('menu');
+      ui.licenceCard(NAME, false);
+      hud.buttons({ action: null, jump: null, stick: false });
+      hud.hint('');
+      seatKids();
+      setEnv('day');
+      traffic.setup(0);
+      setCones([]);
+      W.hideZone();
+      W.hideBay();
+      const nx = nextLesson();
+      const s = LESSONS[Math.max(0, nx)].start;
+      placeCar(s[0], s[1], s[2]);
+      fan.pos.set(s[0] - 3.6, heightAt(s[0] - 3.6, s[1] + 1), s[1] + 1);
+      fan.target.copy(fan.pos);
+      meter();
+      ui.course(
+        {
+          who,
+          lessons: LESSONS,
+          stars: course.stars,
+          best: course.best,
+          done: course.done,
+          open: (i) => isOpen(course, i, who),
+          next: nx,
+          total: totalStars(course),
+          licence: licenceOf(course, ctx.load('licence', 0)),
+          paints: PAINTS,
+          paint: course.paint,
+        },
+        {
+          pick: (v) => showIntro(+v),
+          paint: (id) => {
+            course.paint = id;
+            ctx.save(who === 'roji' ? 'course' : 'hcourse', course);
+            car.setColor(paintColor());
+            showCourse();
+          },
+          exit: () => ctx.end(lastResult ? { win: lastResult.pass, stars: lastResult.stars, licence: !!lastResult.firstLicence } : { quit: true }),
+        },
+      );
+    }
+    function showIntro(i) {
+      phase = 'intro';
+      phaseT = 0;
+      ui.mode('menu');
+      const Ls = LESSONS[i];
+      seatKids();
+      setLights(false);
+      setEnv(Ls.env);
+      setCones([]);
+      placeCar(...Ls.start);
+      const f0 = Ls.tasks()[0].fan || [Ls.start[0] - 4, Ls.start[1]];
+      fan.pos.set(f0[0], heightAt(f0[0], f0[1]), f0[1]);
+      fan.target.copy(fan.pos);
+      ui.intro(Ls, i, { who, lessons: LESSONS, best: course.best }, { start: () => beginLesson(i), back: () => showCourse() });
+    }
+
+    // ---------------------------------------------------------------- the licence moment (Roji passes the test)
     let licT = 0;
-    let rojiOut = false;
     function startLicence() {
       phase = 'licence';
-      layer.classList.add('party');
       licT = 0;
+      ui.mode('party');
       say('Roji, you passed! Here is your driving licence!');
       sound.ui('win');
       sound.wish?.();
     }
-    function rojiGetsOut() {
-      rojiOut = true;
+    function getOut() {
+      out = true;
       const base = car.root.position;
-      fx.poof(base.clone().setY(1));
-      scene.attach(roji.root);
-      roji.pose = 'stand';
-      roji.root.rotation.set(0, 0, 0);
-      roji.root.position.set(base.x, 0, base.z + 2.6);
-      roji.root.scale.setScalar(1);
-      if (meIsRoji) {
-        scene.attach(nora.root);
-        nora.pose = 'stand';
-        nora.root.rotation.set(0, 0.3, 0);
-        nora.root.position.set(base.x - 1.4, 0, base.z + 2.4);
-      } else {
-        scene.attach(homama.root);
-        homama.pose = 'stand';
-        homama.root.rotation.set(0, -0.3, 0);
-        homama.root.position.set(base.x + 1.3, 0, base.z + 2.7);
-      }
-      // The one at the roadside pops over to join them
-      fx.poof(fan.pos.clone().setY(0.8));
-      fan.pos.set(meIsRoji ? base.x + 1.3 : base.x - 1.4, 0, meIsRoji ? base.z + 2.8 : base.z + 2.4);
+      fx.poof(base.clone().setY(base.y + 1));
+      scene.attach(driver.root);
+      driver.pose = 'stand';
+      driver.root.rotation.set(0, 0, 0);
+      driver.root.scale.setScalar(1);
+      const rx = base.x + 0.4;
+      const rz = base.z + 2.7;
+      driver.root.position.set(rx, heightAt(rx, rz), rz);
+      scene.attach(abu.root);
+      abu.pose = 'stand';
+      abu.root.rotation.set(0, 0.35, 0);
+      abu.root.position.set(rx - 1.7, heightAt(rx - 1.7, rz), rz - 0.3);
+      fx.poof(fan.pos.clone().setY(fan.pos.y + 0.8));
+      fan.pos.set(rx + 0.55, heightAt(rx + 0.55, rz), rz);
       fan.target.copy(fan.pos);
-      fan.yaw = 0;
-      fx.poof(fan.pos.clone().setY(0.8));
-      later(300, () => roji.emote('cheer'));
+      fan.yaw = -Math.PI / 2;
+      fx.poof(fan.pos.clone().setY(fan.pos.y + 0.8));
+      later(300, () => driver.emote('cheer'));
     }
 
     // ---------------------------------------------------------------- driving
-    const tmp = new THREE.Vector3();
-    const vel = new THREE.Vector3();
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const ray = new THREE.Raycaster();
     const hit = new THREE.Vector3();
-    car.yaw = START.yaw;
-    car.root.position.set(START.x, 0, START.z);
-    car.update(0, 0);
-    let brakeOn = false;
-    const front = () => tmp.set(car.root.position.x + Math.sin(car.yaw) * FRONT, 0, car.root.position.z + Math.cos(car.yaw) * FRONT);
-    const dbg = { fast: 1, auto: false, car, get task() { return TASKS[taskI]?.id || 'end'; }, get phase() { return phase; }, get oops() { return oops; }, get light() { return lightState; }, get ducks() { return duckState; }, teleport(x, z, yaw = car.yaw) { car.root.position.set(x, 0, z); car.yaw = yaw; car.speed = 0; } };
+    const dbg = {
+      fast: 1,
+      auto: false,
+      log: [],
+      car,
+      G,
+      get phase() {
+        return phase;
+      },
+      get lesson() {
+        return L?.id;
+      },
+      get task() {
+        return task?.label || 'end';
+      },
+      get ti() {
+        return ti;
+      },
+      get oops() {
+        return oops;
+      },
+      get faults() {
+        return faults;
+      },
+      get stars() {
+        return starsNow();
+      },
+      get result() {
+        return lastResult;
+      },
+      get course() {
+        return course;
+      },
+      get info() {
+        const p = car.root.position;
+        return { phase, lesson: L?.id, task: task?.label, ti, wpI, x: +p.x.toFixed(2), z: +p.z.toFixed(2), y: +p.y.toFixed(2), yaw: +car.yaw.toFixed(2), spd: +car.speed.toFixed(2), gear, oops, light: lightState, t: +lessonT.toFixed(1) };
+      },
+      lessonAt(i, { auto = false, fast = 1, rush = false } = {}) {
+        dbg.log = [];
+        dbg.rush = rush;
+        dbg.auto = auto;
+        dbg.fast = fast;
+        beginLesson(i);
+      },
+      intro: (i) => showIntro(i),
+      courseCard: () => showCourse(),
+      teleport(x, z, yaw = car.yaw) {
+        placeCar(x, z, yaw);
+      },
+      reset: () => {
+        course = loadCourse(ctx, who);
+      },
+    };
     window.__drive = dbg;
 
     function autopilot() {
-      const wp = wps[Math.min(wpI, wps.length - 1)] || [BAY.x, BAY.z];
+      const wp = wps[Math.min(wpI, wps.length - 1)] || [car.root.position.x, car.root.position.z];
       const p = car.root.position;
-      const f = front();
-      const id = TASKS[taskI]?.id;
-      let brake = false;
-      let intent = 1;
-      if (id === 'stop' && f.z < STOP_Z + 3) brake = true;
-      if (id === 'light' && f.z < LIGHT_Z + 3.4 && lightState !== 'green') brake = true;
-      if (id === 'ducks' && f.z > ZEBRA.z0 - 2.4 && duckState !== 'pond') brake = true;
-      if (id === 'park') {
-        const d = Math.hypot(BAY.x - p.x, BAY.z - p.z);
-        intent = clamp(d / 5, 0.25, 1);
-        if (d < 0.6) brake = true;
+      const a = task?.auto?.(G) || {};
+      const want = a.gear || (wp[2] === 'r' ? 'R' : 'D');
+      let brake = !!a.brake;
+      if (want !== gear) {
+        if (Math.abs(car.speed) < 0.3) gear = want;
+        else brake = true;
       }
-      return { want: Math.atan2(wp[0] - p.x, wp[1] - p.z), intent, brake };
+      if (task?.hold?.(G) && wpI === 0 && Math.hypot(wp[0] - p.x, wp[1] - p.z) < 3) brake = true;
+      if (traffic.blocking(p.x, p.z, car.yaw)) brake = true;
+      // rush: a careless test driver who never brakes (to check that faults are marked)
+      if (dbg.rush && gear === 'D') return { want: Math.atan2(wp[0] - p.x, wp[1] - p.z), intent: 1, brake: false };
+      return { want: a.want ?? Math.atan2(wp[0] - p.x, wp[1] - p.z), intent: a.intent ?? 1, brake };
     }
-
-    function steer(dt, want, intent, brake) {
-      const p = car.root.position;
-      const max = MAX_SPEED * (onRoad(p.x, p.z) ? 1 : 0.55);
-      let target = 0;
-      if (want !== null && intent > 0.05) {
-        const d = wrap(want - car.yaw);
-        const grip = clamp(0.4 + Math.abs(car.speed) / 3, 0, 1);
-        const rate = 2.6 - 0.8 * clamp(Math.abs(car.speed) / max, 0, 1);
-        const turn = clamp(d * 3.2, -rate, rate) * grip;
-        car.yaw += turn * dt;
-        car.turnRate = turn;
-        car.steer = damp(car.steer, clamp(d, -0.6, 0.6), 10, dt);
-        if (!brake) target = max * Math.min(1, intent) * clamp(Math.cos(d) * 1.15, 0.28, 1);
-      } else {
-        car.turnRate = 0;
-        car.steer = damp(car.steer, 0, 8, dt);
-      }
-      const dv = target - car.speed;
-      const decel = brake ? 10 : intent > 0.05 ? 5 : 2.2;
-      car.speed += clamp(dv, -decel * dt, (target > 0 ? 4.2 : 0) * dt);
-      if (Math.abs(car.speed) < 0.03 && target === 0) car.speed = 0;
-    }
-
     function controls(first) {
+      if (first && (input.pressed('gear') || input.pressed('r') || input.pressed('q'))) toggleGear();
+      if (first && (input.pressed('lights') || input.pressed('l')) && L?.lights) {
+        setLights(!lights);
+        sfx.tick();
+      }
+      if (first && input.pressed('jump') && honkCd <= 0) honk();
       if (dbg.auto) return autopilot();
       const ax = input.axis();
       let dirX = ax.x;
@@ -1000,6 +882,7 @@ export default {
       const ptr = input.pointer;
       if (intent < 0.05 && ptr.down) {
         ray.setFromCamera(ptr.ndc, camera);
+        plane.constant = -car.root.position.y;
         if (ray.ray.intersectPlane(plane, hit)) {
           dirX = hit.x - car.root.position.x;
           dirZ = hit.z - car.root.position.z;
@@ -1008,44 +891,170 @@ export default {
         }
       }
       const brake = input.held('action') || input.held('b');
-      if (first && input.pressed('jump') && honkCd <= 0) honk();
       return { want: intent > 0.05 ? Math.atan2(dirX, dirZ) : null, intent, brake };
+    }
+    function toggleGear() {
+      if (!L?.reverse || phase !== 'drive') return;
+      if (Math.abs(car.speed) > 1.2) return say('Stop first, then change gear.', 'Abu Sanad', 1800);
+      gear = gear === 'D' ? 'R' : 'D';
+      sfx.tick();
+      const b = document.querySelector('#arena .a-btn[data-b="gear"]');
+      if (b) {
+        b.textContent = gear === 'R' ? 'Drive' : 'Reverse';
+        b.classList.toggle('dl-on', gear === 'R');
+      }
     }
     function honk() {
       honkCd = 0.6;
       sound.honk();
       car.honk();
       const p = car.root.position;
-      if (ducks.some((d) => Math.hypot(d.x - p.x, d.z - p.z) < 9)) {
+      if (ducks.list.some((d) => Math.hypot(d.g.position.x - p.x, d.g.position.z - p.z) < 9)) {
         sfx.quack(3);
-        for (const d of ducks) d.hop = 0.5;
+        ducks.quackHop();
       }
+      // A little secret: honk near the one cheering and they blow a kiss back
+      if (kissCd <= 0 && Math.hypot(fan.pos.x - p.x, fan.pos.z - p.z) < 8 && fanKid.pose === 'stand' && fan.speed < 0.4) {
+        kissCd = 14;
+        later(250, () => {
+          fanKid.emote('kiss');
+          fx.heartsAt(fan.pos.clone().setY(fan.pos.y + 1.6), 3);
+          if (phase === 'drive' || phase === 'menu') say(meIsRoji ? 'Beep beep to you too, Roji!' : 'Beep beep, my favourite driver!', FAN, 1800);
+        });
+      }
+    }
+    function nearestRoute() {
+      const p = car.root.position;
+      const pts = [L.start, ...tasks.slice(0, ti + 1).flatMap((t) => t.wps || [])];
+      let best = null;
+      let bd = Infinity;
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, az] = pts[i - 1];
+        const [bx, bz] = pts[i];
+        const dx = bx - ax;
+        const dz = bz - az;
+        const l2 = dx * dx + dz * dz || 1;
+        const f = clamp(((p.x - ax) * dx + (p.z - az) * dz) / l2, 0, 1);
+        const x = ax + dx * f;
+        const z = az + dz * f;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < bd) {
+          bd = d;
+          best = { x, z, yaw: Math.atan2(dx, dz) };
+        }
+      }
+      return best;
+    }
+    function rescue(line) {
+      const r = nearestRoute();
+      if (!r) return;
+      fx.poof(car.root.position.clone().setY(car.root.position.y + 0.8));
+      placeCar(r.x, r.z, r.yaw);
+      fx.poof(car.root.position.clone().setY(car.root.position.y + 0.8));
+      gear = 'D';
+      say(line, 'Abu Sanad', 2600);
+      offT = stuckT = 0;
     }
 
     function stepDrive(dt, t, first) {
       const p = car.root.position;
-      const c = phase === 'drive' ? controls(first) : { want: null, intent: 0, brake: true };
-      brakeOn = c.brake;
-      steer(dt, c.want, c.intent, c.brake);
-      vel.set(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed);
-      const before = car.speed;
+      const driving = phase === 'drive';
+      const c = driving ? controls(first) : { want: null, intent: 0, brake: true };
+      brakeHeld = c.brake;
+      const wet = envNow === 'rain';
+      const fx0 = Math.sin(car.yaw);
+      const fz0 = Math.cos(car.yaw);
+      let spd = vel.x * fx0 + vel.z * fz0;
+      let lat = vel.x * fz0 - vel.z * fx0;
+      const onRoad = W.onRoad(p.x, p.z, 0.2);
+      // Slope along the car (front higher: positive)
+      const hf = heightAt(p.x + fx0 * 1.2, p.z + fz0 * 1.2);
+      const hb = heightAt(p.x - fx0 * 1.2, p.z - fz0 * 1.2);
+      const slope = (hf - hb) / 2.4;
+      // Steering toward where the stick points (in Reverse, where the back should go)
+      const rev = gear === 'R';
+      const vmax = (rev ? MAX_REVERSE : MAX_SPEED) * (onRoad ? 1 : 0.55);
+      let target = 0;
+      if (c.want !== null && c.intent > 0.05) {
+        const d = wrap(c.want - (rev ? car.yaw + Math.PI : car.yaw));
+        const maxSteer = 0.68 / (1 + Math.abs(spd) * 0.13);
+        car.steer = damp(car.steer, clamp((rev ? -d : d) * 1.7, -maxSteer, maxSteer), 9, dt);
+        target = (rev ? -1 : 1) * vmax * Math.min(1, c.intent) * clamp(Math.cos(d) * 1.15, 0.28, 1);
+      } else car.steer = damp(car.steer, 0, 6, dt);
+      // Gas, brake and coasting
+      if (c.brake) spd = toward(spd, 0, (wet ? 6 : 10) * dt);
+      else if (c.intent > 0.05) {
+        if (spd * target < -0.01) spd = toward(spd, 0, 7 * dt);
+        else if (Math.abs(spd) < Math.abs(target)) spd += Math.sign(target) * (rev ? 2.4 : 3.1) * dt;
+        else spd = toward(spd, target, 4 * dt);
+      } else spd = toward(spd, 0, 1.9 * Math.max(0, 1 - Math.abs(slope) * 4) * dt);
+      // Hills pull the car back; the brake holds it still
+      if (c.brake && Math.abs(spd) < 0.3) spd = 0;
+      else spd -= 9.8 * 0.55 * slope * dt;
+      // Turn like a car: the tighter the wheels, the faster it turns, and only while moving
+      const yawRate = (spd * Math.tan(car.steer)) / WHEELBASE;
+      car.yaw += yawRate * dt;
+      car.turnRate = yawRate;
+      const fx1 = Math.sin(car.yaw);
+      const fz1 = Math.cos(car.yaw);
+      // Grip: on a wet road the car keeps sliding sideways for a moment
+      let inPuddle = false;
+      if (wet)
+        for (const [x, z, rx, rz] of W.puddles) {
+          if (((p.x - x) / (rx + 0.5)) ** 2 + ((p.z - z) / (rz + 0.5)) ** 2 < 1) inPuddle = true;
+        }
+      const grip = wet ? (inPuddle ? 1.3 : 2.6) : 30;
+      lat *= Math.exp(-grip * dt);
+      if (wet) lat += -yawRate * Math.abs(spd) * 0.06 * dt * 6;
+      slipping = wet && Math.abs(lat) > 0.75;
+      vel.set(fx1 * spd + fz1 * lat, 0, fz1 * spd - fx1 * lat);
+      const before = spd;
       p.x += vel.x * dt;
       p.z += vel.z * dt;
-      physics.resolve(p, 1.05, vel);
-      const fwd = vel.x * Math.sin(car.yaw) + vel.z * Math.cos(car.yaw);
-      if (Math.abs(fwd) < Math.abs(before) - 1.2) {
-        car.speed = fwd * 0.6;
-        if (bumpCd <= 0 && Math.abs(before) > 1.6 && phase === 'drive') {
-          bumpCd = 1.6;
-          addOops(0.5);
+      // Collisions: a circle at the front and one at the back
+      let railHit = false;
+      for (const off of [0.62, -0.62]) {
+        q.set(p.x + fx1 * off, 0, p.z + fz1 * off);
+        const bx = q.x;
+        const bz = q.z;
+        for (const r of rails) {
+          const dx = q.x - clamp(q.x, r.x - (r.hw ?? 0), r.x + (r.hw ?? 0));
+          const dz = q.z - clamp(q.z, r.z - (r.hd ?? 0), r.z + (r.hd ?? 0));
+          const rr = r.type === 'circle' ? r.r + 0.82 : 0.82;
+          if (r.type === 'circle' ? Math.hypot(q.x - r.x, q.z - r.z) < rr : dx * dx + dz * dz < rr * rr) railHit = true;
         }
-      } else car.speed = fwd;
+        physics.resolve(q, 0.82, vel, { skip: (cc) => cc === fanCol && fan.speed > 0.3 });
+        p.x += q.x - bx;
+        p.z += q.z - bz;
+      }
+      if (railHit && driving) G.onRail?.();
+      const after = vel.x * fx1 + vel.z * fz1;
+      if (Math.abs(after) < Math.abs(before) - 1.2) {
+        car.speed = after * 0.6;
+        vel.multiplyScalar(0.6);
+        if (bumpCd <= 0 && Math.abs(before) > 1.6 && driving) {
+          bumpCd = 1.6;
+          addOops(0.5, null, 'Bumped into something');
+        }
+      } else car.speed = after;
+      // Height and tilt on the hill and the bridge
+      const hc = (heightAt(p.x + fx1 * 1.2, p.z + fz1 * 1.2) + heightAt(p.x - fx1 * 1.2, p.z - fz1 * 1.2)) / 2;
+      p.y = damp(p.y, hc, 20, dt);
+      // Speed bumps on School Street
+      const f = front();
+      for (const bxp of SCHOOL.bumps) {
+        if (Math.abs(p.z - SCHOOL.z) < 2.6 && Math.abs(f.x - bxp) < 0.22 && Math.abs(car.speed) > 0.3 && bumpCd < 1.2) {
+          car.hopV = clamp(Math.abs(car.speed) * 0.55, 0.6, 3.4);
+          bumpCd = 1.5;
+          sfx.thump();
+          if (Math.abs(car.speed) > 3.3) abu.squash = 1.25;
+        }
+      }
       // Cones
-      for (const cn of CONES) {
+      for (const cn of cones) {
         const dx = cn.x - p.x;
         const dz = cn.z - p.z;
         const d = Math.hypot(dx, dz);
-        // In the car's own frame: a cone inside its footprint (plus a little) gets knocked
         const lx = dx * Math.cos(car.yaw) - dz * Math.sin(car.yaw);
         const lz = dx * Math.sin(car.yaw) + dz * Math.cos(car.yaw);
         if (Math.abs(lx) < 0.98 && Math.abs(lz) < 1.55 && Math.abs(car.speed) > 0.4) {
@@ -1054,10 +1063,11 @@ export default {
           cn.vz = (dz / (d || 1)) * push + vel.z * 0.4;
           cn.vy = 2.2;
           cn.tipDir = Math.atan2(cn.vz, cn.vx);
-          if (!cn.hit && phase === 'drive') {
+          if (!cn.hit && driving) {
             cn.hit = true;
-            addOops(0.5, 'Whoops, a cone! They are tougher than they look.');
-            fx.puff?.(tmp.set(cn.x, 0.4, cn.z));
+            coneHits++;
+            addOops(0.5, 'Whoops, a cone! They are tougher than they look.', 'Knocked a cone');
+            fx.puff?.(tmp2.set(cn.x, 0.4, cn.z));
           }
         }
         if (cn.vx || cn.vz || cn.vy || cn.y > 0) {
@@ -1073,160 +1083,101 @@ export default {
         }
         if (cn.hit) cn.tip = damp(cn.tip, Math.PI / 2, 9, dt);
       }
-      // Off the road
+      if (!driving) return;
+      // Puddle splashes in the rain
+      if (wet && Math.abs(car.speed) > 2.4) {
+        W.puddles.forEach(([x, z, rx, rz], i) => {
+          if (((p.x - x) / (rx + 0.9)) ** 2 + ((p.z - z) / (rz + 0.9)) ** 2 > 1) return;
+          if ((splashCd.get(i) || 0) > t) return;
+          splashCd.set(i, t + 1.5);
+          sfx.splash();
+          fx.burst(tmp2.set(x, 0.4, z), ['#bfe6ff', '#ffffff', '#9fc4dc'], 40);
+          const near = Math.hypot(fan.pos.x - x, fan.pos.z - z) < 4.2;
+          if (near) {
+            fanKid.squash = 0.8;
+            later(400, () => say(meIsRoji ? 'Ha! I needed a shower anyway!' : 'Homama! My dress! ... I am laughing, it is fine.', FAN, 2400));
+          }
+          G.onSplash?.(near);
+        });
+      }
+      // Speed limit zones (the school)
+      overCd -= dt;
+      const inZone = limit && p.x > SCHOOL.x0 && p.x < SCHOOL.x1 && Math.abs(p.z - SCHOOL.z) < 4;
+      if (inZone && Math.abs(car.speed) > limit * 1.12) overT += dt;
+      else overT = Math.max(0, overT - dt * 2);
+      if (overT > 1.1 && overCd <= 0) {
+        overCd = 4;
+        overT = 0;
+        addOops(0.5, 'Slower, please! Under 20 near the school.', 'Too fast in the school zone');
+      }
+      if (limit && p.x > SCHOOL.x1 + 1) limit = null;
+      // Off the road for too long, or stuck: Abu Sanad helps
       offCd -= dt;
-      if (phase === 'drive' && !onRoad(p.x, p.z, 0.2) && Math.abs(car.speed) > 1 && offCd <= 0) {
-        offCd = 6;
-        say('Back onto the road, please! The grass is for the ducks.', 'Abu Sanad', 2400);
+      if (!onRoad) {
+        offT += dt;
+        if (Math.abs(car.speed) > 1 && offCd <= 0) {
+          offCd = 6;
+          say('Back onto the road, please! The grass is for the ducks.', 'Abu Sanad', 2400);
+        }
+        if (offT > 4.5) {
+          addOops(0.5, null, 'Drove off the road');
+          rescue('Let me help. I will steer us back onto the road.');
+        }
+      } else offT = Math.max(0, offT - dt);
+      if (c.intent > 0.5 && !c.brake && Math.abs(car.speed) < 0.25) {
+        stuckT += dt;
+        if (stuckT > 3.5) rescue('Stuck? No problem, I will pop us back on the road.');
+      } else stuckT = 0;
+      // Reverse beeps
+      if (car.speed < -0.2) {
+        beepT -= dt;
+        if (beepT <= 0) {
+          beepT = 0.55;
+          sfx.beep();
+        }
       }
     }
 
     function stepTasks(dt) {
-      if (phase !== 'drive' || taskI >= TASKS.length) return;
-      const id = TASKS[taskI].id;
+      if (phase !== 'drive' || !task) return;
       const p = car.root.position;
-      const f = front();
-      const sp = Math.abs(car.speed);
-      // Follow the guide waypoints
       const wp = wps[wpI];
-      const hold = id === 'light' && lightState !== 'green'; // do not point past a red light
-      if (wp && !hold && wpI < wps.length - 1 && Math.hypot(wp[0] - p.x, wp[1] - p.z) < 3.2) wpI++;
-      if (id === 'gate') {
-        if (p.z < GATE_Z && p.z > GATE_Z - 3 && Math.abs(p.x) < 2.3) complete('Through the gate!');
-      } else if (id === 'stop') {
-        if (f.z < STOP_Z - 0.7) {
-          complete('A little past the line', false);
-          addOops(1, 'Just past the line. Brake a tiny bit sooner next time!');
+      const reach = task.reach || 3.2;
+      const hold = task.hold?.(G) && wpI === 0;
+      if (wp && !hold && wpI < wps.length - 1 && Math.hypot(wp[0] - p.x, wp[1] - p.z) < reach) wpI++;
+      task.step(G, dt);
+      if (advance) {
+        const a = advance;
+        advance = null;
+        completeTask(a);
+      }
+      // A secret: three laps of the roundabout in a row
+      const dx = p.x - RC.x;
+      const dz = p.z - RC.z;
+      const d = Math.hypot(dx, dz);
+      if (d > R_IN - 0.5 && d < R_OUT + 1) {
+        const th = Math.atan2(dz, dx);
+        if (lapPrev !== null) lapAcc -= wrap(th - lapPrev);
+        lapPrev = th;
+        if (!lapEgg && lapAcc > Math.PI * 6.3) {
+          lapEgg = true;
+          say(`Three times round! Are we lost, ${NAME}, or just having fun?`, 'Abu Sanad', 3000);
+          fx.heartsAt(car.root.position.clone().setY(2.6), 6);
         }
-        else if (f.z < STOP_Z + 3.0 && sp < 0.2) complete('Perfect stop!');
-        else if (!stopSaid && f.z < STOP_Z + 6 && sp > 3) {
-          stopSaid = true;
-          say('Brake now! Hold the brake button.', 'Abu Sanad', 2000);
-        }
-      } else if (id === 'light') {
-        if (lightState !== 'green') {
-          if (f.z < LIGHT_Z - 0.4) {
-            addOops(1, 'Oh! That light was red. Abu Sanad covers his eyes.');
-            lightState = 'green';
-            setLight(lampMats, 'green');
-          } else if (f.z < LIGHT_Z + 3.7 && sp < 0.25) {
-            lightWait += dt;
-            if (lightWait > 1.4 && lightState === 'red') {
-              lightState = 'redamber';
-              lightT = 0;
-              setLight(lampMats, 'redamber');
-              say('Good waiting. Get ready...', 'Abu Sanad', 0);
-            }
-          }
-          if (lightState === 'redamber') {
-            lightT += dt;
-            if (lightT > 0.9) {
-              lightState = 'green';
-              setLight(lampMats, 'green');
-              pop('Green!', '#c9ffd9');
-              sfx.chime();
-              say('Green light! Off we go.', 'Abu Sanad', 0);
-            }
-          }
-        } else if (f.z < LIGHT_Z - 0.5) complete('Nice and patient!', lightWait > 0.5);
-      } else if (id === 'round') {
-        const dx = p.x - RC.x;
-        const dz = p.z - RC.z;
-        const d = Math.hypot(dx, dz);
-        if (d < R_OUT + 1.2 && d > R_IN - 0.5) {
-          const th = Math.atan2(dz, dx);
-          if (ringPrev !== null) ringAcc -= wrap(th - ringPrev);
-          ringPrev = th;
-          if (ringAcc < -1.0) {
-            ringAcc = 0;
-            if (!wrongSaid) {
-              wrongSaid = true;
-              addOops(0.5, 'Other way round, Roji! Follow the white arrows.');
-            }
-          }
-          // Waypoints follow the angle travelled, so the arrow always points onward round the ring
-          const want = Math.min(9, Math.max(0, Math.floor((ringAcc + (Math.PI / 4) * 0.45) / (Math.PI / 4)))) + 2;
-          if (want > wpI) wpI = Math.min(want, wps.length - 1);
-          if (ringAcc > Math.PI * 2.5 - 0.3) {
-            complete('All the way round!');
-            if (duckState === 'home') duckState = 'walking';
-          }
-        } else if (ringPrev !== null && d > R_OUT + 3) {
-          ringPrev = null;
-          if (ringAcc > 0.4 && !leftEarly) {
-            leftEarly = true;
-            say('We left a bit early! Back to the roundabout, all the way round.', 'Abu Sanad', 3000);
-          }
-        }
-      } else if (id === 'ducks') {
-        if (duckState === 'home' && p.z > -3) duckState = 'walking';
-        const inBand = f.z > ZEBRA.z0 - 0.3 && f.z < ZEBRA.z1 + 0.5 && sp > 0.3;
-        const onRoadDuck = ducks.some((dk) => dk.x > ZEBRA.x0 - 0.3 && dk.x < ZEBRA.x1 + 0.3);
-        if (inBand && onRoadDuck && duckState === 'walking') {
-          duckState = 'scared';
-          scared = true;
-          duckSpeed = 4.5;
-          for (const dk of ducks) dk.hop = 1;
-          sfx.quack(4);
-          addOops(1, 'Eek! Ducks first, Roji! They are fine, just ruffled.');
-        }
-        if (!duckWaitSaid && sp < 0.2 && f.z > ZEBRA.z0 - 3 && onRoadDuck) {
-          duckWaitSaid = true;
-          say('Lovely waiting. Look at the little ones!', 'Abu Sanad', 0);
-        }
-        if (duckState === 'pond') complete(scared ? 'The ducks made it!' : 'The ducks say thank you!', !scared);
-      } else if (id === 'park') {
-        const inBay = Math.abs(p.x - BAY.x) < 0.75 && Math.abs(p.z - BAY.z) < 1.05;
-        const straight = Math.abs(Math.sin(car.yaw)) < 0.42;
-        crookedCd -= dt;
-        if (inBay && straight && sp < 0.25) {
-          parkT += dt;
-          if (parkT > 0.5) complete('Parked!');
-        } else {
-          parkT = 0;
-          if (inBay && !straight && sp < 0.3 && crookedCd <= 0) {
-            crookedCd = 4;
-            say('Nearly! Straighten up a little, then brake.', 'Abu Sanad', 2600);
-          }
-        }
+      } else {
+        lapPrev = null;
+        lapAcc = 0;
       }
     }
 
-    function stepDucks(dt, t) {
-      const walking = duckState !== 'home';
-      ducks.forEach((dk, i) => {
-        dk.hop = Math.max(0, dk.hop - dt);
-        if (walking && !dk.done) {
-          dk.x += duckSpeed * dt;
-          if (dk.x > POND.x - 1.6) {
-            dk.done = true;
-            dk.swimA = Math.PI + i * 0.9;
-          }
-          const bob = Math.abs(Math.sin(t * 9 + i)) * 0.05;
-          dk.g.position.set(dk.x, bob + (dk.hop > 0 ? Math.abs(Math.sin(dk.hop * 12)) * 0.25 : 0), DUCK_Z + (i ? Math.sin(t * 4 + i) * 0.04 : 0));
-          dk.g.rotation.set(0, Math.PI / 2, Math.sin(t * 9 + i) * 0.12);
-        } else if (dk.done) {
-          dk.swimA += dt * 0.5;
-          const r = POND.r - 0.55;
-          dk.g.position.set(POND.x + Math.cos(dk.swimA) * r, 0.17 + Math.sin(t * 3 + i) * 0.012, POND.z + Math.sin(dk.swimA) * r);
-          dk.g.rotation.set(0, -dk.swimA, 0);
-        } else {
-          dk.g.position.y = dk.hop > 0 ? Math.abs(Math.sin(dk.hop * 12)) * 0.2 : 0;
-          dk.g.rotation.set(0, Math.PI / 2 + Math.sin(t * 0.8 + i) * 0.3, 0);
-        }
-      });
-      if ((duckState === 'walking' || duckState === 'scared') && ducks.every((d) => d.x > ZEBRA.x1 + 0.6)) duckState = 'pond';
-    }
-
     function stepFan(dt, t) {
-      const k2 = fanKid;
       const dx = fan.target.x - fan.pos.x;
       const dz = fan.target.z - fan.pos.z;
       const d = Math.hypot(dx, dz);
-      if (d > 34) {
-        fx.poof(fan.pos.clone().setY(0.8));
+      if (d > 30) {
+        fx.poof(fan.pos.clone().setY(fan.pos.y + 0.8));
         fan.pos.copy(fan.target);
-        fx.poof(fan.pos.clone().setY(0.8));
+        fx.poof(fan.pos.clone().setY(heightAt(fan.pos.x, fan.pos.z) + 0.8));
         fan.speed = 0;
       } else if (d > 0.2) {
         fan.speed = damp(fan.speed, Math.min(5.2, d * 2.5), 6, dt);
@@ -1235,18 +1186,19 @@ export default {
         fan.yaw = dampAngle(fan.yaw, Math.atan2(dx, dz), 10, dt);
       } else {
         fan.speed = damp(fan.speed, 0, 10, dt);
-        const p = rojiOut ? roji.root.position : car.root.position;
+        const p = out ? driver.root.position : car.root.position;
         const look = Math.atan2(p.x - fan.pos.x, p.z - fan.pos.z);
-        fan.yaw = dampAngle(fan.yaw, rojiOut ? look * 0.5 : look, 4, dt);
+        if (!(phase === 'licence' && licT > 2.4)) fan.yaw = dampAngle(fan.yaw, look, 4, dt);
       }
+      fan.pos.y = heightAt(fan.pos.x, fan.pos.z);
       fanCol.x = fan.pos.x;
       fanCol.z = fan.pos.z;
-      k2.root.position.copy(fan.pos);
-      k2.root.rotation.y = fan.yaw;
-      k2.update(dt, t, fan.speed, 0, 0);
-      if (banner) banner.visible = phase !== 'licence' || licT < 1.6;
-      if (banner?.visible && !k2.emoteType) {
-        const [aL, aR] = k2.arms;
+      fanKid.root.position.copy(fan.pos);
+      fanKid.root.rotation.y = fan.yaw;
+      fanKid.update(dt, t, fan.speed, 0, 0);
+      if (phase === 'licence' && licT > 1.6) banner.visible = false;
+      if (banner.visible && !fanKid.emoteType && !fanKid.carried) {
+        const [aL, aR] = fanKid.arms;
         const wig = Math.sin(t * 6) * 0.08;
         aL.rotation.set(0, 0, 2.55 + wig);
         aR.rotation.set(0, 0, -2.55 + wig);
@@ -1255,146 +1207,206 @@ export default {
     }
 
     // ---------------------------------------------------------------- camera
-    const camLook = new THREE.Vector3(START.x, 0.8, START.z - 4);
+    const camLook = new THREE.Vector3(0, 0.8, 36);
     const camOff = new THREE.Vector3(0, 12.2, 9.6);
     const CLOSE = new THREE.Vector3(0, 4.4, 7.4);
     const camOffNow = camOff.clone();
     const want = new THREE.Vector3();
+    let zoomNow = 1;
+    let orbit = 0;
     function stepCamera(dt) {
       const p = car.root.position;
       const aspect = camera.aspect;
       let zoom = aspect < 1 ? 1.45 : aspect > 1.9 ? 0.95 : 1;
-      if (phase === 'licence' && rojiOut) {
-        // Swing down to a friendly front view of the three of them
-        want.set(roji.root.position.x, 1.5, roji.root.position.z - 1.3);
+      if (phase === 'menu') {
+        orbit += dt * 0.05;
+        const cx = 26;
+        const cz = 14;
+        camera.position.set(cx + Math.sin(orbit) * 46, 46, cz + Math.cos(orbit) * 46);
+        camera.lookAt(cx, 0, cz);
+        camLook.set(p.x, p.y + 0.8, p.z - 4);
+        env.follow(tmp2.set(cx, 0, cz));
+        return;
+      }
+      if (phase === 'licence' && out) {
+        want.set(driver.root.position.x, driver.root.position.y + 1.4, driver.root.position.z - 1.3);
         camOffNow.lerp(CLOSE, 1 - Math.exp(-2.5 * dt));
         zoom = aspect < 1 ? 1.5 : 1;
-      } else if (phase === 'intro') {
-        want.set(p.x, 0.8, p.z - 5 - Math.max(0, 1.6 - phaseT) * 4);
-        zoom *= 1.0 + Math.max(0, 1.4 - phaseT) * 0.25;
       } else {
-        // Look ahead of the car, more when it drives toward the camera (so the road ahead stays on screen)
-        const fz = Math.cos(car.yaw);
-        const ahead = 2.2 + clamp(car.speed, 0, MAX_SPEED) * 0.45 + Math.max(0, fz) * 1.6;
-        want.set(p.x + Math.sin(car.yaw) * ahead, 0.8, p.z + fz * ahead);
+        camOffNow.lerp(camOff, 1 - Math.exp(-3 * dt));
+        if (phase === 'intro' || phase === 'count') {
+          want.set(p.x, p.y + 0.8, p.z - 2);
+          zoom *= phase === 'count' ? 0.9 + Math.max(0, 1.4 - phaseT) * 0.2 : 0.85;
+        } else {
+          // Look ahead of where the car is going (behind it when reversing), more when it comes toward the camera
+          const dir = car.speed < -0.1 || (gear === 'R' && car.speed < 0.1) ? -1 : 1;
+          const tx = Math.sin(car.yaw) * dir;
+          const tz = Math.cos(car.yaw) * dir;
+          const ahead = (dir < 0 ? 1.4 : 2.2) + clamp(Math.abs(car.speed), 0, MAX_SPEED) * 0.45 + Math.max(0, tz) * 1.6;
+          want.set(p.x + tx * ahead, p.y + 0.8, p.z + tz * ahead);
+        }
+        zoom *= task?.zoom || 1;
       }
+      zoomNow = damp(zoomNow, zoom, 3, dt);
       const rate = 1 - Math.exp(-3.2 * dt);
       camLook.lerp(want, rate);
-      camera.position.copy(camLook).addScaledVector(camOffNow, zoom);
+      camera.position.copy(camLook).addScaledVector(camOffNow, zoomNow);
       camera.lookAt(camLook);
       env.follow(camLook);
     }
 
     // ---------------------------------------------------------------- frame
-    setTask(0);
-    say('Hi Roji! Seatbelt on? Point where you want to go and off we drive.');
-    hud.message(hadLicence ? 'Practice drive' : `Lesson ${lessonNo}`, 1400);
-    sound.ui('swoosh');
     const engineWasOn = !!sound.engineOsc;
     if (!engineWasOn) sound.engine(true);
-    drawList();
+    if (ctx.opts?.lesson != null) showIntro(clamp(+ctx.opts.lesson, 0, N - 1));
+    else showCourse();
 
     function step(dt, t, first) {
       phaseT += dt;
       bumpCd -= dt;
       honkCd -= dt;
+      cheerCd -= dt;
+      kissCd -= dt;
       passengerCheer = Math.max(0, passengerCheer - dt);
-      if (phase === 'intro' && phaseT > 1.6) {
+      writeT = Math.max(0, writeT - dt);
+      if (phase === 'count' && phaseT > 1.4) {
         phase = 'drive';
         phaseT = 0;
         hud.message('Go!', 700);
         sound.ui('good');
-        say(TASKS[0].say);
       }
+      if (phase === 'drive') lessonT += dt;
       stepDrive(dt, t, first);
       stepTasks(dt);
-      stepDucks(dt, t);
-      if (phase === 'done') {
-        if (phaseT > 2.2 && !dbg.resultShown) {
-          dbg.resultShown = true;
-          if (!hadLicence && newProgress >= 100) startLicence();
-          else showResult();
-        }
+      ducks.update(dt, t);
+      traffic.update(dt, t, car.root.position, sound);
+      crossing.update(dt, t);
+      fox.update(dt, t, car.root.position, lights);
+      const p = car.root.position;
+      tractor.update(dt, t, p.z > 24.0 && p.z < 32.2 && Math.abs(p.x - 60) < 2.4, sound);
+      if (phase === 'done' && phaseT > 2.4 && !dbg.resultShown) {
+        dbg.resultShown = true;
+        if (lastResult.firstLicence) startLicence();
+        else showResult();
       }
+      if (phase !== 'done') dbg.resultShown = false;
       if (phase === 'licence') {
         licT += dt;
-        if (licT > 0.6 && !rojiOut) rojiGetsOut();
+        if (licT > 0.6 && !out) getOut();
         if (licT > 1.8 && !dbg.cardShown) {
           dbg.cardShown = true;
-          drawLicenceCard();
-          $('.dl-card').classList.add('on');
-          fx.burst(roji.root.position.clone().setY(1.6), ['#ffd166', '#ff9eb5', '#7fd8bf', '#6fb8ff', '#ffffff'], 90);
-          if (meIsRoji) say('I knew you could do it, Roji! I am so proud of you!', 'Homama', 0);
-          else say('Roji got her licence! Best day ever!', 'Homama', 0);
-          fanKid.emote(meIsRoji ? 'cheer' : 'cheer');
-          later(1600, () => !disposed && homama.emote('heart'));
-          later(1800, () => !disposed && roji.emote('spin'));
+          ui.licenceCard('Roji', true);
+          fx.burst(driver.root.position.clone().setY(driver.root.position.y + 1.6), ['#ffd166', '#ff9eb5', '#7fd8bf', '#6fb8ff', '#ffffff'], 90);
+          say('I knew you could do it, Roji! I am so proud of you!', 'Homama', 0);
+          fanKid.emote('cheer');
         }
-        if (licT > 2 && Math.floor(licT * 1.4) !== Math.floor((licT - dt) * 1.4)) fx.burst(roji.root.position.clone().setY(2.4 + R()), ['#ffd166', '#ff9eb5', '#7fd8bf', '#ffffff'], 30);
-        if (licT > 6.2 && !dbg.licFinished) {
-          dbg.licFinished = true;
-          $('.dl-card').classList.remove('on');
-          ctx.finish({ win: true, title: 'Roji got her licence!', text: `<span class="dl-res"><span class="stars">${[1, 2, 3].map((n) => STAR(n <= starsNow(), 34)).join('')}</span>Certified driver: <b>Roji</b>. Abu Sanad signs her card with a heart.<br>Homama: "Now we can take turns driving to the beach!"</span>`, stars: starsNow(), licence: true });
+        // Homama and Roji share a hug, facing each other
+        if (licT > 3.2 && !dbg.hugged) {
+          dbg.hugged = true;
+          const r = driver.root.position;
+          fan.pos.set(r.x + 0.55, r.y, r.z);
+          fan.target.copy(fan.pos);
+          fan.yaw = -Math.PI / 2;
+          driver.root.rotation.y = Math.PI / 2;
+          driver.emote('hug');
+          fanKid.emote('hug');
+          fx.heartsAt(r.clone().setY(r.y + 1.8), 6);
         }
-      }
+        if (licT > 2 && Math.floor(licT * 1.4) !== Math.floor((licT - dt) * 1.4)) fx.burst(driver.root.position.clone().setY(driver.root.position.y + 2.4 + Math.random()), ['#ffd166', '#ff9eb5', '#7fd8bf', '#ffffff'], 30);
+        if (licT > 6.6 && !dbg.licDone) {
+          dbg.licDone = true;
+          ui.licenceCard('Roji', false);
+          showResult();
+        }
+      } else dbg.cardShown = dbg.hugged = dbg.licDone = false;
     }
 
     return {
       update(dt, t) {
         const n = Math.max(1, dbg.fast | 0);
         for (let i = 0; i < n; i++) step(dt, t + i * dt, i === 0);
-        // Visuals once per frame
         car.update(dt, t);
-        brakeMat.emissiveIntensity = brakeOn && Math.abs(car.speed) > 0.05 ? 2.4 : brakeOn ? 1.2 : 0.35;
+        car.root.rotation.x = -Math.atan2(heightAt(car.root.position.x + Math.sin(car.yaw) * 1.2, car.root.position.z + Math.cos(car.yaw) * 1.2) - heightAt(car.root.position.x - Math.sin(car.yaw) * 1.2, car.root.position.z - Math.cos(car.yaw) * 1.2), 2.4);
+        brakeMat.emissiveIntensity = brakeHeld && Math.abs(car.speed) > 0.05 ? 2.4 : brakeHeld ? 1.2 : car.speed < -0.1 ? 1.4 : 0.35;
         sound.engineSpeed(car.speed);
-        roji.update(dt, t, 0, 0, rojiOut ? 0 : car.turnRate || 0);
-        const pk = passenger;
-        if (pk.root.parent === car.body) pk.hands = passengerCheer > 0 ? 'wave2' : pk === nora ? 'carry' : null;
-        else if (pk === nora) pk.hands = 'carry';
-        pk.update(dt, t, 0, 0, 0);
+        driver.update(dt, t, 0, 0, out ? 0 : car.turnRate || 0);
+        if (abu.root.parent === car.body) abu.hands = passengerCheer > 0 ? 'wave2' : writeT > 0 ? 'read' : 'carry';
+        else abu.hands = 'carry';
+        abu.update(dt, t, 0, 0, 0);
         stepFan(dt, t);
         drawCones();
-        // Guide arrow above the car and the beacon over the target
+        // Wipers swish in the rain
+        if (wipers.visible) {
+          const a = Math.sin(t * 4.2);
+          blades[0].rotation.z = 0.2 + a * 0.95;
+          blades[1].rotation.z = 0.2 + a * 0.95;
+        }
+        // Rain falls round the camera
+        if (rain.visible) {
+          const cx = camLook.x;
+          const cz = camLook.z;
+          for (let i = 0; i < RAIN_N; i++) {
+            const d = drops[i];
+            d[1] -= dt * 16;
+            if (d[1] < 0) {
+              d[1] += 14;
+              d[0] = Math.random() * 40 - 20;
+              d[2] = Math.random() * 32 - 16;
+            }
+            const x = cx + d[0];
+            const z = cz + d[2];
+            rainPos.set([x, d[1], z, x + 0.06, d[1] + 0.5, z + 0.03], i * 6);
+          }
+          rainGeo.attributes.position.needsUpdate = true;
+        }
+        if (flies.visible) {
+          flyBase.forEach(([x, y, z, ph], i) => flyPos.set([x + Math.sin(t * 0.7 + ph) * 0.5, y + Math.sin(t * 1.3 + ph) * 0.25, z + Math.cos(t * 0.6 + ph) * 0.5], i * 3));
+          fliesGeo.attributes.position.needsUpdate = true;
+          flies.material.opacity = 0.55 + Math.sin(t * 3) * 0.3;
+        }
+        // Guide arrow ahead of the car and the beacon over the target
         const p = car.root.position;
-        const id = TASKS[taskI]?.id;
         const wp = wps[wpI];
-        const showGuide = phase === 'drive' && wp;
+        const holdNow = task?.hold?.(G) && wpI === 0 && wp && Math.hypot(wp[0] - p.x, wp[1] - p.z) < 3;
+        const showGuide = phase === 'drive' && wp && !holdNow;
         guide.visible = !!showGuide;
         if (showGuide) {
           const a = Math.atan2(wp[0] - p.x, wp[1] - p.z);
-          // A glowing chevron on the road a little ahead, pointing where to go next
-          guide.position.set(p.x + Math.sin(a) * 3.0, 0.14 + Math.sin(t * 4) * 0.04, p.z + Math.cos(a) * 3.0);
+          const gx = p.x + Math.sin(a) * 3.0;
+          const gz = p.z + Math.cos(a) * 3.0;
+          guide.position.set(gx, heightAt(gx, gz) + 0.14 + Math.sin(t * 4) * 0.04, gz);
           guide.rotation.set(0, a + Math.PI, 0);
           const s = 1.15 + Math.sin(t * 6) * 0.08;
           guide.scale.set(s, 0.6, s);
         }
-        beacon.visible = phase === 'drive' && !!id;
+        arrowMat.color.set(gear === 'R' && phase === 'drive' ? '#ff9eb5' : '#ffd166');
+        const b = task?.beacon;
+        beacon.visible = phase === 'drive' && !!b;
         if (beacon.visible) {
-          const [bx, bz, by] = BEACON[id];
-          beacon.position.set(bx, by + 0.2 + Math.abs(Math.sin(t * 3)) * 0.4, bz);
+          beacon.position.set(b[0], heightAt(b[0], b[1]) + b[2] + 0.2 + Math.abs(Math.sin(t * 3)) * 0.4, b[1]);
           beacon.rotation.y = t * 1.5;
         }
         arrowMat.emissiveIntensity = 0.45 + Math.sin(t * 6) * 0.2;
-        // Make the Brake button pulse when it is time to stop
-        const f = front();
-        const needBrake = phase === 'drive' && Math.abs(car.speed) > 0.3 && ((id === 'stop' && f.z < STOP_Z + 6) || (id === 'light' && lightState !== 'green' && f.z < LIGHT_Z + 7) || (id === 'ducks' && duckState !== 'pond' && f.z > ZEBRA.z0 - 7 && f.z < ZEBRA.z0) || (id === 'park' && Math.hypot(p.x - BAY.x, p.z - BAY.z) < 2));
+        // The Brake button pulses when it is time to stop
+        const needBrake = phase === 'drive' && Math.abs(car.speed) > 0.3 && !!task?.needBrake?.(G);
         if (needBrake !== hotBrake) {
           hotBrake = needBrake;
           document.querySelector('#arena .a-btn[data-b="action"]')?.classList.toggle('dl-hot', needBrake);
         }
-        const pulse = 0.25 + Math.sin(t * 5) * 0.12;
-        zoneMat.opacity = 0.65 + pulse;
-        glowMat.opacity = 0.55 + Math.sin(t * 5) * 0.3;
+        W.zoneMat.opacity = 0.65 + 0.25 + Math.sin(t * 5) * 0.12;
+        W.glowMat.opacity = 0.55 + Math.sin(t * 5) * 0.3;
+        W.fairyMat.emissiveIntensity = 1.6 + Math.sin(t * 3) * 0.8;
+        if (phase === 'drive' || phase === 'count') {
+          const kmh = Math.round(Math.abs(car.speed) * 5);
+          const inZone = limit && p.x > SCHOOL.x0 - 4 && p.x < SCHOOL.x1;
+          ui.setSpeed(kmh, { limit: inZone ? 20 : null, over: inZone && kmh > 22, gear, night: envNow === 'night', lights });
+        }
         stepCamera(dt);
-        if (phase === 'drive' && zone.visible && id === 'ducks' && duckState === 'pond') zone.visible = false;
       },
       dispose() {
         disposed = true;
         for (const id of timers) clearTimeout(id);
-        clearTimeout(popTimer);
-        clearTimeout(sayTimer);
-        layer.remove();
-        style.remove();
+        ui.dispose();
         if (!engineWasOn) sound.engine(false);
         if (window.__drive === dbg) delete window.__drive;
       },
