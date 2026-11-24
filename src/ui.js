@@ -1,4 +1,4 @@
-import { svgIcon } from './icons.js';
+import { svgIcon, ICONS } from './icons.js';
 import { STOPS } from './config.js';
 import { avatar } from './games/avatar.js';
 import { EMOTES } from './kid.js';
@@ -23,7 +23,25 @@ function saveNote(id, text) {
   localStorage.setItem(NOTES_KEY, JSON.stringify(all));
 }
 
-const EMOTE_ICONS = { wave: 'hand', dance: 'music', spin: 'spin', cheer: 'star', heart: 'heart', bow: 'smile' };
+// Dance icons on the 24x24 grid (registered into ICONS below so svgIcon can draw them)
+const ring = (x, y, r) => `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
+const DANCE_ICONS = {
+  dabke: `${ring(5, 5.5, 2)} ${ring(12, 5.5, 2)} ${ring(19, 5.5, 2)} M5 8.5v5.5 M12 8.5v5.5 M19 8.5v5.5 M5 11h14 M5 14l-1.8 5.5 M5 14l2 3 M12 14l-2 3 M12 14l1.8 5.5 M19 14l-2 3 M19 14l1.8 5.5`,
+  slow: `${ring(8, 11, 2.6)} ${ring(16, 11, 2.6)} M3.5 21c0-3 2-4.6 4.5-4.6s4 1 4 1 1.5-1 4-1 4.5 1.6 4.5 4.6 M12 6.6s-2.6-1.6-2.6-3.3a1.4 1.4 0 0 1 2.6-.7 1.4 1.4 0 0 1 2.6.7c0 1.7-2.6 3.3-2.6 3.3z`,
+  twirl: 'M12 12a1.2 1.2 0 1 1 1.2 1.2 3.4 3.4 0 1 1 2.2-3 5.6 5.6 0 1 1-8.6-1.2 7.8 7.8 0 1 1 1.6 10.6',
+  robot: 'M6.5 8h11A1.5 1.5 0 0 1 19 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 17.5v-8A1.5 1.5 0 0 1 6.5 8z M12 8V5 M12 3.5h.01 M9.5 12.2h.01 M14.5 12.2h.01 M9.5 15.6h5 M2.5 12v3 M21.5 12v3',
+  salsa: `${ring(8, 7.5, 3.6)} M10.3 10.3 16 20.5 ${ring(17, 6.2, 3)} M15.2 8.7 12.4 13 M4 15.5l-1.5 1 M5.5 18.5l-1 1.5 M21 12.5l1 1.2`,
+  moonwalk: 'M2.5 16.5c3.5 2.2 15.5 2.2 19 0 M6.5 16l1-6.5C7.8 7.4 9.5 6 12 6s4.2 1.4 4.5 3.5l1 6.5 M7.3 12.5c2.8.8 6.6.8 9.4 0',
+  hop: `M10.2 9.6 7.7 4.3a1.5 1.5 0 0 1 2.7-1.2l1.6 5.6 M14.4 8.8l1.7-5.7a1.5 1.5 0 0 1 2.7 1.2l-2.5 5.4 ${ring(12.5, 14.6, 5.4)} M10.6 13.9h.01 M14.4 13.9h.01 M11.5 16.6c.7.5 1.3.5 2 0`,
+  shimmy: 'M3 8l3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2 M3 13l3-2.2 3 2.2 3-2.2 3 2.2 3-2.2 3 2.2 M7 19h10',
+  ballet: `${ring(12, 3.8, 2)} M12 6v5.5 M12 8.2 7.5 5 M12 8.2l4.5-3.2 M5.5 13.5c2.4-2.2 10.6-2.2 13 0-2.4 1.6-10.6 1.6-13 0z M11 14.5 10 21 M13.2 14.5l3.3 5.6`,
+  jazz: 'M8 13V7.5a1.5 1.5 0 0 1 3 0V11 M11 10V6a1.5 1.5 0 0 1 3 0v4 M14 10.5V7.5a1.5 1.5 0 0 1 3 0V13 M17 11.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-4.8-2.4L4.6 15.6a1.5 1.5 0 0 1 2.3-1.9L8 15 M4 3.5l1.3 1.6 M2.5 8.5h2 M9.5 2v1.8 M20.5 4.5l-1.4 1.3',
+  'dance-more': 'M5 5h4v4H5z M15 5h4v4h-4z M5 15h4v4H5z M15 15h4v4h-4z',
+};
+Object.assign(ICONS, DANCE_ICONS);
+const EMOTE_ICONS = { wave: 'hand', dance: 'music', spin: 'spin', cheer: 'star', heart: 'heart', bow: 'smile', ...Object.fromEntries(Object.keys(DANCE_ICONS).map((k) => [k, k])) };
+const EMOTE_KEY = (i) => (i < 9 ? String(i + 1) : i === 9 ? '0' : '');
+const DOCK_MOVES = 6; // the first moves sit on the dock; the More button opens every move
 
 export class UI {
   constructor(h) {
@@ -80,22 +98,40 @@ export class UI {
     });
     this.prompt.addEventListener('click', () => h.onAction('auto'));
 
-    // Dance and hand-holding dock (desktop) and the touch buttons
+    // Dance and hand-holding dock (desktop) and the touch buttons.
+    // Desktop: the first moves on the dock and a More button that opens every move in a grid.
+    // Phones: the dance button opens the wheel, a two-row grid of every move.
     const dock = $('dock');
     const wheel = Object.entries(EMOTES).filter(([, v]) => v.wheel !== false);
+    const tile = ([k, v], i, size) =>
+      `<button class="wheel-btn${v.duo ? ' duo' : ''}" data-emote="${k}" title="${esc(v.name)}${v.duo ? ' (for two)' : ''}${EMOTE_KEY(i) ? ` (${EMOTE_KEY(i)})` : ''}">${svgIcon(EMOTE_ICONS[k] || 'music', size)}<span>${esc(v.name)}</span>${v.duo ? `<i>${svgIcon('heart', 10, 3)}</i>` : ''}${EMOTE_KEY(i) ? `<kbd>${EMOTE_KEY(i)}</kbd>` : ''}</button>`;
     const emoteHtml = wheel
+      .slice(0, DOCK_MOVES)
       .map(([k, v], i) => `<button class="dock-btn" data-emote="${k}" title="${v.name} (${i + 1})" aria-label="${v.name}">${svgIcon(EMOTE_ICONS[k], 20)}<kbd>${i + 1}</kbd></button>`)
       .join('');
-    dock.innerHTML = `${emoteHtml}<span class="dock-sep"></span><button class="dock-btn" id="btn-hands" title="Hold hands (H)" aria-label="Hold hands">${svgIcon('hands', 20)}<kbd>H</kbd></button>`;
-    $('emote-wheel').innerHTML = wheel
-      .map(([k, v]) => `<button class="wheel-btn" data-emote="${k}">${svgIcon(EMOTE_ICONS[k], 22)}<span>${v.name}</span></button>`)
-      .join('');
+    dock.innerHTML = `${emoteHtml}<button class="dock-btn" id="btn-dances" title="More dances" aria-label="More dances" aria-expanded="false">${svgIcon('dance-more', 20)}<em>+${wheel.length - DOCK_MOVES}</em></button><span class="dock-sep"></span><button class="dock-btn" id="btn-hands" title="Hold hands (H)" aria-label="Hold hands">${svgIcon('hands', 20)}<kbd>H</kbd></button>
+      <div class="dock-more hidden" role="menu" aria-label="Dances"><div class="dock-more-head"><b>Dances</b><span>${svgIcon('heart', 12, 3)} for two</span></div><div class="dock-grid">${wheel.map((e, i) => tile(e, i, 20)).join('')}</div></div>`;
+    $('emote-wheel').innerHTML = wheel.map((e, i) => tile(e, i, 20)).join('');
+    const more = dock.querySelector('.dock-more');
+    const showMore = (on) => {
+      more.classList.toggle('hidden', !on);
+      $('btn-dances').classList.toggle('on', on);
+      $('btn-dances').setAttribute('aria-expanded', String(on));
+    };
+    $('btn-dances').addEventListener('click', () => showMore(more.classList.contains('hidden')));
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') showMore(false);
+    });
+    window.addEventListener('pointerdown', (e) => {
+      if (!more.classList.contains('hidden') && !e.target.closest?.('#dock')) showMore(false);
+    });
     for (const el of [dock, $('emote-wheel')]) {
       el.addEventListener('click', (e) => {
         const b = e.target.closest('[data-emote]');
         if (b) {
           h.onEmote(b.dataset.emote);
           $('emote-wheel').classList.add('hidden');
+          showMore(false);
         }
       });
     }

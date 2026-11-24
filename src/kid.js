@@ -80,11 +80,42 @@ export const EMOTES = {
   cheer: { name: 'Cheer', duration: 1.7 },
   heart: { name: 'Heart', duration: 2.2 },
   bow: { name: 'Bow', duration: 1.4 },
+  // More dances. duo: a dance for two; when the partner is close they take their place for it
+  // ('side': side by side holding hands, 'face': facing each other). See src/life/npcs/dances.js.
+  dabke: { name: 'Dabke', duration: 4.8, duo: 'side' },
+  slow: { name: 'Slow dance', duration: 7.2, duo: 'face' },
+  twirl: { name: 'Twirl', duration: 2.2 },
+  robot: { name: 'Robot', duration: 3.6 },
+  salsa: { name: 'Salsa', duration: 4.2, duo: 'face' },
+  moonwalk: { name: 'Moonwalk', duration: 3.4 },
+  hop: { name: 'Happy hop', duration: 2.8 },
+  shimmy: { name: 'Shimmy', duration: 2.6 },
+  ballet: { name: 'Ballet', duration: 3.8 },
+  jazz: { name: 'Jazz hands', duration: 2.4 },
   // Moves for two (games and places trigger these; they are not on the dance wheel)
   kiss: { name: 'Kiss', duration: 1.6, wheel: false },
   hug: { name: 'Hug', duration: 2.4, wheel: false },
   nod: { name: 'Nod', duration: 1.6, wheel: false },
+  // With people around town (src/life/npcs.js)
+  highfive: { name: 'High five', duration: 1.3, wheel: false },
+  handshake: { name: 'Handshake', duration: 1.6, wheel: false },
+  selfie: { name: 'Selfie', duration: 2.4, wheel: false },
 };
+
+// Robot dance poses, one every 0.3 s: [left arm x, left arm z, right arm x, right arm z, body turn, head turn]
+const ROBOT = [
+  [-1.57, 0.1, -1.57, -0.1, 0, 0],
+  [0, 1.57, -1.57, -0.1, 0.5, -0.4],
+  [0, 1.57, 0, -1.57, 0, 0.4],
+  [-1.57, 0.1, 0.3, -2.5, -0.5, 0],
+  [0.3, 2.5, 0.3, -2.5, 0, 0],
+  [-0.8, 0.9, -0.8, -0.9, 0.5, 0.4],
+  [0, 1.57, -1.57, -0.1, -0.5, -0.4],
+  [-1.57, 0.1, -1.57, -0.1, 0, 0],
+];
+const ROBOT_REST = [0, 0.18, 0, -0.18, 0, 0];
+const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const bump = (x, a, b) => (x <= a || x >= b ? 0 : Math.sin((Math.PI * (x - a)) / (b - a)));
 
 export class Kid {
   constructor(look) {
@@ -734,9 +765,14 @@ export class Kid {
         armR.rotation.set(-1.35 * k, 0, 0.55 * k - 0.18 * (1 - k));
         B.rotation.x = 0.12 * k;
         B.rotation.z = Math.sin(T * 2.6) * 0.07 * k;
-      }
+      } else this.moreMoves(e, T, D, k, t, dt);
       if (e !== 'kiss') this.mouth.scale.set(1, 1, 1);
+      if (e === 'jazz') this.mouth.scale.set(1 + 0.3 * k, 1 + 0.5 * k, 1);
       if (T >= D) this.emoteType = e === 'dance' && this.danceLoop ? (this.emoteTime = 0, 'dance') : null;
+    } else if (this.emoteHead || this.blob.position.z) {
+      this.emoteHead = null;
+      this.blob.position.z = 0;
+      this.mouth.scale.set(1, 1, 1);
     }
 
     // Head: counter-bob, idle look-around, look up at the camera when still
@@ -748,6 +784,11 @@ export class Kid {
       this.head.rotation.x += Math.max(0, Math.sin(this.emoteTime * 9)) * 0.32 * kn;
     }
     if (this.emoteType === 'kiss') this.head.rotation.x -= 0.12;
+    if (this.emoteType && this.emoteHead) {
+      this.head.rotation.x += this.emoteHead[0];
+      this.head.rotation.y += this.emoteHead[1];
+      this.head.rotation.z += this.emoteHead[2];
+    }
     if (this.emoteType && !standing) this.emoteType = null;
     if (pose === 'sleep') this.head.rotation.set(0, 0, 0.12);
 
@@ -786,6 +827,228 @@ export class Kid {
     this.blob.scale.setScalar(1 - Math.min(0.6, air * 0.35));
     this.blob.position.y = 0.015 - air;
     this.blob.material.opacity = 0.22 * (1 - Math.min(0.7, air * 0.4));
+  }
+
+  // The dances added for the wheel and the moves used with people around town (see EMOTES).
+  // this.duet (set by src/life/npcs/dances.js while dancing with the partner):
+  //   { side: +1 partner on my left (+X) | -1 on my right, mirror: +1 | -1, hold: 'shoulders' | 'waist', lead }
+  // this.emoteBeat counts the hits of a move (a stamp, a beep, a landing) and this.beatKind names the
+  // last one, so town life code can add a puff or a sound without touching the animation.
+  moreMoves(e, T, D, k, t, dt) {
+    const B = this.body;
+    const [legL, legR] = this.legs;
+    const [armL, armR] = this.arms;
+    const duo = this.duet;
+    const head = (this.emoteHead = [0, 0, 0]);
+    if (T <= dt + 1e-6) this.beatStep = -1;
+    const TAU = Math.PI * 2;
+    if (e === 'dabke') {
+      // Step, kick, hop, stamp, three rounds; the kicking leg swaps each round
+      const c = T / 1.6;
+      const n = Math.floor(c);
+      const u = c - n;
+      const s = n % 2 ? -1 : 1;
+      const kick = s > 0 ? legL : legR;
+      const stamp = s > 0 ? legR : legL;
+      B.position.x += Math.sin(u * TAU) * 0.04 * s * k;
+      kick.rotation.x = -1.05 * bump(u, 0.2, 0.55) * k;
+      B.rotation.x -= 0.08 * bump(u, 0.2, 0.55) * k;
+      B.position.y += 0.13 * bump(u, 0.45, 0.72) * k;
+      stamp.rotation.x = -0.75 * bump(u, 0.6, 0.86) * k;
+      if (u > 0.86 && this.beat('stamp', n)) this.squash = 0.84;
+      const bob = Math.sin(u * TAU) * 0.08 * k;
+      if (duo) {
+        // The hand on the partner's side holds theirs; the leader rolls the other hand up high
+        const inner = duo.side > 0 ? armL : armR;
+        const outer = duo.side > 0 ? armR : armL;
+        inner.rotation.set(-0.12 + bob, 0, 0.62 * duo.side);
+        if (duo.lead) outer.rotation.set(0.3 * k, 0, -duo.side * (0.18 + (2.15 + Math.sin(t * 7) * 0.2) * k));
+        else outer.rotation.set(-0.12 + bob, 0, -duo.side * (0.18 + 0.35 * k));
+      } else {
+        armR.rotation.set(0.3 * k, 0, -0.18 - (2.15 + Math.sin(t * 7) * 0.2) * k);
+        armL.rotation.set(-0.12 + bob, 0, 0.18 + 0.4 * k);
+      }
+    } else if (e === 'slow') {
+      // Sway from foot to foot; with the partner: hands on the shoulders or the waist
+      const w = Math.sin(T * 1.8);
+      const m = duo?.mirror ?? 1;
+      B.rotation.z = w * 0.07 * k * m;
+      B.position.x += w * 0.025 * k * m;
+      legL.rotation.x = -Math.max(0, w) * 0.16 * k;
+      legR.rotation.x = -Math.max(0, -w) * 0.16 * k;
+      head[0] = -0.08 * k;
+      head[2] = (0.1 - w * 0.05 * m) * k;
+      if (duo?.hold === 'shoulders') {
+        armL.rotation.set(-1.72 * k, 0, 0.18 * (1 - k));
+        armR.rotation.set(-1.72 * k, 0, -0.18 * (1 - k));
+        B.rotation.x += 0.07 * k;
+      } else if (duo) {
+        armL.rotation.set(-1.05 * k, 0, 0.18 * (1 - k));
+        armR.rotation.set(-1.05 * k, 0, -0.18 * (1 - k));
+        B.rotation.x += 0.05 * k;
+      } else {
+        armL.rotation.set(-1.3 * k, 0, 0.18 - 0.4 * k);
+        armR.rotation.set(-1.3 * k, 0, -0.18 + 0.4 * k);
+      }
+    } else if (e === 'twirl') {
+      // Two turns on tiptoe with one hand up, then a little curtsy
+      B.rotation.y = smooth((T - 0.15) / 1.45) * TAU * 2;
+      B.position.y += 0.06 * k + 0.05 * bump(T, 0.15, 1.6);
+      armR.rotation.set(0.35 * k, 0, -0.18 - 2.35 * k);
+      armL.rotation.set(-1.0 * k, 0, 0.18 + 0.35 * k);
+      const dip = bump(T, 1.65, D);
+      B.position.y -= 0.1 * dip;
+      B.rotation.x += 0.12 * dip;
+      legL.rotation.x = -0.2 * dip;
+      legR.rotation.x = 0.35 * dip;
+      head[2] = 0.15 * k;
+      if (T > 1.6) this.beat('sparkle', 0);
+    } else if (e === 'robot') {
+      // Stiff poses that snap into place, a beep on each
+      const i = Math.floor(T / 0.3);
+      const a = ROBOT[i % ROBOT.length];
+      const b = i === 0 ? ROBOT_REST : ROBOT[(i - 1) % ROBOT.length];
+      const f = smooth(((T % 0.3) / 0.3) * 4);
+      const P = (j) => ROBOT_REST[j] + (b[j] + (a[j] - b[j]) * f - ROBOT_REST[j]) * k;
+      armL.rotation.set(P(0), 0, P(1));
+      armR.rotation.set(P(2), 0, P(3));
+      B.rotation.y = P(4);
+      head[1] = P(5) - P(4) * 0.5;
+      B.position.y -= (i % 2 ? 0.025 : 0) * k;
+      legL.rotation.x = (i % 4 === 1 ? -0.3 : 0) * k;
+      legR.rotation.x = (i % 4 === 3 ? -0.3 : 0) * k;
+      this.beat('beep', i);
+    } else if (e === 'salsa') {
+      // Side steps with swinging hips; facing the partner, the follower turns under a raised hand
+      const om = TAU / 1.2;
+      const w = Math.sin(T * om);
+      const m = duo?.mirror ?? 1;
+      B.position.x += w * 0.08 * k * m;
+      B.rotation.z = -w * 0.09 * k * m;
+      B.rotation.y = Math.sin(T * om * 2) * 0.12 * k;
+      legL.rotation.x = -Math.max(0, w) * 0.35 * k;
+      legR.rotation.x = -Math.max(0, -w) * 0.35 * k;
+      const turn = bump(T, 2.3, 3.4);
+      const fwd = -1.0 * k * (1 - turn) + 0.4 * turn;
+      if (duo && duo.hold !== 'shoulders') {
+        // The lead holds both hands and lifts the right one for the follower's turn
+        armL.rotation.set(-1.0 * k, 0, 0.18 * (1 - k));
+        armR.rotation.set(fwd, 0, -0.18 * (1 - k) - 2.2 * turn);
+      } else if (duo) {
+        // The follower turns under the lifted hand
+        B.rotation.y += smooth((T - 2.4) / 0.9) * TAU;
+        armL.rotation.set(fwd, 0, 0.18 * (1 - k) + 2.2 * turn);
+        armR.rotation.set(-1.0 * k, 0, -0.18 * (1 - k));
+      } else {
+        armL.rotation.set((-0.7 + w * 0.2) * k, 0, 0.18 + 0.6 * k);
+        armR.rotation.set((-0.7 - w * 0.2) * k, 0, -0.18 - 0.6 * k);
+      }
+      this.beat('shake', Math.floor((T * om) / Math.PI));
+    } else if (e === 'moonwalk') {
+      // Glide backwards, a spin back to the start, then a pose with a hand at the brow
+      const glide = smooth(T / 2.4) * (1 - smooth((T - 2.4) / 0.7));
+      B.position.z -= 0.42 * glide;
+      this.blob.position.z = -0.42 * glide;
+      const g = k * (1 - smooth((T - 2.25) / 0.2));
+      const w = Math.sin((T * Math.PI) / 0.6);
+      legL.rotation.x = (0.3 * Math.max(0, w) - 0.12 * Math.max(0, -w)) * g;
+      legR.rotation.x = (0.3 * Math.max(0, -w) - 0.12 * Math.max(0, w)) * g;
+      B.position.y += 0.03 * Math.abs(w) * g + 0.06 * bump(T, 2.4, D);
+      armL.rotation.x = w * 0.25 * g;
+      armR.rotation.x = -w * 0.25 * g;
+      B.rotation.y = smooth((T - 2.4) / 0.6) * TAU;
+      const tip = bump(T, 2.85, D + 0.1);
+      if (tip > 0) armR.rotation.set(-2.7 * tip, 0, -0.18 - 0.12 * tip);
+      head[0] = 0.14 * g - 0.1 * tip;
+      if (T > 2.95) this.beat('pop', 0);
+    } else if (e === 'hop') {
+      // Bunny hops from side to side, arms flapping, a squash on each landing
+      const c = T / 0.7;
+      const n = Math.floor(c);
+      const v = c - n;
+      const h = bump(v, 0.08, 0.86) * k;
+      const from = n === 0 ? 0 : (n % 2 ? -0.09 : 0.09);
+      const to = n % 2 ? 0.09 : -0.09;
+      B.position.x += (from + (to - from) * smooth((v - 0.08) / 0.78)) * k;
+      B.position.y += 0.27 * h;
+      legL.rotation.x = legR.rotation.x = -0.55 * h;
+      armL.rotation.z = 0.18 + (0.5 + 1.6 * h) * k;
+      armR.rotation.z = -0.18 - (0.5 + 1.6 * h) * k;
+      B.rotation.z = (n % 2 ? 0.1 : -0.1) * h;
+      head[2] = (n % 2 ? 0.08 : -0.08) * h;
+      if (v > 0.86 && this.beat('land', n)) this.squash = 0.8;
+    } else if (e === 'shimmy') {
+      // Quick shoulder shakes while dipping down low and back up
+      const dip = Math.sin(Math.min(1, T / D) * Math.PI);
+      const sh = Math.sin(T * 30) * 0.14 * k;
+      B.rotation.y = sh;
+      B.rotation.x -= 0.1 * k;
+      B.position.y -= 0.07 * dip;
+      legL.rotation.x = legR.rotation.x = -0.28 * dip;
+      armL.rotation.set(-0.5 * k, 0, 0.18 + 0.85 * k);
+      armR.rotation.set(-0.5 * k, 0, -0.18 - 0.85 * k);
+      head[1] = -sh * 0.7;
+      this.beat('shimmer', Math.floor(T / 0.6));
+    } else if (e === 'ballet') {
+      // Up on the toes, arms in a crown, a pirouette, then an arabesque
+      const up = smooth(T / 0.45) * (1 - smooth((T - (D - 0.45)) / 0.45));
+      B.position.y += 0.08 * up;
+      B.rotation.y = smooth((T - 0.45) / 1.45) * TAU;
+      const passe = bump(T, 0.4, 2.0);
+      const ara = smooth((T - 2.0) / 0.5) * (1 - smooth((T - 3.1) / 0.45));
+      B.rotation.x += 0.32 * ara;
+      legL.rotation.x = -0.32 * ara;
+      legR.rotation.set(-0.95 * passe + 1.2 * ara, 0, -0.35 * passe);
+      const crown = up * (1 - ara);
+      armL.rotation.set(0.45 * crown - 1.6 * ara, 0, 0.18 + 2.25 * crown + 0.1 * ara);
+      armR.rotation.set(0.45 * crown + 0.3 * ara, 0, -0.18 - 2.25 * crown - 1.3 * ara);
+      head[0] = -0.12 * up - 0.2 * ara;
+      if (T > 1.9) this.beat('sparkle', 0);
+    } else if (e === 'jazz') {
+      // Hands up and out, shaking, a side step and a kick
+      const sh = Math.sin(T * 32) * 0.09 * k;
+      armL.rotation.set(-0.35 * k, 0, 0.18 + 1.8 * k + sh);
+      armR.rotation.set(-0.35 * k, 0, -0.18 - 1.8 * k - sh);
+      B.position.x += Math.sin((T * Math.PI) / 0.6) * 0.06 * k;
+      B.position.y += Math.abs(Math.sin((T * Math.PI) / 0.3)) * 0.04 * k;
+      const kick = bump(T, 1.0, 1.5);
+      legL.rotation.set(-0.3 * kick, 0, 0.5 * kick);
+      B.rotation.z = -0.08 * kick;
+      head[2] = Math.sin((T * Math.PI) / 0.6) * 0.08 * k;
+      this.beat('twinkle', Math.floor(T / 0.8));
+    } else if (e === 'highfive') {
+      // Hand up, a slap forward, back down
+      const up = smooth(T / 0.32);
+      const slap = smooth((T - 0.32) / 0.14);
+      const back = smooth((T - 0.85) / 0.4);
+      armR.rotation.set((-0.3 * up + 1.2 * slap) * (1 - back), 0, -0.18 - 2.5 * up * (1 - back));
+      B.rotation.x += 0.08 * slap * (1 - back);
+      B.position.y += 0.06 * bump(T, 0.3, 0.6);
+      if (T > 0.44) this.beat('slap', 0);
+    } else if (e === 'handshake') {
+      // A hand forward, a few friendly shakes and a small nod
+      const shake = bump(T, 0.35, 1.25);
+      armR.rotation.set(-1.2 * k + Math.sin(T * 18) * 0.12 * shake, 0, -0.18 * (1 - k) + 0.1 * k);
+      B.rotation.x += 0.08 * shake;
+      head[0] = 0.12 * shake;
+      if (T > 0.5) this.beat('shake', 0);
+    } else if (e === 'selfie') {
+      // Phone up high in one hand, a peace sign by the cheek, head tilted
+      armR.rotation.set(-2.5 * k, 0, -0.18 - 0.27 * k);
+      armL.rotation.set(-2.7 * k, 0, 0.18 + 0.12 * k);
+      B.rotation.z = 0.05 * k;
+      head[2] = 0.16 * k;
+      head[0] = -0.1 * k;
+    }
+  }
+
+  // Count a hit of the current move once per step (see moreMoves). Returns true when it counts.
+  beat(kind, step) {
+    if (step === this.beatStep) return false;
+    this.beatStep = step;
+    this.emoteBeat = (this.emoteBeat || 0) + 1;
+    this.beatKind = kind;
+    return true;
   }
 
   // World position of a hand (0 left, 1 right), for hand-holding checks.

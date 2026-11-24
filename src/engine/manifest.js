@@ -33,6 +33,7 @@ export const INTERIORS = [
 // Town life modules (src/engine/life.js): small moments layered on the whole game.
 export const LIFE = [
   { id: 'love', module: '../life/love.js' },
+  { id: 'npcs', module: '../life/npcs.js' },
 ];
 
 // 3D minigames. place: the stop or place whose card offers it.
