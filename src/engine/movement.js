@@ -137,8 +137,8 @@ export function faceTo(a, dt, targetYaw, rate = 12) {
 export function syncKid(a, dt, t) {
   const k = a.kid;
   const air = airOf(a);
-  if (k.pose === 'stand' || k.pose === 'swim') {
-    k.pose = a.mode === 'swim' ? 'swim' : k.pose === 'swim' ? 'stand' : k.pose;
+  if (k.pose === 'stand' || k.pose === 'swim' || k.pose === 'scoot') {
+    if (k.pose !== 'scoot') k.pose = a.mode === 'swim' ? 'swim' : k.pose === 'swim' ? 'stand' : k.pose;
     k.root.position.set(a.pos.x, a.y - (a.stepLag || 0), a.pos.z);
     k.root.rotation.set(0, a.yaw, 0);
   }
@@ -148,5 +148,5 @@ export function syncKid(a, dt, t) {
     a.flipT = -1;
     k.flip = 0;
   }
-  k.update(dt, t, k.pose === 'stand' || k.pose === 'swim' ? a.speed : 0, air, a.turn || 0);
+  k.update(dt, t, k.pose === 'stand' || k.pose === 'swim' || k.pose === 'scoot' ? a.speed : 0, air, a.turn || 0);
 }

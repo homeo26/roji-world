@@ -58,9 +58,11 @@ export class Spaces {
   // Load every place module (or only some ids). slots: optional { id: [x, z] } overrides.
   // progress(i, n, title): called before each place is built (the loading screen); it may return a promise
   // to let the page repaint between places.
-  async load({ only = null, slots = {}, interiors = true, progress = null } = {}) {
+  // extra: [{ id, def, door: [x, z] }] interiors that weekend stops bring (they replace a manifest entry
+  // with the same id).
+  async load({ only = null, slots = {}, interiors = true, progress = null, extra = [] } = {}) {
     const defs = PLACES.filter((p) => (only ? only.includes(p.id) : !p.dev));
-    const idefs = interiors ? INTERIORS.filter((p) => !only || only.includes(p.id)) : [];
+    const idefs = interiors ? INTERIORS.filter((p) => (!only || only.includes(p.id)) && !extra.some((e) => e.id === p.id)) : [];
     // Interiors download while the places are being built
     const iload = Promise.allSettled(idefs.map((d) => import(d.module)));
     const res = await Promise.allSettled(defs.map((d) => import(d.module)));
@@ -84,6 +86,7 @@ export class Spaces {
       if (r.status === 'fulfilled') this.addInterior(idefs[i].id, r.value.default, new THREE.Vector3(idefs[i].door[0], 0, idefs[i].door[1]));
       else this.failed.push(idefs[i].id);
     });
+    if (interiors) for (const e of extra) this.addInterior(e.id, e.def, new THREE.Vector3(e.door[0], 0, e.door[1]));
     return this.places;
   }
 

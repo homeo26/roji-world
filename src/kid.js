@@ -147,7 +147,7 @@ export class Kid {
     this.tailSwing = new THREE.Vector2();
     this.tailVel = new THREE.Vector2();
     this.squash = 1;
-    this.pose = 'stand'; // stand | sit | sleep | ride | drive | swim | ski | bike
+    this.pose = 'stand'; // stand | sit | sleep | ride | drive | swim | ski | bike | scoot
     this.hands = null; // null | carry | type | stir | read | hold | wave2 (arms on top of any pose)
     this.flip = 0; // 0..1 progress of a forward flip (double jump)
     this.holdSide = 0; // +1 holding with the left hand, -1 with the right
@@ -803,6 +803,19 @@ export class Kid {
       B.rotation.set(0.22 + tuck * 0.2, 0, clamp(-turnRate * 0.12, -0.35, 0.35));
       armL.rotation.set(-0.55 + Math.sin(t * 3) * 0.05, 0, 0.35);
       armR.rotation.set(-0.55 - Math.sin(t * 3) * 0.05, 0, -0.35);
+    } else if (pose === 'scoot') {
+      // On a kick scooter: standing on the deck (13 cm up), hands on the bar, the back foot kicks while
+      // the scooter speeds up and rests on the deck when it glides
+      const want = clamp(this.kickWant ?? 0, 0, 1);
+      this.kickAmt = damp(this.kickAmt || 0, want, 6, dt);
+      this.kickPhase = (this.kickPhase || 0) + dt * 6.5;
+      const kick = Math.max(0, Math.sin(this.kickPhase)) * this.kickAmt;
+      B.position.set(0, 0.13 + kick * 0.015, 0);
+      B.rotation.set(0.1 + clamp(speed / 14, 0, 1) * 0.1, 0, clamp(-turnRate * 0.1, -0.3, 0.3));
+      legL.rotation.set(-0.08, 0, 0.03);
+      legR.rotation.set(0.12 + kick * 0.75, 0, -0.06);
+      armL.rotation.set(-1.05, 0, 0.16);
+      armR.rotation.set(-1.05, 0, -0.16);
     } else if (pose === 'bike') {
       this.pedal = (this.pedal || 0) + dt * (2 + speed * 2.2);
       legL.rotation.set(-1.15 + Math.sin(this.pedal) * 0.55, 0, 0.06);
