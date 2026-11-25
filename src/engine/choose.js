@@ -1,5 +1,6 @@
-// A small choice card: choose({ title, text, options: [{ id, label, sub }] }) -> Promise<id | null>.
+// A small choice card: choose({ title, text, options: [{ id, label, sub }], exit }) -> Promise<id | null>.
 // Used by places (api.choose) and 3D minigames (ctx.hud.choose). Esc or the backdrop returns null.
+// exit: a function for an X button in the top-right corner (games pass "leave the game").
 
 const CSS = `
 .choose { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(40,24,40,.32); font-family: var(--font, 'Fredoka', system-ui, sans-serif); }
@@ -11,6 +12,8 @@ const CSS = `
 .choose button:hover, .choose button:focus-visible { background: #ffe1e6; outline: none; }
 .choose button small { display: block; font-weight: 400; font-size: .78rem; color: #7a6470; margin-top: 2px; }
 @keyframes c-in { from { transform: scale(.9); opacity: 0; } }
+/* In a game, the card covers the game's exit button, so it carries the same one in the same corner */
+.choose .c-exit { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 42px; height: 42px; padding: 0; border-radius: 50%; background: #fffaf4; box-shadow: 0 6px 18px rgba(60,30,40,.18); display: grid; place-items: center; color: #3b2b3f; }
 @media (max-height: 520px) {
   .choose .c-card { padding: 14px 16px; width: min(660px, 92vw); max-height: 92vh; }
   .choose h3 { font-size: 1.1rem; }
@@ -28,7 +31,7 @@ export function closeChoices() {
   for (const done of [...open]) done(null);
 }
 
-export function choose({ title = '', text = '', options = [] } = {}) {
+export function choose({ title = '', text = '', options = [], exit = null } = {}) {
   if (!document.getElementById('choose-style')) {
     const s = document.createElement('style');
     s.id = 'choose-style';
@@ -40,14 +43,16 @@ export function choose({ title = '', text = '', options = [] } = {}) {
     el.className = 'choose';
     el.innerHTML = `<div class="c-card" role="dialog" aria-label="${esc(title)}"><h3>${esc(title)}</h3>${text ? `<p>${text}</p>` : ''}<div class="c-opts">${options
       .map((o) => `<button data-c="${esc(o.id)}">${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`)
-      .join('')}</div></div>`;
+      .join('')}</div></div>${exit ? '<button class="c-exit" aria-label="Back to town"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>' : ''}`;
     const done = (v) => {
       open.delete(done);
+      if (!open.size) document.body.classList.remove('choosing');
       el.remove();
       window.removeEventListener('keydown', key, true);
       resolve(v);
     };
     open.add(done);
+    document.body.classList.add('choosing');
     const key = (e) => {
       if (e.key === 'Escape') {
         e.stopImmediatePropagation();
@@ -60,6 +65,11 @@ export function choose({ title = '', text = '', options = [] } = {}) {
     el.addEventListener('pointerdown', () => (armed = true));
     el.addEventListener('click', (e) => {
       if (!armed && e.detail !== 0) return;
+      if (exit && e.target.closest('.c-exit')) {
+        done(null);
+        exit();
+        return;
+      }
       const b = e.target.closest('[data-c]');
       if (b) done(b.dataset.c);
       else if (e.target === el) done(null);

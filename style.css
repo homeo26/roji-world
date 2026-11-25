@@ -1687,3 +1687,42 @@ body.wardrobe-open .clock {
 
 /* A choice card on screen wins over a place toast (on phones they can touch) */
 body:has(.choose) #toast { opacity: 0; }
+
+/* ---------------------------------------------------------------- touch: everything easy to hit with a thumb */
+.touch-keys {
+  display: none;
+}
+body.touch .touch-keys {
+  display: grid;
+}
+body.touch .keys:not(.touch-keys) {
+  display: none;
+}
+body.touch .card .btn {
+  min-height: 40px;
+}
+body.touch .round.small {
+  width: 40px;
+  height: 40px;
+}
+body.touch .choose button {
+  min-height: 42px;
+}
+body.touch .wchip {
+  min-height: 38px;
+  padding: 8px 14px;
+}
+body.touch .sw {
+  width: 36px;
+  height: 36px;
+}
+body.touch .chips,
+body.touch .swatches {
+  gap: 8px;
+}
+/* The stamps in the top bar stay small to fit, but take a tap a little around them */
+body.touch #journey .chip::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}

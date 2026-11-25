@@ -88,6 +88,7 @@ body.touch #arena .dl-say { bottom: max(12px, env(safe-area-inset-bottom)); max-
 #arena .dl-paint { width: 26px; height: 26px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: inset 0 0 0 2px rgba(0,0,0,.08); position: relative; }
 #arena .dl-paint.on { box-shadow: 0 0 0 3px #fffaf4, 0 0 0 5px #3b2b3f; }
 #arena .dl-paint:disabled { cursor: default; opacity: .35; }
+#arena .dl-paint::after { content: ''; position: absolute; inset: -8px; } /* a bigger area to tap than the dot */
 #arena .dl-paint small { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: .6rem; font-weight: 700; color: #3b2b3f; }
 #arena .dl-total { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; background: #f6ece4; border-radius: 99px; padding: 3px 10px; }
 #arena .dl-tip { display: flex; gap: 12px; align-items: center; text-align: left; background: #e9f8f2; border-radius: 18px; padding: 10px 14px; margin: 4px 0 10px; }
@@ -146,7 +147,8 @@ body.touch #arena .dl-keys { display: none; }
   #arena .dl-lv svg { width: 11px; height: 11px; }
   #arena .dl-row { margin-top: 6px; gap: 6px; }
   #arena .dl-btn { font-size: .84rem; padding: .42em 1em; }
-  #arena .dl-paint { width: 20px; height: 20px; }
+  #arena .dl-paint { width: 26px; height: 26px; }
+  #arena .dl-paints { gap: 10px; }
   #arena .dl-tip { padding: 5px 10px; margin: 2px 0 6px; gap: 8px; }
   #arena .dl-tip img { width: 36px; height: 36px; }
   #arena .dl-tip p { font-size: .74rem; }

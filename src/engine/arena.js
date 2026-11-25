@@ -20,7 +20,10 @@ const CSS = `
 #arena .a-title span { font-size: .78rem; color: #7a6470; }
 #arena .a-score { margin-left: auto; background: rgba(255,250,244,.92); border-radius: 16px; padding: 8px 14px; font-weight: 700; box-shadow: 0 6px 18px rgba(60,30,40,.15); min-width: 40px; text-align: center; }
 #arena .a-score:empty { display: none; }
-#arena .a-close { pointer-events: auto; width: 42px; height: 42px; border-radius: 50%; border: 0; background: #fffaf4; box-shadow: 0 6px 18px rgba(60,30,40,.18); display: grid; place-items: center; cursor: pointer; color: #3b2b3f; }
+body.choosing #arena .a-close { visibility: hidden; } /* the question card shows its own X in the same corner */
+/* The X always sits in the top-right corner, whatever a game hides next to it */
+#arena .a-top { padding-right: 52px; min-height: 42px; }
+#arena .a-close { position: absolute; top: 0; right: 0; pointer-events: auto; width: 42px; height: 42px; border-radius: 50%; border: 0; background: #fffaf4; box-shadow: 0 6px 18px rgba(60,30,40,.18); display: grid; place-items: center; cursor: pointer; color: #3b2b3f; }
 #arena .a-msg { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(.8); font-size: clamp(2rem, 7vw, 4.2rem); font-weight: 700; color: #fff; text-shadow: 0 4px 0 rgba(0,0,0,.18), 0 10px 30px rgba(0,0,0,.25); opacity: 0; transition: opacity .2s, transform .25s cubic-bezier(.2,1.4,.4,1); text-align: center; white-space: nowrap; }
 #arena .a-msg.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 #arena .a-hint { position: absolute; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: rgba(255,250,244,.9); border-radius: 999px; padding: 6px 14px; font-size: .85rem; box-shadow: 0 6px 18px rgba(60,30,40,.12); white-space: nowrap; }
@@ -50,6 +53,9 @@ body.arena-result #arena { z-index: 48; }
   #arena .a-card button { padding: .6em 1.05em; font-size: .92rem; }
 }
 body.arena-nostick #stick, body.arena-nostick #joy { display: none !important; }
+/* Phones: every button a game shows is at least 40 px tall, so it is easy to hit with a thumb */
+body.touch.arena-on button:not(.a-btn):not(.a-close):not(.c-exit):not(.dl-paint) { min-height: 40px; }
+body.touch #arena .a-card button { min-height: 44px; }
 body.arena-on #hud, body.arena-on #minimap, body.arena-on #card, body.arena-on #prompt, body.arena-on #dock, body.arena-on #tbuttons, body.arena-on #toast { display: none !important; }
 `;
 
@@ -347,7 +353,7 @@ export class ArenaHost {
         message: (html, ms) => host.message(html, ms),
         hint: (text) => (host.$('.a-hint').textContent = text || ''),
         buttons: (spec) => host.setButtons(spec),
-        choose: (spec) => choose(spec), // { title, text, options: [{ id, label, sub }] } -> Promise<id | null>
+        choose: (spec) => choose({ exit: () => host.end({ quit: true }), ...spec }), // { title, text, options: [{ id, label, sub }] } -> Promise<id | null>
         async countdown(n = 3) {
           for (let i = n; i > 0; i--) {
             host.message(String(i), 700);

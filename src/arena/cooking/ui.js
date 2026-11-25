@@ -19,7 +19,7 @@ body.ck2-on #arena .a-msg { color: ${PAL.paper}; text-shadow: 0 3px 0 ${PAL.inkD
 body.ck2-on #arena .a-hint { background: ${PAL.paper}; color: ${PAL.inkDeep}; box-shadow: 0 0 0 2px ${PAL.band}; bottom: max(8px, env(safe-area-inset-bottom)); font-size: .78rem; padding: 4px 12px; }
 body.ck2-on.ck2-play #arena .a-title, body.ck2-on #arena .a-score { display: none; }
 body.ck2-on.ck2-cardopen #arena { z-index: 46; }
-body.ck2-on.ck2-cardopen #arena .a-hint { display: none; }
+body.ck2-on.ck2-cardopen #arena .a-hint, body.ck2-on.ck2-cardopen #arena .a-btns, body.ck2-on.ck2-cardopen #stick, body.ck2-on.ck2-cardopen #joy { display: none !important; }
 @media (max-height: 520px) { body.ck2-on.ck2-cardopen #arena .a-title { display: none; } }
 body.ck2-on.touch #arena .a-btns { display: grid; grid-template-columns: 62px 82px; grid-template-rows: 62px 82px; gap: 6px; align-items: center; justify-items: center; }
 body.ck2-on.touch #arena .a-btn { width: 62px; height: 62px; font-size: .72rem; line-height: 1.05; padding: 0 4px; }
