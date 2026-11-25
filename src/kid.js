@@ -517,6 +517,7 @@ export class Kid {
 
   buildHair(style, hair, accent, HC) {
     const H = this.head;
+    this.bow = null;
     const girl = this.look.gender === 'girl';
     const add = (m) => {
       H.add(m);
@@ -666,18 +667,46 @@ export class Kid {
       }
     }
     if (girl && style !== 'buns') {
-      const bow = new THREE.Group();
-      for (const side of [1, -1]) {
-        const wing = mesh(new THREE.SphereGeometry(0.06, 12, 8), accent);
-        wing.scale.set(1.2, 0.8, 0.5);
-        wing.position.x = 0.06 * side;
-        bow.add(wing);
-      }
-      bow.add(mesh(new THREE.SphereGeometry(0.03, 10, 8), mat(shade(this.look.accent || '#ff7fa3', 0.85), { rough: 0.5 })));
-      bow.position.set(HC.x - 0.17, HC.y + 0.23, HC.z + 0.13);
-      bow.rotation.set(-0.5, 0.5, 0.35);
-      H.add(bow);
+      this.bow = this.makeBow(HC); // places hide it (bow.visible = false) under a hat
+      H.add(this.bow);
     }
+  }
+
+  // A ribbon bow on the top left of the hair: two puffy loops that flare up from a round knot, and two
+  // short tails. It sits on the hair surface (the cap has a radius of 0.33), facing out from the head.
+  makeBow(HC) {
+    const col = this.look.accent || '#ff7fa3';
+    const ribbon = mat(col, { rough: 0.5 });
+    const fold = mat(shade(col, 0.82), { rough: 0.5 });
+    const bow = new THREE.Group();
+    const loopGeo = new THREE.SphereGeometry(0.05, 16, 12);
+    const tailGeo = new THREE.CapsuleGeometry(0.014, 0.05, 4, 8);
+    for (const side of [1, -1]) {
+      const loop = mesh(loopGeo, ribbon);
+      loop.scale.set(1.35, 0.95, 0.5);
+      loop.position.set(0.056 * side, 0.008, 0);
+      loop.rotation.z = 0.32 * side;
+      // the fold inside each loop, a touch darker, so it reads as ribbon rather than a ball
+      const inner = mesh(loopGeo, fold, { cast: false });
+      inner.scale.set(0.62, 0.42, 0.3);
+      inner.position.set(0.05 * side, 0.008, 0.016);
+      inner.rotation.z = 0.32 * side;
+      const tail = mesh(tailGeo, ribbon);
+      tail.position.set(0.022 * side, -0.05, 0.002);
+      tail.rotation.z = 0.42 * side;
+      tail.scale.set(1.25, 1, 0.55);
+      bow.add(loop, inner, tail);
+    }
+    const knot = mesh(new THREE.SphereGeometry(0.026, 14, 10), fold);
+    knot.scale.set(0.95, 1.1, 0.78);
+    knot.position.z = 0.008;
+    bow.add(knot);
+    // Out along this direction from the head centre, just above the hair
+    const n = new THREE.Vector3(-0.54, 0.73, 0.41).normalize();
+    bow.position.copy(HC).addScaledVector(n, 0.352);
+    bow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    bow.rotateZ(-0.5); // the loops lie along the curve of the head, tipped toward the face
+    return bow;
   }
 
   emote(type) {

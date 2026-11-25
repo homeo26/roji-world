@@ -386,8 +386,10 @@ export default {
           winter.set(kid, w);
         }
         if (w.hat.parent !== kid.head) kid.head.add(w.hat);
+        if (kid.bow) kid.bow.visible = false; // under the beanie
         if (w.scarf.parent !== kid.body) kid.body.add(w.scarf);
       } else if (w) {
+        if (kid.bow) kid.bow.visible = true;
         w.hat.removeFromParent();
         w.scarf.removeFromParent();
       }
