@@ -90,9 +90,12 @@ function toast(html, ms = 2600) {
 const fadeEl = document.getElementById('fade');
 function fade(fn) {
   fadeEl.classList.add('on');
-  setTimeout(() => {
-    fn();
-    setTimeout(() => fadeEl.classList.remove('on'), 60);
+  setTimeout(async () => {
+    try {
+      await fn();
+    } finally {
+      setTimeout(() => fadeEl.classList.remove('on'), 60);
+    }
   }, 320);
 }
 

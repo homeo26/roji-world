@@ -518,24 +518,43 @@ export class Minimap {
     return [this.w / 2 + (x - this.cx) * this.s, this.h / 2 + (z - this.cz) * this.s];
   }
 
-  draw(me, yaw, stamps, t, other, car) {
-    const ctx = this.canvas.getContext('2d');
-    this.cx = me.x;
-    this.cz = me.z;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, this.w, this.h);
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect?.(0, 0, this.w, this.h, 18);
-    ctx.clip();
-    ctx.fillStyle = '#7fcad3';
-    ctx.fillRect(0, 0, this.w, this.h);
+  // The island, the snow, the places, the roads and the paths never move: they are drawn once into a big
+  // canvas at the map's own scale and copied in each frame (redrawn when the golden trail grows).
+  staticLayer() {
+    const trail = Math.floor(this.world.trailShown || 0);
+    const key = `${trail}|${this.places.length}`;
+    if (this.layer && this.layerKey === key) return this.layer;
+    const s = this.s;
+    const dpr = this.dpr;
+    const ol = this.world.outline;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of ol) {
+      x0 = Math.min(x0, p.x);
+      x1 = Math.max(x1, p.x);
+      z0 = Math.min(z0, p.y);
+      z1 = Math.max(z1, p.y);
+    }
+    // Room for the widest view past every edge
+    const padX = this.w / s / 2 + 4;
+    const padZ = this.h / s / 2 + 4;
+    x0 -= padX;
+    x1 += padX;
+    z0 -= padZ;
+    z1 += padZ;
+    const c = this.layer || document.createElement('canvas');
+    c.width = Math.ceil((x1 - x0) * s * dpr);
+    c.height = Math.ceil((z1 - z0) * s * dpr);
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+    const P = (x, z) => [(x - x0) * s, (z - z0) * s];
+    const W = (x1 - x0) * s;
     ctx.fillStyle = '#9ad06a';
     ctx.strokeStyle = '#d9a066';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    this.world.outline.forEach((p, i) => {
-      const [x, y] = this.P(p.x, p.y);
+    ol.forEach((p, i) => {
+      const [x, y] = P(p.x, p.y);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
@@ -543,19 +562,19 @@ export class Minimap {
     ctx.stroke();
     ctx.fill();
     // Snow at the north end
-    const [, snowY] = this.P(0, -88);
+    const [, snowY] = P(0, -88);
     if (snowY > 0) {
       const g = ctx.createLinearGradient(0, snowY, 0, snowY - 10);
       g.addColorStop(0, 'rgba(242,246,251,0)');
       g.addColorStop(1, 'rgba(242,246,251,0.95)');
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, this.w, snowY);
+      ctx.fillRect(0, 0, W, snowY);
     }
     for (const pl of this.places) {
-      const [x, y] = this.P(pl.x - pl.w / 2, pl.z - pl.d / 2);
+      const [x, y] = P(pl.x - pl.w / 2, pl.z - pl.d / 2);
       ctx.fillStyle = pl.color + '55';
       ctx.beginPath();
-      ctx.roundRect?.(x, y, pl.w * this.s, pl.d * this.s, 4);
+      ctx.roundRect?.(x, y, pl.w * s, pl.d * s, 4);
       ctx.fill();
     }
     const line = (pts, style, width, dash = []) => {
@@ -566,7 +585,7 @@ export class Minimap {
       ctx.setLineDash(dash);
       ctx.beginPath();
       pts.forEach((p, i) => {
-        const [x, y] = this.P(p.x, p.z);
+        const [x, y] = P(p.x, p.z);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
@@ -577,7 +596,31 @@ export class Minimap {
     line(this.world.samples, '#f6e4bd', 5);
     line(this.world.townSamples, '#f6e4bd', 5);
     line(this.world.futureSamples, 'rgba(255,255,255,0.8)', 2, [3, 5]);
-    if (this.world.trailShown > 0) line(this.world.samples.slice(0, Math.floor(this.world.trailShown) + 1), '#ffb347', 3);
+    if (trail > 0) line(this.world.samples.slice(0, trail + 1), '#ffb347', 3);
+    this.layer = c;
+    this.layerKey = key;
+    this.layerOrigin = [x0, z0];
+    return c;
+  }
+
+  draw(me, yaw, stamps, t, other, car) {
+    const ctx = this.canvas.getContext('2d');
+    this.cx = me.x;
+    this.cz = me.z;
+    const layer = this.staticLayer();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.w, this.h);
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect?.(0, 0, this.w, this.h, 18);
+    ctx.clip();
+    ctx.fillStyle = '#7fcad3';
+    ctx.fillRect(0, 0, this.w, this.h);
+    // Copy the fixed map in at whole device pixels, so it stays as crisp as drawing it fresh
+    const [ox, oz] = this.P(this.layerOrigin[0], this.layerOrigin[1]);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer, Math.round(ox * this.dpr), Math.round(oz * this.dpr));
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     for (const st of this.stations) {
       const [x, y] = this.P(st.pad.x, st.pad.z);
       if (x < -8 || y < -8 || x > this.w + 8 || y > this.h + 8) continue;

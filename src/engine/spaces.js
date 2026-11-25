@@ -104,6 +104,9 @@ export class Spaces {
       const door = inst.door || { x: 0, z: d / 2 - 0.5 };
       this.addInterior(def.id, inst.interior, new THREE.Vector3(sx + door.x, 0, sz + door.z), space);
     }
+    // Everything the place drew at build time, with room for what moves about in it (boats, gulls, rides)
+    inst.group.updateMatrixWorld(true);
+    space.bounds = new THREE.Box3().setFromObject(inst.group).expandByScalar(6);
     this.places.push(space);
     this.byId[def.id] = space;
     return space;
@@ -207,25 +210,36 @@ export class Spaces {
   // A locked door (the school) only opens with { force: true }, which the dev harness uses.
   enter(key, { force = false } = {}) {
     const rec = this.interiors[key];
-    if (!rec || this.inside) return;
+    if (!rec || this.inside || this.entering) return;
     if (!force && rec.locked()) {
       rec.onLocked();
       return;
     }
-    if (!rec.space) {
+    this.entering = true;
+    // The screen fades first; the room is built and its shaders made ready while it is dark, so walking in
+    // never freezes on the town view
+    this.g.fade(async () => {
       try {
-        this.buildInterior(rec);
-      } catch (e) {
-        console.error(`interior ${key} failed to build`, e);
-        this.g.toast('This door is stuck for now.');
-        return;
+        if (!rec.space) {
+          try {
+            this.buildInterior(rec);
+          } catch (e) {
+            console.error(`interior ${key} failed to build`, e);
+            this.g.toast('This door is stuck for now.');
+            return;
+          }
+        }
+        const s = rec.space;
+        if (!s.compiled) {
+          s.compiled = true;
+          await this.g.precompile?.(s.inst.group);
+        }
+        this.inside = s;
+        this.g.onEnterInterior(s);
+        s.inst.onEnter?.(s.api);
+      } finally {
+        this.entering = false;
       }
-    }
-    const s = rec.space;
-    this.g.fade(() => {
-      this.inside = s;
-      this.g.onEnterInterior(s);
-      s.inst.onEnter?.(s.api);
     });
   }
 
@@ -286,6 +300,18 @@ export class Spaces {
       const s = c.object.scale;
       s.y += (want - s.y) * (1 - Math.exp(-10 * dt));
       c.object.visible = s.y > 0.02;
+    }
+  }
+
+  // Called just before each frame is drawn (after the camera moved). A place stays drawn only while its
+  // bounds touch the camera's view or the sun's shadow view, so places out of sight cost nothing, and
+  // the picture is the same: anything that could show up, or cast a shadow into view, is still drawn.
+  // Inside a building the town is far behind the camera, so its places are skipped altogether.
+  cull(view, shadow) {
+    for (const s of this.places) {
+      const g = s.inst.group;
+      if (!g.visible) continue;
+      if (this.inside || !(view.intersectsBox(s.bounds) || (shadow && shadow.intersectsBox(s.bounds)))) g.visible = false;
     }
   }
 
