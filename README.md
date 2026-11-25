@@ -92,6 +92,8 @@ python3 -m http.server 8765 --bind 127.0.0.1
 
 Then open http://127.0.0.1:8765. Opening `index.html` directly from disk does not work, because browsers block ES modules on `file://`.
 
+The start screen shows a real loading percentage: the download share comes from `loading.json`, the list of files the game needs before it can start, with their sizes. After adding or removing modules, run `node tools/loading-list.mjs` from the project root to update it.
+
 For testing, `?time=night` fixes the time of day. The other names are `dawn`, `sunrise`, `morning`, `noon`, `afternoon`, `golden`, `sunset` and `dusk`.
 
 ## Publish on GitHub Pages
@@ -163,3 +165,4 @@ Everything about the stops is in `src/config.js`: titles, tags, texts and colour
 | `src/input.js` | Keyboard, mouse, thumbstick, pinch zoom and touch buttons |
 | `src/games/*.js` | The older 2D minigames, used only if a 3D one fails to load |
 | `games.html` | Opens a single 2D minigame for testing |
+| `loading.json`, `tools/loading-list.mjs` | The start-up files and their sizes for the loading percentage, and the script that writes the list |
