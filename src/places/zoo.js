@@ -127,6 +127,7 @@ export default {
     hat.add(brim, crown, band);
     hat.rotation.x = -0.12;
     keeper.head.add(hat);
+    keeper.bow?.removeFromParent(); // under the hat (skinify merges hidden meshes too)
     skinify(keeper.root, { rough: 0.6 });
     group.add(keeper.root);
     dynamic.push(keeper.root);

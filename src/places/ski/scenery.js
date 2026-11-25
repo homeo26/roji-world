@@ -366,6 +366,7 @@ export function buildRentalHut(group, colliders, makeKid, looks) {
   kid.arms[1].rotation.set(0, 0, -2.5);
   kid.head.rotation.set(-0.08, -0.25, 0.08);
   kid.head.add(beanie('#4aa3df', '#ffffff'));
+  kid.bow?.removeFromParent(); // under the beanie
   kid.body.add(scarf('#ffd166'));
   kid.root.position.set(W / 2 + 0.55, 0, D / 2 + 0.55);
   kid.root.rotation.y = -0.35;
