@@ -592,13 +592,21 @@ function currentHotspot() {
 // ------------------------------------------------------------------ actions
 let currentStation = null;
 let currentHot = null;
+let hotLockUntil = 0;
 function action(act = 'auto') {
   if (!started || gameOpen) return;
-  if (act === 'auto' && ui.panelOpen) return;
+  // While a choice card is up, E and A wait for a pick (the card has its own buttons; Esc closes it)
+  if (act === 'auto' && (ui.panelOpen || document.querySelector('.choose'))) return;
   if (act === 'auto') {
     if (game.activities.active) return game.activities.end();
     if (mount) return dismount();
-    if (currentHot) return currentHot.act();
+    if (currentHot) {
+      // A quick second press must not run the same thing twice (some open their card after a short walk)
+      const now = performance.now();
+      if (now < hotLockUntil) return;
+      hotLockUntil = now + 600;
+      return currentHot.act();
+    }
     if (currentStation) {
       const s = currentStation.stop;
       if (s.kind === 'start') act = 'inside';
