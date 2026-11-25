@@ -41,6 +41,8 @@ export const INTERIORS = [
 export const STOP_MODULES = [
   { id: 'horse', module: '../stops/horse.js' },
   { id: 'fencing', module: '../stops/fencing.js' },
+  { id: 'boardgames', module: '../stops/boardgames.js' },
+  { id: 'clay', module: '../stops/clay.js' },
   { id: 'drawing', module: '../stops/drawing.js' },
   { id: 'plaza', module: '../stops/plaza.js' },
 ];
