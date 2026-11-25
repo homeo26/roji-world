@@ -197,7 +197,7 @@ export class Station {
     const s = this.onPad ? 2.05 : 1.7;
     this.badge.scale.x += (s - this.badge.scale.x) * Math.min(1, dt * 8);
     this.badge.scale.y = this.badge.scale.x;
-    this.animate(dt, t, this.nearAmount, this.onPad);
+    this.animate(dt, t, this.nearAmount, this.onPad, rojiPos);
   }
 }
 
