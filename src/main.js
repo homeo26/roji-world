@@ -502,7 +502,7 @@ const ui = new UI({
   onJump: () => jump(),
   onPlay: (id) => playGame(id),
   onFullscreen: () => toggleFullscreen(),
-  journalData: () => ({ stations, stamps, gamesAt: gamesFor }),
+  journalData: () => ({ stations, stamps, gamesAt: gamesFor, looks }),
 });
 ui.setSound(sound.muted);
 ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
@@ -1500,6 +1500,7 @@ const insideColor = new THREE.Color();
 window.__roji = {
   renderer,
   minimap,
+  ui,
   scene,
   world,
   car,
