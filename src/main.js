@@ -54,6 +54,22 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+// Checking every shader for errors makes the browser finish compiling it on the spot, which stalls a frame
+// each time a new place comes into view. Keep the checks while developing (local server or ?debug).
+const DEV = ['127.0.0.1', 'localhost'].includes(location.hostname) || params.has('debug');
+renderer.debug.checkShaderErrors = DEV;
+// Compile shaders ahead of time (in parallel where the browser can) so nothing stalls when it first shows up
+const PARALLEL = renderer.extensions.has('KHR_parallel_shader_compile');
+const compileNow = (root, cam, target) => {
+  try {
+    if (PARALLEL) return renderer.compileAsync(root, cam, target);
+    renderer.compile(root, cam, target); // the browser compiles without telling when it is done: start it now
+  } catch (e) {
+    if (DEV) console.warn('precompile failed', e);
+  }
+  return Promise.resolve();
+};
+const precompile = (root, timeout = 6000) => Promise.race([Promise.resolve(compileNow(root, camera, scene)).catch(() => {}), new Promise((r) => setTimeout(r, timeout))]);
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -90,6 +106,7 @@ const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerH
 await bootStep(0.12, 'Laying the paths and the sea');
 const world = new World(scene);
 const physics = new Physics(world.colliders);
+if (!params.has('nogrid')) physics.useGrid(8); // thousands of colliders: look only at the nearby ones
 const fx = new Effects(scene);
 fx.initExtras();
 const tweens = new Tweens();
@@ -125,6 +142,7 @@ const game = {
   onExitInterior: (space) => onExitInterior(space),
   playArena: (id, opts) => playArena(id, opts),
   openWardrobe: () => openWardrobe(),
+  precompile: (root) => precompile(root, 2500),
   setHolding: (on) => (!!on !== holding ? toggleHands() : null),
   phase: () => daylight.label().phase,
 };
@@ -273,6 +291,9 @@ const greeting = () => {
 const headPos = (kid) => kid.head.localToWorld(new THREE.Vector3(0, 0.75, 0));
 function addActor(id, x, z, yaw) {
   const kid = new Kid(looks[id]);
+  // Roji and Homama are always on screen: merging their fixed pieces saves draw calls in every view
+  kid.autoBatch = !params.has('nobatch');
+  if (kid.autoBatch) kid.batch();
   scene.add(kid.root);
   kid.onEmoteFx = (type, k) => fx.heartsAt(headPos(k), 4);
   return makeActor(id, kid, x, z, yaw);
@@ -433,6 +454,7 @@ const arena = new ArenaHost({
   input: null, // set below once Input exists
   looks,
   models: { pony: (coat) => makePony(coat) },
+  precompile: (s, cam) => Promise.race([Promise.resolve(compileNow(s, cam)).catch(() => {}), new Promise((r) => setTimeout(r, 2500))]),
 });
 game.arena = arena;
 // On slow phones the games finish loading after the first card shows, so redraw it then
@@ -899,9 +921,12 @@ function dismount() {
 const fadeEl = document.getElementById('fade');
 function fadeThen(fn) {
   fadeEl.classList.add('on');
-  setTimeout(() => {
-    fn();
-    setTimeout(() => fadeEl.classList.remove('on'), 60);
+  setTimeout(async () => {
+    try {
+      await fn(); // may be async (a room being built and its shaders compiled while the screen is dark)
+    } finally {
+      setTimeout(() => fadeEl.classList.remove('on'), 60);
+    }
   }, 360);
 }
 function placePair(pos, yaw) {
@@ -1083,6 +1108,25 @@ function updateLift(target, dt) {
     lift = 0;
     camera.clearViewOffset();
   }
+}
+
+// Skip places that are neither in view nor able to cast a shadow into it (see Spaces.cull)
+const viewFrustum = new THREE.Frustum();
+const shadowFrustum = new THREE.Frustum();
+const cullMatrix = new THREE.Matrix4();
+function cullPlaces() {
+  camera.updateMatrixWorld();
+  viewFrustum.setFromProjectionMatrix(cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  let shadow = null;
+  if (renderer.shadowMap.enabled && sun.castShadow) {
+    sun.updateMatrixWorld();
+    sun.target.updateMatrixWorld();
+    sun.shadow.updateMatrices(sun);
+    const sc = sun.shadow.camera;
+    shadowFrustum.setFromProjectionMatrix(cullMatrix.multiplyMatrices(sc.projectionMatrix, sc.matrixWorldInverse));
+    shadow = shadowFrustum;
+  }
+  spaces.cull(viewFrustum, shadow);
 }
 
 function updateCamera(dt, t) {
@@ -1455,6 +1499,7 @@ const insideColor = new THREE.Color();
 // Test hooks for headless checks
 window.__roji = {
   renderer,
+  minimap,
   scene,
   world,
   car,
@@ -1532,6 +1577,7 @@ window.__roji = {
 function frame() {
   timer.update();
   const dt = Math.min(timer.getDelta(), 1 / 20);
+  physics.tick(timer.getDelta());
   const t = timer.getElapsed();
   elapsed = t;
   tweens.update(dt);
@@ -1667,6 +1713,7 @@ function frame() {
   if (!arena.active) game.life.emit('tick', dt, t);
   fx.update(dt, t);
   updateCamera(dt, t);
+  cullPlaces();
   if (started && !spaces.inside && frameCount % 2 === 0) minimap.draw(mount?.type === 'car' ? car.root.position : P().pos, mount?.type === 'car' ? car.yaw : P().yaw, stamps, t, C().pos, car.root.position);
   renderer.render(scene, camera);
 
@@ -1679,6 +1726,10 @@ function frame() {
     fpsTime = now;
   }
 }
+// Before the first frame: every material in the town (all places, the kids, the stops) gets its shader ready
+await bootStep(0.97, 'Mixing the paints');
+if (!params.has('noprecompile')) await precompile(scene);
+if (DEV) boot.log?.push(['programs after precompile', renderer.info.programs.length]);
 renderer.setAnimationLoop(frame);
 
 window.addEventListener('resize', () => {

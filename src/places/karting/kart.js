@@ -231,7 +231,8 @@ export function addHelmet(kid, color = '#ff7fa3', stripe = CREAM) {
     const prm = o.geometry?.parameters || {};
     const isCap = rel.length() < 1e-3 && prm.thetaStart === 0;
     const onTop = rel.length() > 1e-3 && rel.y > 0.1;
-    if (bow || isCap || onTop) {
+    // A batched kid (Kid.batch) keeps the hair a helmet covers in one mesh marked hairTop
+    if (bow || isCap || onTop || o.userData.hairTop) {
       o.visible = false;
       hidden.push(o);
     }

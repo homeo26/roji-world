@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mat, mesh, damp, clamp } from './util.js';
 import { hasSkirt } from './looks.js';
 
@@ -61,6 +62,22 @@ function hairTextures() {
   return [strandTex, shineTex];
 }
 const hairCache = new Map();
+// One white material per shading mode for batched kid parts, shared by every kid: colour and roughness come
+// from each vertex (the pieces' own values), so the shading matches the separate pieces exactly.
+const batchMats = new Map();
+function batchMat(m) {
+  const key = `${m.flatShading}|${m.side}`;
+  if (batchMats.has(key)) return batchMats.get(key);
+  const bm = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: 1, metalness: 0, flatShading: m.flatShading, side: m.side });
+  bm.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float batchRough;\nvarying float vBatchRough;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvBatchRough = batchRough;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vBatchRough;').replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vBatchRough;');
+  };
+  bm.customProgramCacheKey = () => 'kid-batch';
+  batchMats.set(key, bm);
+  return bm;
+}
+
 function hairMat(hex) {
   if (hairCache.has(hex)) return hairCache.get(hex);
   const [map, shine] = hairTextures();
@@ -159,6 +176,95 @@ export class Kid {
       this.body.remove(c);
     }
     this.build();
+    if (this.autoBatch) this.batch();
+  }
+
+  // Fewer draw calls, the same look. Inside each moving part (the body, the head, each leg and arm, each
+  // hair tail) and each fixed accessory group, the fixed pieces merge:
+  // - plain pieces (no texture, no glow, not see-through) into one mesh that keeps each piece's colour and
+  //   roughness per vertex, so shading is unchanged;
+  // - textured hair pieces into one mesh per material (the pieces a helmet hides into their own mesh,
+  //   marked userData.hairTop);
+  // - see-through pieces with the same material settings (the cheeks) into one mesh.
+  // Moving pieces (torso, mouth, eyes) stay as they are. Set autoBatch to redo it after setLook.
+  batch() {
+    const moving = new Set([this.torso, this.mouth, this.carryAnchor, this.head, this.blob, ...this.legs, ...this.arms, ...this.eyes, ...this.tails.map((t) => t.pivot)]);
+    const parts = [this.body, this.head, ...this.legs, ...this.arms, ...this.tails.map((t) => t.pivot)];
+    for (const part of [this.body, this.head]) for (const c of part.children) if (!c.isMesh && !moving.has(c) && c.children.length) parts.push(c);
+    const HC = new THREE.Vector3(0, 0.29, 0);
+    const v = new THREE.Vector3();
+    for (const part of parts) {
+      const buckets = new Map();
+      for (const o of part.children) {
+        if (!o.isMesh || moving.has(o) || o.children.length || !o.visible || !o.geometry.attributes.normal) continue;
+        const m = o.material;
+        if (Array.isArray(m) || m.vertexColors) continue;
+        const shadow = `${o.castShadow}|${o.receiveShadow}|${o.renderOrder}`;
+        let key = null;
+        let kind = null;
+        if (m.isMeshStandardMaterial && !m.map && !m.transparent && m.metalness === 0 && !(m.emissiveIntensity > 0 && m.emissive.getHex() !== 0)) {
+          kind = 'plain';
+          key = `plain|${m.flatShading}|${m.side}|${shadow}`;
+        } else if (m.map && !m.transparent) {
+          kind = 'same';
+          // A helmet hides the cap and the pieces on top of the head (see addHelmet in places/karting/kart.js)
+          let top = false;
+          if (part === this.head) {
+            v.copy(o.position).sub(HC);
+            top = (v.length() < 1e-3 && o.geometry.parameters?.thetaStart === 0) || (v.length() > 1e-3 && v.y > 0.1);
+          }
+          key = `same|${m.uuid}|${shadow}|${top}`;
+        } else if (m.transparent && m.isMeshBasicMaterial && !m.map) {
+          kind = 'same';
+          key = `clear|${m.color.getHex()}|${m.opacity}|${m.depthWrite}|${m.side}|${shadow}`;
+        }
+        if (!key) continue;
+        if (!buckets.has(key)) buckets.set(key, { kind, list: [] });
+        buckets.get(key).list.push(o);
+      }
+      for (const [key, { kind, list }] of buckets) {
+        if (list.length < 2) continue;
+        const keepNames = kind === 'plain' ? ['position', 'normal'] : ['position', 'normal', 'uv'];
+        let ok = true;
+        const geos = list.map((o) => {
+          o.updateMatrix();
+          const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+          for (const name of Object.keys(g.attributes)) if (!keepNames.includes(name)) g.deleteAttribute(name);
+          for (const name of keepNames) if (!g.attributes[name]) ok = false;
+          g.clearGroups();
+          g.morphAttributes = {};
+          g.applyMatrix4(o.matrix);
+          if (kind === 'plain') {
+            const c = o.material.color;
+            const r = o.material.roughness;
+            const n = g.attributes.position.count;
+            const col = new Float32Array(n * 3);
+            const rough = new Float32Array(n).fill(r);
+            for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+            g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+            g.setAttribute('batchRough', new THREE.BufferAttribute(rough, 1));
+          }
+          return g;
+        });
+        const merged = ok ? mergeGeometries(geos, false) : null;
+        for (const g of geos) g.dispose();
+        if (!merged) continue;
+        const m0 = list[0].material;
+        const out = new THREE.Mesh(merged, kind === 'plain' ? batchMat(m0) : m0);
+        out.castShadow = list[0].castShadow;
+        out.receiveShadow = list[0].receiveShadow;
+        out.renderOrder = list[0].renderOrder;
+        out.userData.batched = true;
+        if (key.endsWith('|true') && key.startsWith('same|')) out.userData.hairTop = true;
+        for (const o of list) {
+          o.removeFromParent();
+          o.geometry.dispose();
+        }
+        part.add(out);
+      }
+    }
+    this.batched = true;
+    return this;
   }
 
   build() {

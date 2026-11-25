@@ -268,6 +268,16 @@ export class ArenaHost {
       }
       return;
     }
+    // Have the game's shaders ready before its first frame, so it does not stall as it starts
+    await this.precompile?.(scene, camera);
+    if (this.current !== c || c.ctx !== ctx) {
+      try {
+        game.dispose?.();
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
     c.game = game;
     c.starting = false;
   }
