@@ -32,6 +32,9 @@ export function closeChoices() {
 }
 
 export function choose({ title = '', text = '', options = [], exit = null } = {}) {
+  // Only one card at a time: pressing the action key again while a card is up must not stack a second
+  // card on top. The second call is answered as dismissed (null), which every caller treats as "never mind".
+  if (open.size) return Promise.resolve(null);
   if (!document.getElementById('choose-style')) {
     const s = document.createElement('style');
     s.id = 'choose-style';
