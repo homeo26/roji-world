@@ -245,6 +245,7 @@ for (const s of stations) {
 for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { x: fx_, z: fz, r: 2.6 });
 keepOut.push({ x: CAR.x, z: CAR.z, r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
 keepOut.push({ x: -40, z: 8.2, r: 6.4 }); // the bigger YumYum building
+if (stopMods.fencing) keepOut.push({ x: 10.5, z: 14.6, r: 1.6 }); // the fencing club yard's front corner
 const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
 // Rebuilt weekend stops fill the free ground between the paths: no trees or bushes inside them
 // (world boxes [x0, x1, z0, z1], measured from the paths and the other stops)

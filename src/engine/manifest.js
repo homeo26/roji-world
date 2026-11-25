@@ -39,6 +39,7 @@ export const INTERIORS = [
 // origin). interior is an interior definition like the default export of src/interiors/*.js, and door is
 // its door in world metres [x, z]; the stop's card then offers "Go inside".
 export const STOP_MODULES = [
+  { id: 'fencing', module: '../stops/fencing.js' },
   { id: 'drawing', module: '../stops/drawing.js' },
   { id: 'plaza', module: '../stops/plaza.js' },
 ];
