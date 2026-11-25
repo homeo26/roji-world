@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STOPS } from './config.js';
 import { World, islandSdf, PADS, FUTURE, CAR_SPOT } from './world.js';
 import { Station, BUILDERS, makePony } from './stations.js';
+import { makeScooter } from './scooter.js';
 import { buildYumYum, buildPlaza } from './places.js';
 import { Kid } from './kid.js';
 import { Car } from './car.js';
@@ -25,7 +26,7 @@ import { Spaces } from './engine/spaces.js';
 import { Activities } from './engine/activities.js';
 import { ArenaHost } from './engine/arena.js';
 import { loadProps } from './engine/props.js';
-import { ARENAS, LIFE } from './engine/manifest.js';
+import { ARENAS, LIFE, STOP_MODULES } from './engine/manifest.js';
 import { Life } from './engine/life.js';
 import { makeActor, stepWalker, stepVertical, tryJump, faceTo, syncKid, airOf, RADIUS } from './engine/movement.js';
 
@@ -177,7 +178,17 @@ physics.bounds = (p, r, v, bounce) => {
 
 // Places and interiors from src/engine/manifest.js (modules that are missing are skipped)
 await bootStep(0.3, 'Downloading the town');
-await spaces.load({ progress: (i, n, title) => bootStep(0.32 + (0.5 * i) / n, `Building ${title}`) });
+// Rebuilt weekend stops (src/stops/*.js); a stop that is not there yet keeps its old diorama
+const stopMods = {};
+await Promise.allSettled(
+  STOP_MODULES.map(async (d) => {
+    stopMods[d.id] = (await import(new URL(d.module, new URL('./engine/manifest.js', import.meta.url)).href)).default;
+  }),
+);
+const stopInteriors = Object.entries(stopMods)
+  .filter(([, m]) => m?.interior && m.door)
+  .map(([id, m]) => ({ id, def: m.interior, door: m.door }));
+await spaces.load({ extra: stopInteriors, progress: (i, n, title) => bootStep(0.32 + (0.5 * i) / n, `Building ${title}`) });
 // Town life modules (see src/engine/life.js)
 const lifeState = () => ({
   playerId,
@@ -185,7 +196,7 @@ const lifeState = () => ({
   mount: mount?.type || null,
   inside: spaces.inside?.id || null,
   activity: game.activities.active ? game.activities.current?.label || true : null,
-  free: started && !gameOpen && !arena.active && !mount && !game.activities.active && !ui.panelOpen && !document.querySelector('.choose'),
+  free: started && !gameOpen && !arena.active && !mount && !scooting && !game.activities.active && !ui.panelOpen && !document.querySelector('.choose'),
 });
 Promise.allSettled(LIFE.map((d) => import(new URL(d.module, new URL('./engine/manifest.js', import.meta.url)).href))).then((res) =>
   res.forEach((r, i) => {
@@ -202,7 +213,13 @@ const hasHome = !!spaces.byId.home;
 // ------------------------------------------------------------------ stations: weekends, town places, city places
 await bootStep(0.83, 'Setting out the weekend stops');
 const builders = { ...BUILDERS, yumyum: buildYumYum, plaza: buildPlaza };
+for (const [id, m] of Object.entries(stopMods)) if (m?.build) builders[id] = (st, sc) => m.build(st, sc);
 if (hasHome) builders.home = null;
+// Where the car is parked: the home's garage when the home place has one (inst.carSpot, in its own
+// coordinates), else the old spot by the road
+const homeSpace = spaces.byId.home;
+const carSpot = homeSpace?.inst?.carSpot;
+const CAR = carSpot ? { x: homeSpace.origin.x + carSpot.x, z: homeSpace.origin.z + carSpot.z, yaw: carSpot.yaw ?? -0.5 } : { x: CAR_SPOT[0], z: CAR_SPOT[1], yaw: -0.5 };
 const stations = STOPS.map((stop) => new Station(world, scene, stop, builders[stop.id], stop.id === 'home' && hasHome ? { badgeY: 7.6 } : {}));
 for (const sp of spaces.places) {
   if (sp.id === 'home') continue;
@@ -223,7 +240,7 @@ for (const s of stations) {
   keepOut.push({ x: s.pad.x, z: s.pad.z, r: 2.9 }, { x: s.pad.x - 3.3, z: s.pad.z - 2, r: 1.6 });
 }
 for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { x: fx_, z: fz, r: 2.6 });
-keepOut.push({ x: CAR_SPOT[0], z: CAR_SPOT[1], r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
+keepOut.push({ x: CAR.x, z: CAR.z, r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
 keepOut.push({ x: -40, z: 8.2, r: 6.4 }); // the bigger YumYum building
 const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
 await bootStep(0.89, 'Planting trees and flowers');
@@ -302,6 +319,12 @@ const home = byId.home.pad;
 const actors = game.actors;
 actors.roji = addActor('roji', home.x + 0.3, home.z + 0.3, Math.PI * 0.75);
 actors.homama = addActor('homama', home.x + 1.3, home.z + 0.6, Math.PI * 0.85);
+// Kick scooters, one each: they ride under the kids (children of kid.root) and show while scooting
+const scooters = { roji: makeScooter('#ff7fa3'), homama: makeScooter('#5aa0ff') };
+for (const id of ['roji', 'homama']) {
+  scooters[id].root.visible = false;
+  actors[id].kid.root.add(scooters[id].root);
+}
 const P = () => actors[playerId];
 const C = () => actors[otherId(playerId)];
 let holding = false;
@@ -312,14 +335,15 @@ let holdGrip = false;
 let holdBlocked = 0;
 const HOLD_GAP = 0.64;
 let mount = null; // { type: 'car' } or { type: 'pony', ctl, walker }
+let scooting = false; // both kids on their kick scooters (not a mount: they still walk the same paths, faster)
 
 // ------------------------------------------------------------------ car
 const car = new Car('#ff8fb1');
-car.yaw = -0.5;
-car.root.position.set(CAR_SPOT[0], 0, CAR_SPOT[1]);
+car.yaw = CAR.yaw;
+car.root.position.set(CAR.x, 0, CAR.z);
 car.root.rotation.y = car.yaw;
 scene.add(car.root);
-const carCollider = { type: 'circle', x: CAR_SPOT[0], z: CAR_SPOT[1], r: 1.1, isCar: true, h: 1.25 };
+const carCollider = { type: 'circle', x: CAR.x, z: CAR.z, r: 1.1, isCar: true, h: 1.25 };
 world.addCollider(carCollider);
 
 // ------------------------------------------------------------------ beach balls
@@ -499,6 +523,7 @@ const ui = new UI({
   onSwap: () => swapPlayer(),
   onEmote: (type) => emote(type),
   onHands: () => toggleHands(),
+  onScooter: () => toggleScooting(),
   onJump: () => jump(),
   onPlay: (id) => playGame(id),
   onFullscreen: () => toggleFullscreen(),
@@ -512,10 +537,10 @@ const toast = (t, ms) => ui.toast(t, ms);
 
 // ------------------------------------------------------------------ hotspots
 const horse = byId.horse;
-const gate = new THREE.Vector3(horse.origin.x, 0, horse.origin.z + 3.6);
+const gate = horse.gate || new THREE.Vector3(horse.origin.x, 0, horse.origin.z + 3.6); // a rebuilt stop may set st.gate
 const homeSt = byId.home;
 const plaza = byId.plaza;
-const kiosk = new THREE.Vector3(plaza.origin.x - 1.2, 0, plaza.origin.z - 2.6);
+const kiosk = plaza.kiosk || new THREE.Vector3(plaza.origin.x - 1.2, 0, plaza.origin.z - 2.6); // a rebuilt plaza may set st.kiosk
 const homeDoor = () => spaces.interiors.home?.door || homeSt.door;
 const hot = (pos, r, label, icon, act, when = () => true) => ({
   get pos() {
@@ -716,8 +741,42 @@ function emote(type) {
   if (c.pos.distanceTo(P().pos) < 9) setTimeout(() => c.kid.emote(type), 350);
 }
 
+// ------------------------------------------------------------------ scooters
+function startScooting() {
+  if (!started || scooting || mount || spaces.inside || arena.active || gameOpen || game.activities.active) return;
+  if (P().mode === 'swim' || C().mode === 'swim') return toast('Out of the water first!', 1800);
+  if (holding) {
+    holding = false;
+    ui.setHands(false);
+    P().kid.holdSide = C().kid.holdSide = 0;
+  }
+  scooting = true;
+  for (const a of [P(), C()]) {
+    scooters[a.id].root.visible = true;
+    a.kid.pose = 'scoot';
+    a.kid.cancelEmote();
+    fx.poof(a.pos);
+  }
+  ui.setScooter(true);
+  sound.arrive();
+  toast('Scooters out! Hold Shift (or push the stick all the way) to zoom.', 2600);
+}
+function stopScooting(silent = false) {
+  if (!scooting) return;
+  scooting = false;
+  for (const a of [P(), C()]) {
+    scooters[a.id].root.visible = false;
+    if (a.kid.pose === 'scoot') a.kid.pose = 'stand';
+    a.kid.kickWant = 0;
+    if (!silent) fx.poof(a.pos);
+  }
+  ui.setScooter(false);
+}
+const toggleScooting = () => (scooting ? stopScooting() : startScooting());
+
 function toggleHands() {
   if (!started || mount || game.activities.active) return;
+  if (scooting && !holding) return toast('Hands on the handlebars! Hop off the scooters to hold hands.', 2200);
   holding = !holding;
   holdSign = 0;
   holdGrip = false;
@@ -858,6 +917,7 @@ function unseatKid(a, worldPos, yaw) {
 }
 function enterCar() {
   if (mount || spaces.inside) return;
+  stopScooting(true);
   holding = false;
   ui.setHands(false);
   waypoints = [];
@@ -881,6 +941,7 @@ function exitCar() {
 }
 function mountPony() {
   if (mount || spaces.inside) return;
+  stopScooting(true);
   const ctl = horse.pony;
   holding = false;
   ui.setHands(false);
@@ -945,6 +1006,7 @@ function placePair(pos, yaw) {
 }
 function onEnterInterior(space) {
   if (mount) dismount();
+  stopScooting(true);
   // Hands stay joined through the door; the partner takes the hand again on the other side
   holdSign = 0;
   holdGrip = false;
@@ -1037,6 +1099,7 @@ const input = new Input(renderer.domElement, {
     }
     if (k === 'f') toggleFullscreen();
     if (k === 'h') toggleHands();
+    if (k === 'k') toggleScooting();
     if (k === 'tab') {
       e.preventDefault();
       swapPlayer();
@@ -1140,6 +1203,7 @@ function updateCamera(dt, t) {
   offset.lerp(inside ? OFFSET_IN : OFFSET_OUT, 1 - Math.exp(-4 * dt));
   if (mount?.type === 'car') z *= 1.3;
   if (mount?.type === 'pony') z *= 1.1;
+  if (scooting) z *= 1.08;
   if (currentStation && !mount && !spaces.byId[currentStation.stop.id]) {
     const o = currentStation.origin;
     desiredLook.x += (o.x - desiredLook.x) * 0.32;
@@ -1321,7 +1385,9 @@ function updatePlayer(dt, ax) {
 
   const run = input.running || waypoints.length > 6;
   p.surface = spaces.zoneAt(p.pos.x, p.pos.z);
-  stepWalker(p, physics, dirX, dirZ, intent, run ? 7.2 : 4.6, 12, dt);
+  const top = scooting ? (run ? 15 : 10.5) : run ? 7.2 : 4.6;
+  stepWalker(p, physics, dirX, dirZ, intent, top, scooting ? 6.5 : 12, dt);
+  if (scooting) p.kid.kickWant = intent > 0.15 && p.speed < top * 0.86 ? 1 : 0; // kick while speeding up
   const water = spaces.waterAt(p.pos.x, p.pos.z);
   const wasSwim = p.mode === 'swim';
   if (stepVertical(p, physics, dt, water) === 'land') {
@@ -1331,6 +1397,7 @@ function updatePlayer(dt, ax) {
     else fx.puff(p.pos);
   }
   if (!wasSwim && p.mode === 'swim') fx.burst(new THREE.Vector3(p.pos.x, p.y + 0.1, p.pos.z), ['#ffffff', '#bdefff'], 16);
+  if (scooting && p.mode === 'swim') stopScooting(); // into the water: the scooters wait on the side
   if (p.jumpBuf > 0) {
     p.jumpBuf -= dt;
     if (airOf(p) < 0.02 && p.vy === 0) jump();
@@ -1411,7 +1478,7 @@ function updateCompanion(dt) {
     c.kid.holdSide = 0;
     const leadYaw = p.yaw;
     const fwd = new THREE.Vector3(Math.sin(leadYaw), 0, Math.cos(leadYaw));
-    const target = tmpV.copy(leader).addScaledVector(fwd, mount ? -2.2 : -1.0).add(leftOf(leadYaw, 0.9));
+    const target = tmpV.copy(leader).addScaledVector(fwd, mount || scooting ? -2.0 : -1.0).add(leftOf(leadYaw, scooting ? 1.1 : 0.9));
     const dx = target.x - c.pos.x;
     const dz = target.z - c.pos.z;
     const d = Math.hypot(dx, dz);
@@ -1427,8 +1494,9 @@ function updateCompanion(dt) {
       fx.poof(c.pos);
     }
     const near = d < 0.5;
-    const maxS = mount ? 9 : d > 4 ? 7.2 : 4.6;
-    stepWalker(c, physics, dx, dz, near ? 0 : clamp((d - 0.4) * 1.5, 0, 1), maxS, 10, dt);
+    const maxS = scooting ? (d > 3 ? 16 : 11) : mount ? 9 : d > 4 ? 7.2 : 4.6;
+    stepWalker(c, physics, dx, dz, near ? 0 : clamp((d - 0.4) * 1.5, 0, 1), maxS, scooting ? 8 : 10, dt);
+    if (scooting) c.kid.kickWant = d > 1.2 && c.speed < maxS * 0.8 ? 1 : 0;
     c.idle = c.speed > 0.25 ? 0 : c.idle + dt;
     if (c.speed > 0.25) faceTo(c, dt, Math.atan2(c.vel.x, c.vel.z));
     else if (c.idle > 1.4) {
@@ -1454,7 +1522,7 @@ const inScene = (o) => {
   return false;
 };
 function pushOffPeople(a) {
-  if (a.seated || a.kid.pose !== 'stand') return;
+  if (a.seated || (a.kid.pose !== 'stand' && a.kid.pose !== 'scoot')) return;
   for (const n of spaces.npcs) {
     const e = n.kid.root.matrixWorld.elements;
     const dx = a.pos.x - e[12];
@@ -1499,6 +1567,8 @@ const insideColor = new THREE.Color();
 // Test hooks for headless checks
 window.__roji = {
   renderer,
+  scoot: () => toggleScooting(),
+  scooting: () => scooting,
   minimap,
   ui,
   scene,
@@ -1601,9 +1671,11 @@ function frame() {
     pushOffPeople(P());
     pushOffPeople(C());
   }
+  if (scooting && (spaces.inside || mount || arena.active || gameOpen || game.activities.active)) stopScooting(true);
   for (const a of Object.values(actors)) {
     syncKid(a, dt, t);
     footsteps(a);
+    if (scooting) scooters[a.id].spin(dt, a.speed);
   }
 
   // Beach balls

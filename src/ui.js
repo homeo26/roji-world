@@ -109,7 +109,7 @@ export class UI {
       .slice(0, DOCK_MOVES)
       .map(([k, v], i) => `<button class="dock-btn" data-emote="${k}" title="${v.name} (${i + 1})" aria-label="${v.name}">${svgIcon(EMOTE_ICONS[k], 20)}<kbd>${i + 1}</kbd></button>`)
       .join('');
-    dock.innerHTML = `${emoteHtml}<button class="dock-btn" id="btn-dances" title="More dances" aria-label="More dances" aria-expanded="false">${svgIcon('dance-more', 20)}<em>+${wheel.length - DOCK_MOVES}</em></button><span class="dock-sep"></span><button class="dock-btn" id="btn-hands" title="Hold hands (H)" aria-label="Hold hands">${svgIcon('hands', 20)}<kbd>H</kbd></button>
+    dock.innerHTML = `${emoteHtml}<button class="dock-btn" id="btn-dances" title="More dances" aria-label="More dances" aria-expanded="false">${svgIcon('dance-more', 20)}<em>+${wheel.length - DOCK_MOVES}</em></button><span class="dock-sep"></span><button class="dock-btn" id="btn-hands" title="Hold hands (H)" aria-label="Hold hands">${svgIcon('hands', 20)}<kbd>H</kbd></button><button class="dock-btn" id="btn-scooter" title="Scooters (K)" aria-label="Scooters">${svgIcon('scooter', 20)}<kbd>K</kbd></button>
       <div class="dock-more hidden" role="menu" aria-label="Dances"><div class="dock-more-head"><b>Dances</b><span>${svgIcon('heart', 12, 3)} for two</span></div><div class="dock-grid">${wheel.map((e, i) => tile(e, i, 20)).join('')}</div></div>`;
     $('emote-wheel').innerHTML = wheel.map((e, i) => tile(e, i, 20)).join('');
     const more = dock.querySelector('.dock-more');
@@ -152,6 +152,9 @@ export class UI {
       fn();
     };
     $('btn-hands').addEventListener('click', () => h.onHands());
+    $('btn-scooter').addEventListener('click', () => h.onScooter?.());
+    $('t-scooter').innerHTML = svgIcon('scooter', 26);
+    $('t-scooter').addEventListener('pointerdown', press(() => h.onScooter?.()));
     $('t-hands').innerHTML = svgIcon('hands', 26);
     $('t-hands').addEventListener('pointerdown', press(() => h.onHands()));
     $('t-emote').innerHTML = svgIcon('music', 26);
@@ -232,6 +235,12 @@ export class UI {
   setHands(on) {
     $('btn-hands').classList.toggle('on', on);
     $('t-hands').classList.toggle('on', on);
+  }
+
+  setScooter(on) {
+    $('btn-scooter').classList.toggle('on', on);
+    $('t-scooter').classList.toggle('on', on);
+    document.body.classList.toggle('scooting', on);
   }
 
   toggleHelp(force) {

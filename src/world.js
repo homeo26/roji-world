@@ -53,7 +53,7 @@ export const PADS = {
   drawing: [-10, 3],
   next: [-14, -11],
   yumyum: [-40, 16],
-  plaza: [-40, 1],
+  plaza: [-40, -3.5], // well clear of the back of Roji's YumYum
 };
 export const CAR_SPOT = [-32.5, 20.2];
 const TURN1 = [25.5, 11];
@@ -357,7 +357,14 @@ export class World {
       uv.setXY(i, (x - X0) / W, 1 - (z - Z0) / H);
     }
     topGeo.rotateX(-Math.PI / 2);
+    tex.anisotropy = 4;
     const topMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    // The grass is pushed back a little in depth: the paths and roads lie only a few centimetres above it,
+    // and on some phone GPUs that is too close to tell apart far from the camera (the road breaks up).
+    // Place floors laid flat on the ground win over it too.
+    topMat.polygonOffset = true;
+    topMat.polygonOffsetFactor = 2;
+    topMat.polygonOffsetUnits = 4;
     const topMesh = mesh(topGeo, topMat, { cast: false });
     this.scene.add(topMesh);
     this.ground = topMesh;
@@ -452,6 +459,7 @@ export class World {
     });
     roadTex.wrapS = THREE.RepeatWrapping;
     roadTex.repeat.set(0.25, 1);
+    roadTex.anisotropy = 8; // the centre line and speckles stay steady when seen at a shallow angle
     const roadMat = groundLayer(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 }));
     const curbMat = groundLayer(mat('#efe6da', { rough: 0.9 }));
     this.cityRoads = [];

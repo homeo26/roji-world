@@ -33,6 +33,14 @@ export const INTERIORS = [
 ];
 
 // Town life modules (src/engine/life.js): small moments layered on the whole game.
+// Weekend stops rebuilt as their own modules. A missing module keeps the old diorama from src/stations.js.
+// Default export: { build(st, scene) -> { badgeY?, update?(dt, t, near, onPad), dynamic? }, interior?, door? }
+// build() gets the Station (st.group sits at st.origin; st.addCollider takes coordinates relative to the
+// origin). interior is an interior definition like the default export of src/interiors/*.js, and door is
+// its door in world metres [x, z]; the stop's card then offers "Go inside".
+export const STOP_MODULES = [
+];
+
 export const LIFE = [
   { id: 'love', module: '../life/love.js' },
   { id: 'npcs', module: '../life/npcs.js' },
