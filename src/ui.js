@@ -161,6 +161,7 @@ export class UI {
 
     // Panels
     $('journal').addEventListener('click', (e) => {
+      if (e.target.id === 'journal') return this.toggleJournal(false); // a tap beside the book closes it
       const b = e.target.closest('[data-j]');
       if (!b) return;
       const [act, id] = b.dataset.j.split(':');
@@ -169,6 +170,27 @@ export class UI {
         h.onTravel(id);
       } else if (act === 'notes') this.openNotes(id);
       else if (act === 'close') this.toggleJournal(false);
+      else if (act === 'next') this.turnTo(this.spread + 1);
+      else if (act === 'prev') this.turnTo(this.spread - 1);
+      else if (act === 'page') this.turnTo(Math.floor(Number(id) / 2));
+    });
+    // Arrow keys and swipes turn the pages
+    window.addEventListener('keydown', (e) => {
+      if ($('journal').classList.contains('hidden') || !$('notes').classList.contains('hidden')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') this.turnTo(this.spread + 1);
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') this.turnTo(this.spread - 1);
+      else if (e.key === 'Home') this.turnTo(1);
+      else return;
+      e.preventDefault();
+    });
+    let swipe = null;
+    $('journal').addEventListener('pointerdown', (e) => (swipe = e.target.closest('button') ? null : { x: e.clientX, y: e.clientY }));
+    $('journal').addEventListener('pointerup', (e) => {
+      if (!swipe) return;
+      const dx = e.clientX - swipe.x;
+      const dy = e.clientY - swipe.y;
+      swipe = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) this.turnTo(this.spread + (dx < 0 ? 1 : -1));
     });
     $('notes').addEventListener('click', (e) => {
       if (e.target.id === 'notes' || e.target.closest('[data-n="close"]')) this.closeNotes();
@@ -334,45 +356,198 @@ export class UI {
     this.toastTimer = setTimeout(() => this.toastEl.classList.remove('on'), ms);
   }
 
-  // ---------------------------------------------------------------- journal
+  // ---------------------------------------------------------------- journey book
+  // A book that opens from its cover and turns its pages: the title page and contents, one page per weekend
+  // (its photo, its stamp, its story, its games and your note), the places you visit, and an ending.
+  // Pages come in spreads: spread n shows pages 2n (left) and 2n + 1 (right); spread 0 is the closed cover.
   toggleJournal(force) {
     const el = $('journal');
     const show = force ?? el.classList.contains('hidden');
-    if (show) this.renderJournal();
-    el.classList.toggle('hidden', !show);
+    if (show === !el.classList.contains('hidden')) return;
     document.body.classList.toggle('journal-open', show);
+    if (show) {
+      el.classList.remove('hidden', 'closing');
+      this.pages = this.bookPages();
+      this.spread = 0;
+      this.showSpread();
+      requestAnimationFrame(() => this.turnTo(this.lastSpread || 1));
+    } else {
+      this.lastSpread = Math.max(1, this.spread || 1);
+      clearTimeout(this.flipTimer);
+      this.flipping = false;
+      el.classList.add('closing');
+      setTimeout(() => el.classList.contains('closing') && el.classList.add('hidden'), 220);
+    }
   }
 
+  // Called when something in the book changed (a note, a stamp): redraw the open spread
   renderJournal() {
-    const { stations, stamps, gamesAt } = this.h.journalData();
+    if ($('journal').classList.contains('hidden') || this.flipping) return;
+    this.pages = this.bookPages();
+    this.showSpread();
+  }
+
+  get spreads() {
+    return Math.ceil(this.pages.length / 2);
+  }
+
+  bookPages() {
+    const { stations, stamps, gamesAt, looks } = this.h.journalData();
     const notes = loadNotes();
-    const rows = stations
-      .map((st) => {
-        const s = st.stop;
-        const stamped = stamps.has(s.id);
-        const state = !st.unlocked ? 'locked' : s.week ? (stamped ? 'done' : 'open') : 'place';
-        const status = { locked: st.label, done: 'Stamp collected', open: 'Stand on the pad to collect the stamp', place: s.tag }[state];
-        const games = gamesAt(s.id);
-        const note = notes[s.id]?.text;
-        return `<li class="j-row ${state}" style="--c:${st.unlocked ? s.color : '#a9a6bf'}">
-          <span class="j-icon">${svgIcon(state === 'done' ? 'check' : !st.unlocked ? 'lock' : s.icon, 20)}</span>
-          <div class="j-text">
-            <div class="j-kicker">${s.week ? 'Weekend ' + s.week : esc(s.tag)}</div>
-            <b>${esc(s.title)}</b>
-            <span class="j-status">${esc(status)}${games.length ? ` - ${games.map((g) => esc(g.title)).join(', ')}` : ''}</span>
-            ${note ? `<span class="j-note">${esc(note.length > 120 ? note.slice(0, 120) + '...' : note)}</span>` : ''}
+    const weeks = stations.filter((st) => st.stop.week).sort((a, b) => a.stop.week - b.stop.week);
+    const places = stations.filter((st) => !st.stop.week);
+    const got = weeks.filter((st) => stamps.has(st.stop.id)).length;
+    const total = weeks.filter((st) => !st.stop.locked).length;
+    const pages = [{ kind: 'empty' }, { kind: 'cover', got, total }];
+    pages.push({ kind: 'titlepage', got, total, looks, weeks, stamps });
+    const contentsAt = pages.push({ kind: 'contents' }) - 1;
+    for (const st of weeks) pages.push({ kind: 'week', st, stamped: stamps.has(st.stop.id), games: gamesAt(st.stop.id), note: notes[st.stop.id]?.text });
+    const firstPlace = pages.length;
+    for (let i = 0; i < places.length; i += 4) pages.push({ kind: 'places', list: places.slice(i, i + 4).map((st) => ({ st, games: gamesAt(st.stop.id), note: notes[st.stop.id]?.text })), first: i === 0 });
+    const endAt = pages.push({ kind: 'end', looks }) - 1;
+    if (pages.length % 2) pages.push({ kind: 'blank' });
+    const contents = pages[contentsAt];
+    contents.weeks = weeks.map((st, i) => ({ st, page: contentsAt + 1 + i, stamped: stamps.has(st.stop.id) }));
+    contents.places = firstPlace;
+    contents.end = endAt;
+    return pages;
+  }
+
+  pageHtml(i) {
+    const pg = this.pages[i];
+    if (!pg || pg.kind === 'empty') return '';
+    const num = i >= 3 && pg.kind !== 'blank' && pg.kind !== 'cover' ? `<span class="pg-num">${i - 2}</span>` : '';
+    const side = i % 2 ? 'right' : 'left';
+    const last = Math.floor(i / 2) >= this.spreads - 1;
+    const turn =
+      pg.kind === 'cover'
+        ? ''
+        : side === 'right' && !last
+          ? `<button class="pg-turn next" data-j="next:" aria-label="Next page">${svgIcon('arrow', 18)}</button>`
+          : side === 'left' && i > 2
+            ? `<button class="pg-turn prev" data-j="prev:" aria-label="Previous page">${svgIcon('arrow', 18)}</button>`
+            : '';
+    return `<div class="pg-in pg-${pg.kind}">${this.pageBody(pg)}</div>${num}${turn}`;
+  }
+
+  pageBody(pg) {
+    const stampSvg = (st, stamped) => {
+      const s = st.stop;
+      const id = `ring-${s.id}`;
+      if (s.locked) return `<div class="seal locked">${svgIcon('lock', 30)}<small>Coming soon</small></div>`;
+      if (!stamped) return `<div class="seal empty"><small>Stamp<br />here</small></div>`;
+      const ring = `WEEKEND ${s.week} \u2022 ${s.title.toUpperCase()} \u2022 `;
+      return `<svg class="seal stamped" viewBox="0 0 120 120" style="--c:${s.color}" aria-label="Stamp collected">
+        <defs><path id="${id}" d="M60 60 m-41 0 a41 41 0 1 1 82 0 a41 41 0 1 1 -82 0" /></defs>
+        <circle cx="60" cy="60" r="55" fill="none" stroke="currentColor" stroke-width="4" />
+        <circle cx="60" cy="60" r="31" fill="none" stroke="currentColor" stroke-width="2.5" />
+        <text font-size="11.5" font-weight="700" letter-spacing="1.2" fill="currentColor"><textPath href="#${id}" textLength="252">${esc(ring)}</textPath></text>
+        <g transform="translate(46 44) scale(1.15)" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${ICONS[s.icon] || ICONS.star}" /></g>
+      </svg>`;
+    };
+    switch (pg.kind) {
+      case 'cover':
+        return `<div class="cv-frame"><div class="cv-corner a"></div><div class="cv-corner b"></div><div class="cv-corner c"></div><div class="cv-corner d"></div>
+          <div class="cv-heart">${svgIcon('heart', 34)}</div><div class="cv-title">Our Journey</div><div class="cv-sub">Roji &amp; Homama</div>
+          <div class="cv-stamps">${pg.got} of ${pg.total} stamps</div></div>`;
+      case 'titlepage':
+        return `<div class="tt-kicker">This book belongs to</div>
+          <div class="tt-pair">${avatar(pg.looks.roji, 64)}<span class="tt-amp">${svgIcon('heart', 22)}</span>${avatar(pg.looks.homama, 64)}</div>
+          <div class="tt-names">Roji &amp; Homama</div>
+          <p class="tt-line">One weekend at a time. Every stop on the island path is a little adventure, and every adventure gets a stamp in this book.</p>
+          <div class="tt-row">${pg.weeks.filter((st) => !st.stop.locked).map((st) => `<span class="tt-dot ${pg.stamps.has(st.stop.id) ? 'on' : ''}" style="--c:${st.stop.color}">${svgIcon(pg.stamps.has(st.stop.id) ? 'check' : st.stop.icon, 14)}</span>`).join('')}</div>
+          <div class="tt-count">${pg.got} of ${pg.total} weekends stamped</div>`;
+      case 'contents':
+        return `<h4 class="pg-h">Contents</h4><ol class="toc">${pg.weeks
+          .map(({ st, page, stamped }) => `<li><button data-j="page:${page}" style="--c:${st.stop.color}"><span class="toc-ic ${stamped ? 'on' : st.stop.locked ? 'lock' : ''}">${svgIcon(stamped ? 'check' : st.stop.locked ? 'lock' : st.stop.icon, 13)}</span><span class="toc-t"><small>Weekend ${st.stop.week}</small>${esc(st.stop.locked ? 'Coming soon' : st.stop.title)}</span><span class="toc-dots"></span><span class="toc-n">${page - 2}</span></button></li>`)
+          .join('')}
+          <li><button data-j="page:${pg.places}"><span class="toc-ic">${svgIcon('home', 13)}</span><span class="toc-t"><small>And more</small>Places we love</span><span class="toc-dots"></span><span class="toc-n">${pg.places - 2}</span></button></li>
+          <li><button data-j="page:${pg.end}"><span class="toc-ic">${svgIcon('heart', 13)}</span><span class="toc-t"><small>The end?</small>To be continued</span><span class="toc-dots"></span><span class="toc-n">${pg.end - 2}</span></button></li></ol>`;
+      case 'week': {
+        const s = pg.st.stop;
+        const locked = s.locked;
+        return `<div class="pg-kicker" style="--c:${s.color}">Weekend ${s.week}${pg.stamped ? ' \u2022 stamped' : ''}</div>
+          <h4 class="pg-title">${esc(locked ? 'Coming soon' : s.title)}</h4>
+          <div class="pg-art">
+            <figure class="polaroid ${locked ? 'locked' : ''}" style="--c:${locked ? '#a9a6bf' : s.color}"><span class="tape"></span><div class="ph">${svgIcon(locked ? 'lock' : s.icon, 54)}</div><figcaption>${esc(locked ? 'A secret for now' : s.tag || s.title)}</figcaption></figure>
+            ${stampSvg(pg.st, pg.stamped)}
           </div>
-          <div class="j-actions">
-            <button class="btn small" data-j="go:${s.id}">Go</button>
-            <button class="btn small icon ${note ? 'has' : ''}" data-j="notes:${s.id}" aria-label="Notes">${svgIcon('note', 16)}</button>
-          </div>
-        </li>`;
-      })
-      .join('');
-    $('journal').innerHTML = `
-      <div class="sheet-head"><h3>${svgIcon('book', 22)} Journey</h3><button class="round small" data-j="close:" aria-label="Close">${svgIcon('close', 16)}</button></div>
-      <p class="sheet-intro">Each numbered pad on the path is a weekend checkpoint. Stand on it to open its card and collect the stamp. Places have games, and every spot has its own notes.</p>
-      <ol class="j-list">${rows}</ol>`;
+          <p class="pg-text">${esc(s.text || '')}</p>
+          ${pg.games.length ? `<p class="pg-games">${svgIcon('game', 14)} ${pg.games.map((g) => esc(g.title)).join(', ')}</p>` : ''}
+          ${pg.note ? `<div class="pg-note">${esc(pg.note.length > 110 ? pg.note.slice(0, 110) + '...' : pg.note)}</div>` : ''}
+          <div class="pg-actions"><button class="bk-btn go" data-j="go:${s.id}" style="--c:${locked ? '#a9a6bf' : s.color}">Go there</button><button class="bk-btn" data-j="notes:${s.id}">${svgIcon('note', 15)} ${pg.note ? 'Edit note' : 'Write a note'}</button></div>`;
+      }
+      case 'places':
+        return `${pg.first ? '<h4 class="pg-h">Places we love</h4>' : '<h4 class="pg-h small">More places</h4>'}<ul class="pl-list">${pg.list
+          .map(({ st, games, note }) => {
+            const s = st.stop;
+            return `<li style="--c:${s.color}"><span class="pl-ic">${svgIcon(s.icon, 18)}</span><div class="pl-t"><b>${esc(s.title)}</b><small>${esc(games.length ? games.map((g) => g.title).join(', ') : s.tag || '')}</small>${note ? `<span class="pl-note">${esc(note.length > 50 ? note.slice(0, 50) + '...' : note)}</span>` : ''}</div><button class="bk-btn mini go" data-j="go:${s.id}" aria-label="Go to ${esc(s.title)}">Go</button><button class="bk-btn mini" data-j="notes:${s.id}" aria-label="Notes">${svgIcon('note', 15)}</button></li>`;
+          })
+          .join('')}</ul>`;
+      case 'end':
+        return `<h4 class="pg-h">To be continued</h4><div class="end-hearts">${svgIcon('heart', 26)}${svgIcon('heart', 18)}${svgIcon('heart', 22)}</div>
+          <p class="pg-text center">More weekends are on their way. Keep the empty pages for the adventures still to come.</p>
+          <div class="tt-pair small">${avatar(pg.looks.roji, 44)}<span class="tt-amp">${svgIcon('heart', 16)}</span>${avatar(pg.looks.homama, 44)}</div><div class="end-sign">Love, R &amp; H</div>`;
+      default:
+        return '';
+    }
+  }
+
+  // Draw the spread as it rests (no page turning)
+  showSpread() {
+    const el = $('journal');
+    const s = this.spread;
+    el.innerHTML = `<div class="book ${s === 0 ? 'closed' : ''}">
+      <div class="bk-board"></div>
+      <div class="bk-page left ${this.paperCls(2 * s)}">${this.pageHtml(2 * s)}</div>
+      <div class="bk-page right ${this.paperCls(2 * s + 1)}">${this.pageHtml(2 * s + 1)}</div>
+      <div class="bk-ribbon"></div>
+      <button class="round small bk-close" data-j="close:" aria-label="Close the book">${svgIcon('close', 16)}</button>
+    </div>`;
+  }
+
+  paperCls(i) {
+    const k = this.pages[i]?.kind;
+    return k === 'cover' ? 'is-cover' : !k || k === 'empty' ? 'is-empty' : 'is-paper';
+  }
+
+  // Turn to spread t: the page lifts at the spine and turns over to the other side
+  turnTo(t) {
+    t = Math.max(1, Math.min(this.spreads - 1, t));
+    if (t === this.spread || this.flipping || $('journal').classList.contains('hidden')) return;
+    const from = this.spread;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      this.spread = t;
+      this.showSpread();
+      return;
+    }
+    const fwd = t > from;
+    const book = $('journal').querySelector('.book');
+    const L = book.querySelector('.bk-page.left');
+    const R = book.querySelector('.bk-page.right');
+    // Underneath: the page that stays, and the page that will be revealed
+    if (fwd) {
+      R.className = `bk-page right ${this.paperCls(2 * t + 1)}`;
+      R.innerHTML = this.pageHtml(2 * t + 1);
+    } else {
+      L.className = `bk-page left ${this.paperCls(2 * t)}`;
+      L.innerHTML = this.pageHtml(2 * t);
+    }
+    const leaf = document.createElement('div');
+    leaf.className = `bk-leaf ${fwd ? 'fwd' : 'back'}`;
+    const front = fwd ? 2 * from + 1 : 2 * from;
+    const back = fwd ? 2 * t : 2 * t + 1;
+    leaf.innerHTML = `<div class="bk-face front bk-page ${fwd ? 'right' : 'left'} ${this.paperCls(front)}">${this.pageHtml(front)}</div><div class="bk-face back bk-page ${fwd ? 'left' : 'right'} ${this.paperCls(back)}">${this.pageHtml(back)}</div>`;
+    book.appendChild(leaf);
+    if (from === 0) book.classList.remove('closed');
+    this.flipping = true;
+    this.spread = t;
+    requestAnimationFrame(() => requestAnimationFrame(() => leaf.classList.add('turn')));
+    this.flipTimer = setTimeout(() => {
+      this.flipping = false;
+      this.showSpread();
+    }, from === 0 ? 760 : 620);
   }
 
   // ---------------------------------------------------------------- notes
