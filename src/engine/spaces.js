@@ -56,30 +56,34 @@ export class Spaces {
   }
 
   // Load every place module (or only some ids). slots: optional { id: [x, z] } overrides.
-  async load({ only = null, slots = {}, interiors = true } = {}) {
+  // progress(i, n, title): called before each place is built (the loading screen); it may return a promise
+  // to let the page repaint between places.
+  async load({ only = null, slots = {}, interiors = true, progress = null } = {}) {
     const defs = PLACES.filter((p) => (only ? only.includes(p.id) : !p.dev));
+    const idefs = interiors ? INTERIORS.filter((p) => !only || only.includes(p.id)) : [];
+    // Interiors download while the places are being built
+    const iload = Promise.allSettled(idefs.map((d) => import(d.module)));
     const res = await Promise.allSettled(defs.map((d) => import(d.module)));
-    res.forEach((r, i) => {
+    for (let i = 0; i < res.length; i++) {
+      const r = res[i];
       const def = { ...defs[i], slot: slots[defs[i].id] || defs[i].slot };
       if (r.status !== 'fulfilled') {
         this.failed.push(def.id);
-        return;
+        continue;
       }
+      if (progress) await progress(i, res.length, r.value.default?.stop?.title || def.id);
       try {
         this.mountPlace(def, r.value.default);
       } catch (e) {
         console.error(`place ${def.id} failed to build`, e);
         this.failed.push(def.id);
       }
-    });
-    if (interiors) {
-      const idefs = INTERIORS.filter((p) => !only || only.includes(p.id));
-      const ires = await Promise.allSettled(idefs.map((d) => import(d.module)));
-      ires.forEach((r, i) => {
-        if (r.status === 'fulfilled') this.addInterior(idefs[i].id, r.value.default, new THREE.Vector3(idefs[i].door[0], 0, idefs[i].door[1]));
-        else this.failed.push(idefs[i].id);
-      });
     }
+    const ires = await iload;
+    ires.forEach((r, i) => {
+      if (r.status === 'fulfilled') this.addInterior(idefs[i].id, r.value.default, new THREE.Vector3(idefs[i].door[0], 0, idefs[i].door[1]));
+      else this.failed.push(idefs[i].id);
+    });
     return this.places;
   }
 

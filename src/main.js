@@ -33,7 +33,19 @@ const STORE = 'roji-weekends-stamps-v1';
 const PLAYER_KEY = 'roji-weekends-player';
 const params = new URLSearchParams(location.search);
 
+// The loading screen (index.html): each step says how much of the building is done (0..1) and what comes
+// next, then lets the page repaint the bar before the next chunk of work.
+const boot = window.__boot || { step() {}, done() {} };
+const bootStep = (k, label) => {
+  boot.step(k, label);
+  return new Promise((r) => {
+    requestAnimationFrame(() => setTimeout(r, 0));
+    setTimeout(r, 60); // hidden tabs do not run animation frames
+  });
+};
+
 await Promise.race([document.fonts.load('600 40px Fredoka'), new Promise((r) => setTimeout(r, 1500))]);
+await bootStep(0.02, 'Shaping the island');
 
 // ------------------------------------------------------------------ renderer and scene
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('capture') });
@@ -75,6 +87,7 @@ scene.add(sun, sun.target);
 const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 260);
 
 // ------------------------------------------------------------------ world, physics, the shared game object
+await bootStep(0.12, 'Laying the paths and the sea');
 const world = new World(scene);
 const physics = new Physics(world.colliders);
 const fx = new Effects(scene);
@@ -145,7 +158,8 @@ physics.bounds = (p, r, v, bounce) => {
 };
 
 // Places and interiors from src/engine/manifest.js (modules that are missing are skipped)
-await spaces.load();
+await bootStep(0.3, 'Downloading the town');
+await spaces.load({ progress: (i, n, title) => bootStep(0.32 + (0.5 * i) / n, `Building ${title}`) });
 // Town life modules (see src/engine/life.js)
 const lifeState = () => ({
   playerId,
@@ -168,6 +182,7 @@ Promise.allSettled(LIFE.map((d) => import(new URL(d.module, new URL('./engine/ma
 const hasHome = !!spaces.byId.home;
 
 // ------------------------------------------------------------------ stations: weekends, town places, city places
+await bootStep(0.83, 'Setting out the weekend stops');
 const builders = { ...BUILDERS, yumyum: buildYumYum, plaza: buildPlaza };
 if (hasHome) builders.home = null;
 const stations = STOPS.map((stop) => new Station(world, scene, stop, builders[stop.id], stop.id === 'home' && hasHome ? { badgeY: 7.6 } : {}));
@@ -193,8 +208,10 @@ for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { 
 keepOut.push({ x: CAR_SPOT[0], z: CAR_SPOT[1], r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
 keepOut.push({ x: -40, z: 8.2, r: 6.4 }); // the bigger YumYum building
 const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
+await bootStep(0.89, 'Planting trees and flowers');
 world.scatterNature(keepOut, rects);
 bakeStatic(world.statics, [], mergeGeometries);
+await bootStep(0.94, 'Waking up Roji and Homama');
 
 // ------------------------------------------------------------------ day and night
 const daylight = new Daylight({ override: params.get('time') });
@@ -1671,7 +1688,10 @@ window.addEventListener('resize', () => {
   arena.resize();
 });
 
+// The window may have been resized while the island was loading
+if (renderer.domElement.width !== Math.floor(window.innerWidth * renderer.getPixelRatio())) window.dispatchEvent(new Event('resize'));
 document.body.classList.add('ready');
+boot.done();
 if (params.has('play')) {
   start();
   introBlend = 1;

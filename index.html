@@ -19,6 +19,115 @@
         }
       }
     </script>
+    <script>
+      // Loading screen: a real percentage. Downloading counts the bytes of the start-up files listed in
+      // loading.json as they arrive (tools/loading-list.mjs writes it); building counts the steps
+      // src/main.js reports through window.__boot.step(k, label).
+      (() => {
+        const NET = 0.5; // share of the bar for downloading; the rest is building the island
+        const B = (window.__boot = { log: [] }); // log: [ms, percent, label] for each step, for tests
+        const base = new URL('.', location.href).pathname;
+        const seen = new Set();
+        const early = [];
+        let list = null;
+        let bytes = 0;
+        let build = 0;
+        let shown = 0;
+        let label = 'Downloading the island';
+        let last = performance.now();
+        let error = null;
+        let failed = false;
+        let done = false;
+        const count = (p) => {
+          if (!list) return void early.push(p);
+          if (seen.has(p) || !(p in list.files)) return;
+          seen.add(p);
+          bytes += list.files[p];
+        };
+        const $ = (id) => document.getElementById(id);
+        const render = () => {
+          const net = list ? Math.min(1, bytes / list.total) : 0;
+          const w = list ? NET : 0;
+          const p = done ? 100 : Math.max(shown, Math.min(99, Math.floor(100 * (w * net + (1 - w) * build))));
+          if (p !== shown) last = performance.now();
+          shown = p;
+          const btn = $('start');
+          const pe = $('load-pct');
+          const ne = $('load-note');
+          if (!btn || !pe || !ne || failed) return;
+          btn.style.setProperty('--p', p + '%');
+          pe.textContent = p + '%';
+          ne.textContent = label;
+        };
+        const onEntries = (entries) => {
+          for (const e of entries) {
+            const u = new URL(e.name, location.href);
+            if (u.origin === location.origin && u.pathname.startsWith(base)) count(decodeURIComponent(u.pathname.slice(base.length)));
+          }
+          render();
+        };
+        try {
+          performance.setResourceTimingBufferSize(4000);
+        } catch (e) {}
+        try {
+          new PerformanceObserver((l) => onEntries(l.getEntries())).observe({ type: 'resource', buffered: true });
+        } catch (e) {}
+        count('index.html');
+        fetch('loading.json', { cache: 'no-cache' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => {
+            if (!j || !j.files || !j.total) return;
+            list = j;
+            early.splice(0).forEach(count);
+            onEntries(performance.getEntriesByType('resource'));
+          })
+          .catch(() => {});
+        document.addEventListener('DOMContentLoaded', render);
+
+        B.step = (k, text) => {
+          build = Math.max(build, Math.min(1, k));
+          if (text) label = text;
+          last = performance.now();
+          render();
+          B.log.push([Math.round(last), shown, label, Math.round(bytes / 1024)]);
+        };
+        B.done = () => {
+          done = true;
+          failed = false;
+          label = 'Ready!';
+          render();
+          B.log.push([Math.round(performance.now()), shown, label, Math.round(bytes / 1024)]);
+          setTimeout(() => {
+            const btn = $('start');
+            btn.disabled = false;
+            btn.classList.remove('is-loading');
+            btn.textContent = 'Start the journey';
+            document.body.classList.add('boot-done');
+          }, 260);
+        };
+        // A script error alone is not fatal (the game often carries on); give up only if loading also stops
+        B.fail = (msg) => {
+          if (!done) error = msg || 'error';
+        };
+        window.addEventListener('error', (e) => B.fail(e.message));
+        window.addEventListener('unhandledrejection', (e) => B.fail(String(e.reason)));
+        const watch = setInterval(() => {
+          if (done) return clearInterval(watch);
+          if (list) onEntries(performance.getEntriesByType('resource')); // in case the observer is not supported
+          const idle = performance.now() - last;
+          const btn = $('start');
+          if (!btn || !$('load-note')) return;
+          if (error && idle > 4000 && !failed) {
+            failed = true;
+            btn.classList.remove('is-loading');
+            btn.disabled = false;
+            btn.textContent = 'Try again';
+            btn.addEventListener('click', () => failed && location.reload());
+            $('load-note').textContent = 'Something went wrong while loading.';
+          } else if (!failed && idle > 15000) $('load-note').textContent = 'Still loading. A slow connection can take a little while.';
+        }, 1000);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
@@ -112,7 +221,11 @@
           <button class="pick-btn" data-pick="roji" role="radio"></button>
           <button class="pick-btn" data-pick="homama" role="radio"></button>
         </div>
-        <button id="start" class="btn primary big">Start the journey</button>
+        <button id="start" class="btn primary big is-loading" disabled aria-describedby="load-note">
+          <span class="start-fill" aria-hidden="true"></span>
+          <span class="start-label">Loading <b id="load-pct">0%</b></span>
+        </button>
+        <div id="load-note" class="load-note">Downloading the island</div>
         <div class="intro-hints">
           <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
           <span><kbd>E</kbd> do things</span>
@@ -123,6 +236,6 @@
     </section>
 
     <noscript>This game needs JavaScript.</noscript>
-    <script type="module" src="./src/main.js"></script>
+    <script type="module" src="./src/main.js" onerror="window.__boot && __boot.fail('The game files could not be loaded')"></script>
   </body>
 </html>
