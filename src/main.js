@@ -228,11 +228,14 @@ for (const sp of spaces.places) {
   stations.push(new Station(world, scene, stop, null, { pad: [sp.pad.x, sp.pad.z], origin: [sp.origin.x, sp.origin.z], badgeY: sp.inst.badgeY ?? 6.5 }));
 }
 const byId = Object.fromEntries(stations.map((s) => [s.stop.id, s]));
-const plazaSign = world.sign(['Play Park'], { width: 2.2, height: 0.8, accent: '#21a99a', postHeight: 0.8 });
-plazaSign.position.set(PADS.plaza[0] + 3.2, 0, PADS.plaza[1] - 1.8);
-plazaSign.scale.setScalar(0.9);
-world.statics.add(plazaSign);
-world.addCollider({ type: 'box', x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.86, hw: 0.9, hd: 0.15 });
+// The old Play Park's wooden sign (the rebuilt park has its own entrance arch)
+if (!stopMods.plaza) {
+  const plazaSign = world.sign(['Play Park'], { width: 2.2, height: 0.8, accent: '#21a99a', postHeight: 0.8 });
+  plazaSign.position.set(PADS.plaza[0] + 3.2, 0, PADS.plaza[1] - 1.8);
+  plazaSign.scale.setScalar(0.9);
+  world.statics.add(plazaSign);
+  world.addCollider({ type: 'box', x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.86, hw: 0.9, hd: 0.15 });
+}
 const keepOut = [];
 for (const s of stations) {
   const big = s.stop.kind === 'place' ? 6.6 : 5.4;
@@ -243,6 +246,10 @@ for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { 
 keepOut.push({ x: CAR.x, z: CAR.z, r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
 keepOut.push({ x: -40, z: 8.2, r: 6.4 }); // the bigger YumYum building
 const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
+// Rebuilt weekend stops fill the free ground between the paths: no trees or bushes inside them
+// (world boxes [x0, x1, z0, z1], measured from the paths and the other stops)
+const STOP_GROUND = { horse: [-5, 8, 5.6, 13.6], fencing: [8.5, 18, 6.6, 14.1], clay: [-1.5, 8, -8.9, -1.9], boardgames: [13.5, 26.5, -8.2, -1.2], drawing: [-13.5, -2, -7.2, -0.7], plaza: [-47.5, -27, -19.7, -6.7] };
+for (const [id, [x0, x1, z0, z1]] of Object.entries(STOP_GROUND)) if (stopMods[id]) rects.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2 + 0.6, hd: (z1 - z0) / 2 + 0.6 });
 await bootStep(0.89, 'Planting trees and flowers');
 world.scatterNature(keepOut, rects);
 bakeStatic(world.statics, [], mergeGeometries);

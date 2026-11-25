@@ -251,8 +251,35 @@ export function bubbleTex(text, { color = '#4a3423', bg = '#ffffff', w = 256, h 
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `600 ${Math.round(h * 0.36)}px ${FONT}`;
-    ctx.fillText(text, w / 2, (h - 42) / 2 + 6);
+    // Fit the line inside the bubble: shrink it, and if it is still too long, break it onto two lines
+    const room = w - 64;
+    const cy = (h - 42) / 2 + 6;
+    let size = Math.round(h * 0.36);
+    const fit = (s) => {
+      ctx.font = `600 ${s}px ${FONT}`;
+      return ctx.measureText(text).width <= room;
+    };
+    while (!fit(size) && size > h * 0.24) size -= 2;
+    if (fit(size)) {
+      ctx.fillText(text, w / 2, cy);
+      return;
+    }
+    const words = String(text).split(' ');
+    let best = 1;
+    let bestW = Infinity;
+    for (let i = 1; i < words.length; i++) {
+      const wide = Math.max(ctx.measureText(words.slice(0, i).join(' ')).width, ctx.measureText(words.slice(i).join(' ')).width);
+      if (wide < bestW) {
+        bestW = wide;
+        best = i;
+      }
+    }
+    const lines = [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+    size = Math.round(h * 0.26);
+    ctx.font = `600 ${size}px ${FONT}`;
+    while (Math.max(...lines.map((l) => ctx.measureText(l).width)) > room && size > 12) ctx.font = `600 ${(size -= 2)}px ${FONT}`;
+    ctx.fillText(lines[0], w / 2, cy - size * 0.58);
+    ctx.fillText(lines[1], w / 2, cy + size * 0.58);
   });
 }
 
