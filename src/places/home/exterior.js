@@ -1,9 +1,11 @@
 import { THREE, mat, umat, mesh, canvasTexture, mergeGeometries, box, rbox, cyl, sph, tor, at, rot, uvScale, pattern, texMat, panel, labelTex, glowTex, sprite, heartGeo, bake, colorBake } from './kit.js';
 import { rng } from '../../util.js';
+import { buildGarage } from './garage.js';
 
 // Roji and Homama's cottage: two storeys with a cross gable, a porch with a pink door,
-// window boxes, climbing roses, a picket fence with a rose-covered gate sign, a bench, a mailbox
-// and flowers everywhere. Local frame: footprint 16 x 10, front +Z, the door at (0, 0.2).
+// window boxes, climbing roses, a picket fence with a rose-covered gate sign, a bench, a mailbox,
+// flowers everywhere and a garage on the right (garage.js). Local frame: footprint 16 x 10, front +Z,
+// the door at (0, 0.2).
 
 const CREAM = '#fff2e1';
 const PEACH = '#ffdccf';
@@ -21,6 +23,7 @@ const ZB = -4.6; // back wall
 const ZC = (ZF + ZB) / 2;
 const EAVE = 4.6;
 const RIDGE = 6.4;
+const FENCE_R = 4.62; // the right front fence ends where the driveway starts
 
 // ------------------------------------------------------------------ textures
 const shingleTex = () =>
@@ -367,8 +370,10 @@ export function buildExterior(ctx) {
   windowAt(0, 3.85, 0.8, 0.7, glassA, null, false);
   // Side windows
   for (const s of [-1, 1]) {
-    add(at(rbox(0.1, 1.1, 1.2, white, 0.04), s * (HX + 0.03), 3.6, ZC));
-    add(rot(at(mesh(new THREE.PlaneGeometry(1.0, 0.9), glassA, { cast: false }), s * (HX + 0.09), 3.6, ZC), 0, s * Math.PI / 2, 0));
+    const uy = s > 0 ? 3.78 : 3.6; // the right one clears the garage roof
+    add(at(rbox(0.1, 1.1, 1.2, white, 0.04), s * (HX + 0.03), uy, ZC));
+    add(rot(at(mesh(new THREE.PlaneGeometry(1.0, 0.9), glassA, { cast: false }), s * (HX + 0.09), uy, ZC), 0, s * Math.PI / 2, 0));
+    if (s > 0) continue; // the garage covers the right one
     add(at(rbox(0.1, 1.2, 1.3, white, 0.04), s * (HX + 0.03), 1.55, ZC - 0.6));
     add(rot(at(mesh(new THREE.PlaneGeometry(1.1, 1.0), glassA, { cast: false }), s * (HX + 0.09), 1.55, ZC - 0.6), 0, s * Math.PI / 2, 0));
   }
@@ -510,13 +515,19 @@ export function buildExterior(ctx) {
   const picket = mergeGeometries([new THREE.BoxGeometry(0.11, 0.68, 0.045).translate(0, 0.34, 0), new THREE.ConeGeometry(0.08, 0.13, 4).rotateY(Math.PI / 4).translate(0, 0.74, 0)].map((q) => q.toNonIndexed()));
   const pickets = [];
   for (const s of [-1, 1]) {
-    for (let x = 1.12; x < 7.8; x += 0.27) pickets.push([s * x, 4.75, 0]);
-    for (let z = 4.5; z > -4.7; z -= 0.27) pickets.push([s * 7.85, z, Math.PI / 2]);
-    add(at(box(6.75, 0.07, 0.04, white), s * 4.47, 0.26, 4.72));
-    add(at(box(6.75, 0.07, 0.04, white), s * 4.47, 0.56, 4.72));
-    add(at(box(0.04, 0.07, 9.4, white), s * 7.82, 0.26, 0));
-    add(at(box(0.04, 0.07, 9.4, white), s * 7.82, 0.56, 0));
-    for (const [px, pz] of [[s * 1.05, 4.75], [s * 7.85, 4.75], [s * 7.85, -4.7], [s * 4.47, 4.75], [s * 7.85, 0]]) {
+    const x1 = s < 0 ? 7.85 : FENCE_R;
+    for (let x = 1.12; x < x1 - 0.05; x += 0.27) pickets.push([s * x, 4.75, 0]);
+    const xm = (1.05 + x1) / 2;
+    add(at(box(x1 - 1.05, 0.07, 0.04, white), s * xm, 0.26, 4.72));
+    add(at(box(x1 - 1.05, 0.07, 0.04, white), s * xm, 0.56, 4.72));
+    const posts = [[s * 1.05, 4.75], [s * x1, 4.75], [s * xm, 4.75]];
+    if (s < 0) {
+      for (let z = 4.5; z > -4.7; z -= 0.27) pickets.push([s * 7.85, z, Math.PI / 2]);
+      add(at(box(0.04, 0.07, 9.4, white), s * 7.82, 0.26, 0));
+      add(at(box(0.04, 0.07, 9.4, white), s * 7.82, 0.56, 0));
+      posts.push([s * 7.85, -4.7], [s * 7.85, 0]);
+    }
+    for (const [px, pz] of posts) {
       add(at(box(0.15, 0.92, 0.15, white), px, 0.46, pz));
       add(at(sph(0.09, white, undefined, 10), px, 0.98, pz));
     }
@@ -558,10 +569,10 @@ export function buildExterior(ctx) {
   // Flower beds along the inside of the fence
   for (const s of [-1, 1]) {
     const x0 = s > 0 ? 1.3 : -7.6;
-    const x1 = s > 0 ? 7.6 : -1.3;
-    add(at(rbox(6.4, 0.18, 0.7, '#c9b49a', 0.05), (x0 + x1) / 2, 0.09, 4.3));
-    add(at(box(6.25, 0.05, 0.58, SOIL), (x0 + x1) / 2, 0.18, 4.3));
-    garden.bed(x0 + 0.1, x1 - 0.1, 4.05, 4.55, 0.2, 54, 50 + s);
+    const x1 = s > 0 ? FENCE_R - 0.15 : -1.3;
+    add(at(rbox(x1 - x0, 0.18, 0.7, '#c9b49a', 0.05), (x0 + x1) / 2, 0.09, 4.3));
+    add(at(box(x1 - x0 - 0.15, 0.05, 0.58, SOIL), (x0 + x1) / 2, 0.18, 4.3));
+    garden.bed(x0 + 0.1, x1 - 0.1, 4.05, 4.55, 0.2, Math.round((x1 - x0) * 8.4), 50 + s);
   }
 
   // Bench on the left lawn
@@ -579,27 +590,29 @@ export function buildExterior(ctx) {
   colliders.push({ type: 'box', x: -5.4, z: 2.7, hw: 0.85, hd: 0.3, h: 0.47 });
 
   // Birdbath in a round flower bed on the right lawn
-  add(at(cyl(0.95, 1.0, 0.16, '#c9b49a', 24), 5.4, 0.08, 2.6));
-  add(at(cyl(0.88, 0.88, 0.04, SOIL, 24), 5.4, 0.17, 2.6));
-  for (let i = 0; i < 40; i++) {
+  const BBX = 3.3;
+  const BBZ = 2.75;
+  add(at(cyl(0.76, 0.8, 0.16, '#c9b49a', 24), BBX, 0.08, BBZ));
+  add(at(cyl(0.7, 0.7, 0.04, SOIL, 24), BBX, 0.17, BBZ));
+  for (let i = 0; i < 32; i++) {
     const a = r() * Math.PI * 2;
-    const rr = 0.32 + r() * 0.5;
-    garden.flower(5.4 + Math.cos(a) * rr, 0.18, 2.6 + Math.sin(a) * rr, ['tulip', 'pom', 'daisy', 'rose'][i % 4], ['#ff8fb1', '#ffd75e', '#c7a6ff', '#ffffff', '#ff6b6b', '#7fb0ff'][i % 6], 0.18 + r() * 0.16);
+    const rr = 0.28 + r() * 0.38;
+    garden.flower(BBX + Math.cos(a) * rr, 0.18, BBZ + Math.sin(a) * rr, ['tulip', 'pom', 'daisy', 'rose'][i % 4], ['#ff8fb1', '#ffd75e', '#c7a6ff', '#ffffff', '#ff6b6b', '#7fb0ff'][i % 6], 0.18 + r() * 0.16);
   }
-  add(at(cyl(0.08, 0.12, 0.7, '#e3d6c3', 10), 5.4, 0.5, 2.6));
-  add(at(cyl(0.34, 0.16, 0.14, '#e3d6c3', 18), 5.4, 0.9, 2.6));
-  add(at(cyl(0.3, 0.3, 0.02, mat('#8fdcef', { rough: 0.15 }), 18), 5.4, 0.96, 2.6));
+  add(at(cyl(0.08, 0.12, 0.7, '#e3d6c3', 10), BBX, 0.5, BBZ));
+  add(at(cyl(0.34, 0.16, 0.14, '#e3d6c3', 18), BBX, 0.9, BBZ));
+  add(at(cyl(0.3, 0.3, 0.02, mat('#8fdcef', { rough: 0.15 }), 18), BBX, 0.96, BBZ));
   const bird = new THREE.Group();
   bird.add(at(sph(0.07, '#6fb8ff', undefined, 10), 0, 0.06, 0));
   bird.add(at(sph(0.05, '#6fb8ff', undefined, 10), 0, 0.13, 0.05));
   bird.add(rot(at(cyl(0, 0.018, 0.05, '#ffb347', 6), 0, 0.13, 0.11), Math.PI / 2, 0, 0));
   bird.add(rot(at(box(0.05, 0.015, 0.08, '#3f7bf0'), 0, 0.08, -0.08), 0.4, 0, 0));
   bird.add(at(sph(0.012, '#1d130f', undefined, 6), 0.03, 0.15, 0.09), at(sph(0.012, '#1d130f', undefined, 6), -0.03, 0.15, 0.09));
-  bird.position.set(5.72, 0.97, 2.6);
+  bird.position.set(BBX + 0.32, 0.97, BBZ);
   bird.rotation.y = -1.2;
   add(bake(bird));
   dynamic.push(bird);
-  colliders.push({ type: 'circle', x: 5.4, z: 2.6, r: 0.98 });
+  colliders.push({ type: 'circle', x: BBX, z: BBZ, r: 0.78 });
 
   // Mailbox by the gate
   const mbx = new THREE.Group();
@@ -638,8 +651,7 @@ export function buildExterior(ctx) {
   add(at(box(1.3, 0.09, 0.09, '#9b6a43'), -5.7, 2.05, -2.6));
   for (const dz of [-0.22, 0.22]) add(at(cyl(0.012, 0.012, 1.5, '#d8c2a2', 5), -5.25, 1.3, -2.6 + dz));
   add(at(rbox(0.36, 0.05, 0.56, '#ff9eb5', 0.02), -5.25, 0.55, -2.6));
-  tree(6.4, -3.0, 0.9, false);
-  for (const [x, z, rr] of [[-7.3, 3.4, 0.45], [7.3, 3.4, 0.45], [-7.3, -0.6, 0.5], [7.3, 0.8, 0.5], [-5.2, -4.4, 0.4], [5.6, -4.4, 0.4], [7.2, -1.8, 0.4]]) {
+  for (const [x, z, rr] of [[-7.3, 3.4, 0.45], [-7.3, -0.6, 0.5], [-5.2, -4.4, 0.4]]) {
     add(at(sph(rr, LEAF, { rough: 0.85 }, 14), x, rr * 0.75, z));
     add(at(sph(rr * 0.7, LEAF2, { rough: 0.85 }, 12), x + rr * 0.45, rr * 0.55, z + rr * 0.2));
     garden.bed(x - rr, x + rr, z - rr * 0.2, z + rr * 0.9, rr * 0.9, 5, Math.round(x * 10 + z), ['pom', 'rose'], ['#ffffff', '#ff8fb1', '#ffd75e']);
@@ -654,8 +666,8 @@ export function buildExterior(ctx) {
     wb.add(rot(at(box(0.05, 0.05, 0.9, '#8d5a3a'), s * 0.2, 0.45, -0.45), -0.25, 0, 0));
     wb.add(at(box(0.05, 0.32, 0.05, '#8d5a3a'), s * 0.2, 0.16, -0.25));
   }
-  wb.position.set(6.2, 0, -0.4);
-  wb.rotation.y = 0.5;
+  wb.position.set(-6.55, 0, 0.95);
+  wb.rotation.y = -0.6;
   add(wb);
   wb.updateMatrixWorld(true);
   for (let i = 0; i < 18; i++) {
@@ -664,7 +676,7 @@ export function buildExterior(ctx) {
     const p = new THREE.Vector3(Math.cos(a) * rr, 0.68, Math.sin(a) * rr).applyMatrix4(wb.matrix);
     garden.flower(p.x, p.y, p.z, ['pom', 'tulip', 'daisy'][i % 3], ['#ff8fb1', '#ffd75e', '#ffffff', '#c7a6ff'][i % 4], 0.12 + r() * 0.12);
   }
-  colliders.push({ type: 'circle', x: 6.2, z: -0.4, r: 0.5 });
+  colliders.push({ type: 'circle', x: -6.55, z: 0.95, r: 0.5 });
   // Watering can
   const can = new THREE.Group();
   can.add(at(cyl(0.14, 0.15, 0.26, '#63c7ba', 14), 0, 0.13, 0));
@@ -682,6 +694,7 @@ export function buildExterior(ctx) {
     if (Math.abs(x) < HX + 0.3 && z < 1.4) continue;
     if (Math.abs(x) < 1.2 && z > 1.4) continue;
     if (z > 3.85 && z < 4.9) continue;
+    if (x > HX - 0.2) continue;
     tufts.push([x, z, r() * 6, 0.7 + r() * 0.6]);
   }
   const tim = new THREE.InstancedMesh(tuftGeo, mat('#7cc25a', { rough: 0.9 }), tufts.length);
@@ -711,12 +724,15 @@ export function buildExterior(ctx) {
     butterflies.push({ b, wings, cx, cz, ph: r() * 6 });
   }
 
+  const hotspots = [];
+  const garage = buildGarage({ add, dynamic, colliders, hotspots, garden, api, shingles, peachBoards, glassA });
+
   for (const f of garden.build()) add(f);
   dynamic.push(...colorBake(g, dynamic));
 
   // ---------------------------------------------------------------- colliders and hotspots
   colliders.push(
-    { type: 'box', x: 0, z: ZC, hw: HX + 0.1, hd: (ZF - ZB) / 2 + 0.08 },
+    { type: 'box', x: -0.04, z: ZC, hw: HX + 0.06, hd: (ZF - ZB) / 2 + 0.08 },
     { type: 'box', x: -3.3, z: ZF + 0.52, hw: 1.28, hd: 0.45 },
     { type: 'box', x: 3.3, z: ZF + 0.52, hw: 1.28, hd: 0.45 },
     { type: 'box', x: 0, z: ZF + 0.75, hw: 1.9, hd: 0.75, h: 0.3 },
@@ -726,9 +742,8 @@ export function buildExterior(ctx) {
     { type: 'circle', x: -1.72, z: ZF + 1.38, r: 0.1 },
     { type: 'circle', x: 1.72, z: ZF + 1.38, r: 0.1 },
     { type: 'box', x: -4.45, z: 4.3, hw: 3.42, hd: 0.52 },
-    { type: 'box', x: 4.45, z: 4.3, hw: 3.42, hd: 0.52 },
+    { type: 'box', x: (1.05 + FENCE_R) / 2, z: 4.3, hw: (FENCE_R - 1.05) / 2 + 0.07, hd: 0.52 },
     { type: 'box', x: -7.85, z: 0, hw: 0.07, hd: 4.75 },
-    { type: 'box', x: 7.85, z: 0, hw: 0.07, hd: 4.75 },
     { type: 'circle', x: -0.91, z: 4.8, r: 0.1 },
     { type: 'circle', x: 0.91, z: 4.8, r: 0.1 },
     { type: 'circle', x: -1.4, z: 2.05, r: 0.22 },
@@ -746,7 +761,7 @@ export function buildExterior(ctx) {
     'A bill... just kidding. <b>It is a love letter from Homama.</b>',
   ];
   const state = { flag: 0, smell: 0 };
-  const hotspots = [
+  hotspots.push(
     {
       x: -5.4,
       z: 3.35,
@@ -798,18 +813,20 @@ export function buildExterior(ctx) {
         a.toast(mailLines[i % mailLines.length], 3200);
       },
     },
-  ];
+  );
 
   return {
     group: g,
     dynamic,
     colliders,
     hotspots,
+    carSpot: garage.carSpot,
     ground: [
       { x: 0, z: 3.4, hw: 0.8, hd: 1.45, color: '#ead8b5', feather: 0.25 },
       { x: 0, z: 1.9, hw: 1.4, hd: 0.5, color: '#ead8b5', feather: 0.25 },
     ],
-    update(dt, t) {
+    update(dt, t, a) {
+      garage.update(dt, t, a);
       smoke.forEach((s, i) => {
         const k = (t * 0.3 + i / smoke.length) % 1;
         s.position.set(2.9 + Math.sin(k * 4 + i) * 0.25, 7.8 + k * 1.8, -3.2 + k * 0.3);
