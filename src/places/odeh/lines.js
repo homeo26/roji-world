@@ -88,6 +88,14 @@ export const L = {
   // The bench
   bench: ['The view from here is the best.', 'Smell the jasmine.', 'I love it here.'],
   benchLove: ['For you. It smells like you.', 'A jasmine for the prettiest doctor.', 'There. Perfect.'],
+
+  // The bench half way up, and Homama's sign
+  restPuff: ["Phew! Baba's hill gets taller every visit.", 'Half way. My legs say hello.', 'Okay, okay, one little rest.'],
+  restView: ['Look, you can see the whole town from here.', 'Worth every step, this view.', 'I can see our home from here!'],
+  restSignRoji: ['Who wrote "Almost there, habibti" on that sign?', '"Almost there, habibti"? We are only half way!'],
+  restSignReply: ['No idea. Somebody very handsome.', 'Hmm. Somebody who loves you a lot.', 'It is signed H. Very mysterious.'],
+  restSignHomama: ['See my sign? Almost there, habibti.', 'I painted that sign for you. Half way is almost there!'],
+  restSignSmile: ['You painted that? You are so cute.', 'Almost there, with you.', 'Liar, we are only half way. I love it.'],
 };
 
 // Fill {me} and {other}
