@@ -1,15 +1,18 @@
-// Odeh's Home: a warm, sandy desert hill on the west of the island with Roji's family home on top.
+// Odeh's Home: a big golden desert hill on the west of the island with Roji's family home on top.
 // Odeh (Roji's father) gardens and pours coffee, Hanan (her mother) runs out to hug her, little
 // Sultan never stops bouncing, and Basem (her brother) drops by with sweets some visits.
-// The hill and its props: odeh/hill.js, the house: odeh/house.js, the family: odeh/family.js,
+// The levels and the path: odeh/layout.js, the sand and its walls: odeh/terrain.js,
+// the hill and its props: odeh/hill.js, the house: odeh/house.js, the family: odeh/family.js,
 // what happens outside: odeh/outside.js, the home inside: odeh/interior.js and odeh/inside.js.
 import { THREE, colorBake, glowTexture } from './odeh/kit.js';
-import { hillColliders, LANDING, L2, DOOR, SPOT } from './odeh/layout.js';
+import { walkColliders, DOOR, SPOT } from './odeh/layout.js';
+import { slopeWalls } from './odeh/terrain.js';
 import { buildHill } from './odeh/hill.js';
 import { buildHouse } from './odeh/house.js';
 import { setupOutside } from './odeh/outside.js';
 import { buildInterior } from './odeh/interior.js';
 import { Family } from './odeh/visit.js';
+import { pathGuide } from './odeh/follow.js';
 
 export default {
   id: 'odeh',
@@ -18,7 +21,7 @@ export default {
     tag: "Roji's family",
     icon: 'home',
     color: '#c8743f',
-    text: "A golden hill with date palms and a sleepy camel. Up the steps: Odeh's garden and his fire, and the family home where Hanan cooks, Odeh pours coffee, Sultan bounces off the sofa and Basem drops by.",
+    text: "A big golden hill with date palms and a sleepy camel. Up the winding stone path: the tent and its fire, a bench half way, Odeh's garden, and the family home on top where Hanan cooks, Odeh pours coffee, Sultan bounces off the sofa and Basem drops by.",
   },
   icons: {
     'o-tea': 'M7 8h10l-1.5 11a2 2 0 0 1-2 1.7h-3a2 2 0 0 1-2-1.7z M6 8h12 M10 3.5c0 1 1 1 1 2 M14 3.5c0 1 1 1 1 2',
@@ -33,7 +36,7 @@ export default {
 
   build(ctx) {
     const g = new THREE.Group();
-    const out = { g, dynamic: [], colliders: hillColliders(), halos: [] };
+    const out = { g, dynamic: [], colliders: [...walkColliders(), ...slopeWalls()], halos: [] };
     buildHill(ctx, out);
     buildHouse(ctx, out);
     const F = new Family();
@@ -51,35 +54,11 @@ export default {
     // Everything that does not move merges into a few vertex-coloured meshes
     colorBake(g, out.dynamic);
 
-    // Coming out of the house: the game puts the kids at the door at ground height, so the landing in
-    // front of the door lets them in for one frame and then lifts them back onto the plateau
+    // Coming out of the house: the family sees Roji and Homama off at the door
     const api = ctx.api;
-    let landing = null;
-    const findLanding = () => (landing ||= api.space.colliders?.find((c) => c.tag === 'odeh-landing') || null);
-    const landingRect = (a) => {
-      const O = api.space.origin;
-      return Math.abs(a.pos.x - (O.x + LANDING.x)) < LANDING.hw + 0.4 && Math.abs(a.pos.z - (O.z + LANDING.z)) < LANDING.hd + 0.4;
-    };
-    let exiting = false;
-    const onLeaveHouse = () => {
-      const c = findLanding();
-      if (c) c.h = 0.01;
-      exiting = true;
-      outside.goodbye();
-    };
-    const lift = () => {
-      if (!exiting) return;
-      exiting = false;
-      for (const a of [api.roji, api.homama]) {
-        if (a && landingRect(a) && a.y < L2 - 0.2) {
-          a.y = L2;
-          a.vy = 0;
-          a.kid.root.position.y = L2;
-        }
-      }
-      const c = findLanding();
-      if (c) c.h = L2;
-    };
+    const onLeaveHouse = () => outside.goodbye();
+    // The partner follows up and down the winding path instead of getting stuck below a bend
+    const guide = pathGuide(api, ctx.size || { w: 24, d: 30 });
 
     // The goat wanders round its stake: a small collider follows it so kids do not walk through it
     out.colliders.push({ type: 'circle', x: out.goat.pos.x, z: out.goat.pos.z, r: 0.36, tag: 'odeh-goat' });
@@ -101,13 +80,21 @@ export default {
       hotspots: outside.hotspots,
       pad: SPOT.pad,
       door: { x: DOOR.x, z: DOOR.z },
-      badgeY: 10.5,
+      badgeY: 12,
       interior: {
         title: "Odeh's Home",
         build: (ictx) => buildInterior(ictx, F, { onLeave: onLeaveHouse, outside }),
       },
       update(dt, t, api_) {
-        lift();
+        // The card's "Go inside" walks straight to the door, which would run into the hill: from the
+        // pad it goes in at once instead (the door's own hotspot up top is unchanged)
+        const rec = api_.game?.spaces?.interiors?.odeh;
+        if (rec && !rec.padDoor) {
+          const O = api_.space.origin;
+          rec.door = new THREE.Vector3(O.x + SPOT.pad.x, 0, O.z + SPOT.pad.z);
+          rec.padDoor = true;
+        }
+        guide.update(dt);
         F.tick(dt, api_);
         out.fire.update(t, F.night());
         out.camel.update(dt, t);
@@ -122,7 +109,7 @@ export default {
         if (wasNear && !near) outside.away();
         wasNear = near;
       },
-      debug: { F, outside },
+      debug: { F, outside, guide },
     };
   },
 };

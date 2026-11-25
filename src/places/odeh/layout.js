@@ -1,87 +1,128 @@
 // Where everything sits on Odeh's hill (local metres: x right, z toward the street, y up).
-// The hill rises in three levels: the sandy front yard at the street (y 0), the garden terrace
-// (y 0.88) and the house plateau with its courtyard (y 1.98). Stone steps of 0.22 m join them.
+// A golden sand hill rises from the street to the family home on top (3.24 m up). A stepped stone
+// path winds up its front in three legs: west to the tent terrace, east past the resting bench (half
+// way up) to Odeh's garden terrace, then west again to the gate steps of the courtyard. Each tread is
+// a collider 0.09 m higher than the last, so kids, the partner and the family walk up for real.
 
-export const STEP = 0.22;
-export const L1 = 0.88; // garden terrace
-export const L2 = 1.98; // house plateau
-export const STEPS_A = 3; // steps cut into the terrace front (the 4th rise is the terrace itself)
-export const STEPS_B = 4;
+export const TOP = 3.24; // the courtyard and the house floor
+export const RISE = 0.09; // one tread of the path
+export const TENT_Y = 1.26; // the tent terrace (west)
+export const GARDEN_Y = 2.16; // Odeh's garden terrace (east)
+export const HALF_Y = 1.62; // the resting bench, exactly half way up
+export const STEP_Y = 3.06; // the gate step between the path and the courtyard
 
-export const STAIR = { hw: 1.3 }; // the steps are 2.6 m wide, centred on x = 0
-// Front yard z 6.4..15 | steps A z 4.6..6.4 | terrace z -1.0..4.6 | steps B z -3.4..-1.0 | plateau z -13.9..-3.4
-export const Z = { yardFront: 15, t1Front: 6.4, t1Top: 4.6, t2Front: -1.0, t2Top: -3.4, back: -13.9 };
-export const T1 = { x0: -10.2, x1: 10.2 };
-export const T2 = { x0: -9.4, x1: 9.4 };
-
-// The house on the plateau and its courtyard
-export const HOUSE = { x0: -6.8, x1: 6.8, z0: -13.7, z1: -7.5, h: 3.3 };
+export const HOUSE = { x0: -6.2, x1: 6.2, z0: -12.8, z1: -6.8, h: 3.3 };
 export const DOOR = { x: 0, z: HOUSE.z1 + 0.06 };
-export const LANDING = { x: 0, z: -6.2, hw: 1.3, hd: 1.35 }; // where Roji and Homama come out of the door
+export const PLATEAU = { x0: -7.5, x1: 7.5, z0: -13.25, z1: 0.25 };
+export const GATE = { x0: -1.25, x1: 1.25 };
+export const TENT = { x0: -11, x1: -6, z0: 5, z1: 11 };
+export const GARDEN = { x0: 6.5, x1: 10.75, z0: 0.75, z1: 7 };
+export const NOOK = { x0: -1.9, x1: -0.1, z0: 4, z1: 5 }; // the bench's nook cut into the hill
+export const LEG_A = { z0: 9.25, z1: 11.25, x0: -6, x1: 2.25, entry: 4.25 }; // rises west
+export const LEG_B = { z0: 5, z1: 7, x0: -6, x1: 6.5 }; // rises east
+export const LEG_C = { z0: 0.75, z1: 2.75, x0: -1.25, x1: 6.5 }; // rises west
+
+// The sand domain (the hill spills a little past the footprint, where trees never grow)
+export const DOMAIN = { x0: -13.0, x1: 13.0, z0: -16.0, z1: 15, round: 4.5 };
+
+// Where the flat sandy yard at street level begins (toward the street)
+export function yardZ(x) {
+  if (x >= 4.5) return 10.5;
+  if (x >= LEG_A.x1) return LEG_A.z1;
+  if (x <= LEG_A.x0) return 12.6;
+  return LEG_A.z1 + 0.35 + 1.2 * legAHeight(x);
+}
+function legAHeight(x) {
+  const k = Math.ceil((LEG_A.x1 - x) / ((LEG_A.x1 - LEG_A.x0) / 13));
+  return Math.max(0, Math.min(13, k)) * RISE;
+}
+
+// ---------------------------------------------------------------- the walkable pieces
+// kind: 'pave' (a stone tread), 'apron' (paving at street level), 'sand' (a terrace), 'court' (tiles)
+function buildWalk() {
+  const w = [];
+  const add = (x0, x1, z0, z1, h, kind, tag) => w.push({ x0, x1, z0, z1, h: +h.toFixed(3), kind, tag });
+  // Leg A: 13 treads from the yard up to the tent terrace
+  const nA = 13;
+  const wa = (LEG_A.x1 - LEG_A.x0) / nA;
+  add(LEG_A.x1, LEG_A.entry, LEG_A.z0, LEG_A.z1, 0, 'apron', 'entry');
+  for (let k = 1; k <= nA; k++) add(LEG_A.x1 - wa * k, LEG_A.x1 - wa * (k - 1), LEG_A.z0, LEG_A.z1, RISE * k, 'pave', 'A');
+  add(TENT.x0, TENT.x1, TENT.z0, TENT.z1, TENT_Y, 'sand', 'tent');
+  // Leg B: 9 treads to the garden; the 4th is long, with the bench nook behind it
+  const widths = [1, 1, 1, 2.1, 1, 1, 1, 1, 1];
+  const unit = (LEG_B.x1 - LEG_B.x0 - 2.6) / 8;
+  let x = LEG_B.x0;
+  widths.forEach((f, i) => {
+    const wd = f === 1 ? unit : 2.6;
+    add(x, x + wd, LEG_B.z0, LEG_B.z1, TENT_Y + RISE * (i + 1), 'pave', 'B');
+    x += wd;
+  });
+  add(NOOK.x0, NOOK.x1, NOOK.z0, NOOK.z1, HALF_Y, 'pave', 'nook');
+  add(GARDEN.x0, GARDEN.x1, GARDEN.z0, GARDEN.z1, GARDEN_Y, 'sand', 'garden');
+  // Leg C: 7 treads and the landing below the gate step
+  const nC = 7;
+  const wc = (LEG_C.x1 - GATE.x1) / nC;
+  for (let k = 1; k <= nC; k++) add(LEG_C.x1 - wc * k, LEG_C.x1 - wc * (k - 1), LEG_C.z0, LEG_C.z1, GARDEN_Y + RISE * k, 'pave', 'C');
+  add(GATE.x0, GATE.x1, LEG_C.z0, LEG_C.z1, GARDEN_Y + RISE * (nC + 1), 'pave', 'landing');
+  add(GATE.x0, GATE.x1, PLATEAU.z1, LEG_C.z0, STEP_Y, 'pave', 'step');
+  add(PLATEAU.x0, PLATEAU.x1, PLATEAU.z0, PLATEAU.z1, TOP, 'court', 'court');
+  return w;
+}
+export const WALK = buildWalk();
+
+export function walkAt(x, z, pad = 0) {
+  let best = null;
+  for (const r of WALK) {
+    if (x < r.x0 - pad || x > r.x1 + pad || z < r.z0 - pad || z > r.z1 + pad) continue;
+    if (!best || r.h > best.h) best = r;
+  }
+  return best;
+}
+
+// Height of the hill's walkable top at (x, z), for placing people and things on it
+export function levelAt(x, z) {
+  return walkAt(x, z)?.h ?? 0;
+}
+
+// The walkable pieces as colliders with a height (the slopes in between are walls, see terrain.js)
+export function walkColliders() {
+  return WALK.filter((r) => r.h > 0).map((r) => ({ type: 'box', x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, hw: (r.x1 - r.x0) / 2, hd: (r.z1 - r.z0) / 2, h: r.h, tag: `odeh-${r.tag}` }));
+}
 
 // Spots used by the outdoor scenes
 export const SPOT = {
   pad: { x: -1, z: 16.4 },
-  tent: { x: -8.1, z: 9.7 },
-  fire: { x: -7.6, z: 12.9 },
-  garden: { x: -6.2, z: 2.2 },
-  well: { x: 5.6, z: 2.3 },
-  olive: { x: 8.7, z: 0.4 },
-  goatStake: { x: 6.8, z: 4.2 },
-  camel: { x: 9.6, z: 12.4 },
-  goal: { x: 6.4, z: 7.25 },
-  kick: { x: 6.4, z: 11.2 },
-  lemon: { x: -5.4, z: -4.8 },
-  bench: { x: 4.6, z: -7.0 },
-  photo: { x: 0, z: -5.0 },
-  sign: { x: 3.2, z: 14.2 },
+  sign: { x: -4.3, z: 13.9 },
+  camel: { x: -8.7, z: 13.75 },
+  goal: { x: 6.7, z: 11.0 },
+  kick: { x: 6.7, z: 14.2 },
+  tent: { x: -9.1, z: 6.5 },
+  fire: { x: -9.0, z: 9.45 },
+  garden: { x: 9.25, z: 5.0 },
+  well: { x: 9.3, z: 1.85 },
+  can: { x: 8.25, z: 2.75 },
+  bench2: { x: -1.0, z: 4.35 }, // the resting bench half way up
+  lemon: { x: -4.6, z: -4.2 },
+  goatStake: { x: -5.6, z: -1.6 },
+  olive: { x: 7.0, z: -2.6 },
+  bench: { x: 4.4, z: -6.3 },
+  photo: { x: 0, z: -4.3 },
 };
 
-// The way up: from the street to the door (Basem's walk, Odeh's walk to the tent)
+// The way up: from the street to the door (Basem's walk); DOWN is the way back
 export const UP = [
-  { x: -0.6, z: 14 },
-  { x: 0, z: 7.4 },
-  { x: 0, z: 4.4 },
-  { x: 0, z: -0.4 },
-  { x: 0, z: -4.0 },
-  { x: 0, z: -6.9 },
+  { x: 0.2, z: 13.9 },
+  { x: 3.25, z: 11.6 },
+  { x: 3.0, z: 10.25 },
+  { x: -6.55, z: 10.25 },
+  { x: -6.55, z: 6.0 },
+  { x: 6.95, z: 6.0 },
+  { x: 6.95, z: 1.75 },
+  { x: 0, z: 1.75 },
+  { x: 0, z: -0.6 },
+  { x: 0, z: -6.3 },
 ];
 export const DOWN = [...UP].reverse();
-
-// Height of the hill's walkable top at (x, z), for placing things on it
-export function levelAt(x, z) {
-  if (z <= Z.t2Top && x >= T2.x0 && x <= T2.x1) return L2;
-  if (z <= Z.t2Front && Math.abs(x) > STAIR.hw && x >= T2.x0 && x <= T2.x1) return L2;
-  if (z <= Z.t2Front && z > Z.t2Top && Math.abs(x) <= STAIR.hw) return L1 + STEP * Math.min(STEPS_B, Math.floor((Z.t2Front - z) / 0.6) + 1);
-  if (z <= Z.t1Top && x >= T1.x0 && x <= T1.x1) return L1;
-  if (z <= Z.t1Front && Math.abs(x) > STAIR.hw && x >= T1.x0 && x <= T1.x1) return L1;
-  if (z <= Z.t1Front && z > Z.t1Top && Math.abs(x) <= STAIR.hw) return STEP * Math.min(STEPS_A, Math.floor((Z.t1Front - z) / 0.6) + 1);
-  return 0;
-}
-
-// The hill's colliders: each level is a box with a height, so kids walk up the steps and can
-// jump between levels; the sand slopes at the sides are walls.
-export function hillColliders() {
-  const c = [];
-  const boxC = (x0, x1, z0, z1, h, tag) => c.push({ type: 'box', x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, ...(h === null ? {} : { h }), tag });
-  const S = STAIR.hw;
-  // Terrace 1, with the first steps cut into its front
-  boxC(T1.x0, -S, Z.back, Z.t1Front, L1);
-  boxC(S, T1.x1, Z.back, Z.t1Front, L1);
-  boxC(-S, S, Z.back, Z.t1Top, L1);
-  for (let i = 0; i < STEPS_A; i++) boxC(-S, S, Z.t1Front - 0.6 * (i + 1), Z.t1Front - 0.6 * i, STEP * (i + 1));
-  // The plateau, with the second steps cut into its front
-  boxC(T2.x0, -S, Z.back, Z.t2Front, L2);
-  boxC(S, T2.x1, Z.back, Z.t2Front, L2);
-  boxC(-S, S, Z.back, LANDING.z - LANDING.hd, L2);
-  boxC(-S, S, LANDING.z + LANDING.hd, Z.t2Top, L2);
-  for (let i = 0; i < STEPS_B; i++) boxC(-S, S, Z.t2Front - 0.6 * (i + 1), Z.t2Front - 0.6 * i, L1 + STEP * (i + 1));
-  // The landing in front of the door is its own piece (see odeh.js: kids coming out of the house)
-  boxC(LANDING.x - LANDING.hw, LANDING.x + LANDING.hw, LANDING.z - LANDING.hd, LANDING.z + LANDING.hd, L2, 'odeh-landing');
-  // Sand slopes round the sides and the back: nobody walks into them. They cover the dunes in
-  // hill.js out to where the sand is ankle high (the dunes reach a little past the footprint).
-  boxC(-13.1, T1.x0, Z.back - 1.95, Z.t1Front + 0.84, null);
-  boxC(T1.x1, 13.1, Z.back - 1.95, Z.t1Front + 2.04, null);
-  boxC(-12.1, 12.1, Z.back - 1.95, Z.back, null);
-  return c;
-}
+// Odeh's walk between his garden and the fire
+export const GARDEN_TO_FIRE = [{ x: 6.95, z: 6.0 }, { x: -6.55, z: 6.0 }, { x: -6.55, z: 10.35 }, { x: -10.3, z: 10.4 }];
+export const FIRE_TO_GARDEN = [{ x: -10.3, z: 10.4 }, { x: -6.55, z: 10.35 }, { x: -6.55, z: 6.0 }, { x: 6.95, z: 6.0 }];

@@ -696,6 +696,11 @@ function playGame(id) {
   if (gameOpen) return;
   // Wait for a 3D game that is still loading; the 2D version is only a fallback if it fails
   if (arena.has(id)) return playArena(id).then((r) => (r === null && !arena.has(id) && GAMES.some((g) => g.id === id) ? playGame(id) : r));
+  // A 3D game that could not load and has no 2D version: say so instead of locking every other game
+  if (!GAMES.some((g) => g.id === id)) {
+    toast('That game is not ready yet. Try again in a moment.', 2200);
+    return Promise.resolve(null);
+  }
   gameOpen = true;
   input.enabled = false;
   input.keys.clear();
@@ -1620,7 +1625,12 @@ window.__roji = {
   goto: (x, z) => {
     P().pos.set(x, 0, z);
     C().pos.set(x + 1, 0, z + 0.6);
-    camLook.set(x, 0.9, z);
+    // Stand them on what is under them (a terrace, a step), not inside it
+    for (const a of [P(), C()]) {
+      a.y = physics.support(a.pos.x, a.pos.z, RADIUS, 20, 0);
+      a.vy = 0;
+    }
+    camLook.set(x, 0.9 + P().y, z);
     return true;
   },
   // Run the movement for n frames without drawing: ax is { x, y } or (i) => { x, y }. Returns a trace.

@@ -1,8 +1,9 @@
 // Odeh and Hanan's house on top of the hill: cream limestone walls, arched windows with blue
-// shutters, a blue arched door, a courtyard with a lemon tree and jasmine, a bench outside, and a
-// flat roof with the water tank, a solar heater and a satellite dish (and one of Sultan's toys).
+// shutters, a blue arched door, a tiled courtyard with a lemon tree and jasmine, a gate at the top
+// of the path, a bench outside, and a flat roof with the water tank, a solar heater and a satellite
+// dish (and one of Sultan's toys).
 import { THREE, mat, umat, mesh, box, rbox, cyl, sph, cone, tor, caps, at, sc, panel, canvasTexture, roundRect, FONT, rng, P, C, bakePart } from './kit.js';
-import { L2, HOUSE, DOOR, T2, Z, STAIR, SPOT } from './layout.js';
+import { TOP, HOUSE, DOOR, PLATEAU, GATE, SPOT } from './layout.js';
 import { lantern } from './hill.js';
 
 function limeTex() {
@@ -162,7 +163,7 @@ export function buildHouse(ctx, out) {
   const d = H.z1 - H.z0;
   const cx = (H.x0 + H.x1) / 2;
   const cz = (H.z0 + H.z1) / 2;
-  const y0 = L2;
+  const y0 = TOP;
 
   // Walls
   g.add(at(box(w, H.h, d, C.lime), cx, y0 + H.h / 2, cz));
@@ -186,8 +187,8 @@ export function buildHouse(ctx, out) {
   blueDoor(g, DOOR.x, y0, H.z1);
   archWindow(g, glass, -2.75, y0 + 0.95, H.z1, { flowers: true });
   archWindow(g, glass, 2.75, y0 + 0.95, H.z1, { flowers: true });
-  archWindow(g, glass, -5.2, y0 + 0.95, H.z1, { w: 0.8 });
-  archWindow(g, glass, 5.2, y0 + 0.95, H.z1, { w: 0.8 });
+  archWindow(g, glass, -4.75, y0 + 0.95, H.z1, { w: 0.8 });
+  archWindow(g, glass, 4.75, y0 + 0.95, H.z1, { w: 0.8 });
   // A little round window above the door, and a lantern
   g.add(at(mesh(new THREE.CircleGeometry(0.26, 18), glass, { cast: false }), 0, y0 + 2.75, H.z1 + 0.02));
   g.add(at(tor(0.27, 0.04, C.stoneEdge, 6, 20), 0, y0 + 2.75, H.z1 + 0.04));
@@ -220,51 +221,50 @@ export function buildHouse(ctx, out) {
   // Jasmine climbing up beside the door and along the top
   const r = rng(41);
   const vine = new THREE.Group();
-  const leafM = mat('#4f9a55');
-  const leafM2 = mat('#6fb85f');
-  const jas = mat(C.jasmine, { rough: 0.5 });
+  const leafV = mat('#4f9a55');
+  const leafV2 = mat('#6fb85f');
+  const jasV = mat(C.jasmine, { rough: 0.5 });
   const vinePts = [];
   for (let i = 0; i < 16; i++) vinePts.push([-1.75 + Math.sin(i * 0.9) * 0.12, 0.2 + i * 0.17]);
   for (let i = 0; i < 12; i++) vinePts.push([-1.6 + i * 0.27, 2.9 + Math.sin(i * 1.3) * 0.12]);
   for (const [vx, vy] of vinePts) {
-    vine.add(at(sph(0.15 + r() * 0.06, r() < 0.5 ? leafM : leafM2, 7, 4), vx, vy, 0.12));
-    for (let k = 0; k < 2; k++) vine.add(at(sph(0.035, jas, 4, 3), vx + (r() - 0.5) * 0.26, vy + (r() - 0.5) * 0.2, 0.24));
+    vine.add(at(sph(0.15 + r() * 0.06, r() < 0.5 ? leafV : leafV2, 7, 4), vx, vy, 0.12));
+    for (let k = 0; k < 2; k++) vine.add(at(sph(0.035, jasV, 4, 3), vx + (r() - 0.5) * 0.26, vy + (r() - 0.5) * 0.2, 0.24));
   }
   vine.position.set(0, y0, H.z1);
   g.add(vine);
 
-  // Courtyard: blue-and-cream tiles, low walls, a gate arch at the top of the steps
+  // Courtyard: blue-and-cream tiles over the hill top (the parapet round it is built with the path)
   const tiles = new THREE.MeshStandardMaterial({ map: tileTex(), roughness: 0.75 });
-  const S0 = STAIR.hw;
-  for (const [x0, x1, z0, z1] of [[T2.x0 + 0.3, T2.x1 - 0.3, H.z1, Z.t2Top], [T2.x0 + 0.3, -S0, Z.t2Top, Z.t2Front - 0.3], [S0, T2.x1 - 0.3, Z.t2Top, Z.t2Front - 0.3]]) {
+  const Q = PLATEAU;
+  for (const [x0, x1, z0, z1] of [[Q.x0, Q.x1, H.z1, Q.z1], [Q.x0, H.x0, Q.z0, H.z1], [H.x1, Q.x1, Q.z0, H.z1]]) {
     const tp = texPlane(tiles, x1 - x0, z1 - z0, 0, 0, 1.6);
     tp.rotation.x = -P / 2;
     tp.position.set((x0 + x1) / 2, y0 + 0.006, (z0 + z1) / 2);
     g.add(tp);
   }
-  const wallH = 0.55;
-  const lowWall = (x0, x1, z0, z1) => {
-    g.add(at(box(x1 - x0, wallH, z1 - z0, C.lime), (x0 + x1) / 2, y0 + wallH / 2, (z0 + z1) / 2));
-    g.add(at(rbox(x1 - x0 + 0.06, 0.08, z1 - z0 + 0.06, C.stoneEdge, 0.03), (x0 + x1) / 2, y0 + wallH + 0.02, (z0 + z1) / 2));
-    colliders.push({ type: 'box', x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2, hd: (z1 - z0) / 2, h: y0 + wallH + 0.04 });
-  };
-  const S = STAIR.hw;
-  lowWall(T2.x0, -S - 0.3, Z.t2Front - 0.3, Z.t2Front);
-  lowWall(S + 0.3, T2.x1, Z.t2Front - 0.3, Z.t2Front);
-  lowWall(T2.x0, T2.x0 + 0.3, Z.back + 0.3, Z.t2Front - 0.3);
-  lowWall(T2.x1 - 0.3, T2.x1, Z.back + 0.3, Z.t2Front - 0.3);
-  // Gate pillars and the arch over the top of the steps
+  const leafM = mat('#4f9a55');
+  const leafM2 = mat('#6fb85f');
+  const jas = mat(C.jasmine, { rough: 0.5 });
+  // Gate pillars and a jasmine arch over the top of the path
+  const gz = Q.z1 + 0.12;
+  const S = GATE.x1;
   for (const s of [1, -1]) {
-    g.add(at(rbox(0.5, 2.3, 0.5, C.lime, 0.05), s * (S + 0.2), y0 + 1.15, Z.t2Top - 0.1));
-    g.add(at(rbox(0.6, 0.12, 0.6, C.stoneEdge, 0.04), s * (S + 0.2), y0 + 2.32, Z.t2Top - 0.1));
-    colliders.push({ type: 'box', x: s * (S + 0.2), z: Z.t2Top - 0.1, hw: 0.25, hd: 0.25 });
+    g.add(at(rbox(0.46, 3.0, 0.46, C.lime, 0.05), s * (S + 0.24), y0 + 0.8, gz));
+    g.add(at(rbox(0.56, 0.12, 0.56, C.stoneEdge, 0.04), s * (S + 0.24), y0 + 2.36, gz));
+    // A lantern on each pillar
+    const l = lantern(out.glass, mat(C.brass, { rough: 0.4, metal: 0.4 }));
+    l.scale.setScalar(0.8);
+    l.position.set(s * (S + 0.24), y0 + 2.42, gz);
+    g.add(l);
+    out.halos.push(new THREE.Vector3(s * (S + 0.24), y0 + 2.62, gz));
   }
-  const arch = mesh(new THREE.TorusGeometry(S + 0.2, 0.13, 8, 24, P), mat(C.lime));
-  g.add(at(arch, 0, y0 + 2.3, Z.t2Top - 0.1));
+  const arch = mesh(new THREE.TorusGeometry(S + 0.24, 0.13, 8, 24, P), mat(C.lime));
+  g.add(at(arch, 0, y0 + 2.3, gz));
   for (let i = 0; i < 14; i++) {
     const a = (i / 13) * P;
-    g.add(at(sph(0.14, i % 2 ? leafM : leafM2, 7, 4), Math.cos(a) * (S + 0.2), y0 + 2.3 + Math.sin(a) * (S + 0.2), Z.t2Top - 0.02));
-    g.add(at(sph(0.035, jas, 6, 4), Math.cos(a + 0.1) * (S + 0.26), y0 + 2.34 + Math.sin(a + 0.1) * (S + 0.26), Z.t2Top + 0.1));
+    g.add(at(sph(0.14, i % 2 ? leafM : leafM2, 7, 4), Math.cos(a) * (S + 0.24), y0 + 2.3 + Math.sin(a) * (S + 0.24), gz + 0.08));
+    g.add(at(sph(0.035, jas, 6, 4), Math.cos(a + 0.1) * (S + 0.3), y0 + 2.34 + Math.sin(a + 0.1) * (S + 0.3), gz + 0.2));
   }
 
   // The lemon tree in a round stone planter
@@ -319,7 +319,7 @@ export function buildHouse(ctx, out) {
     sl.rotation.y = 0.2 - s * 0.35;
     g.add(sl);
   }
-  for (const [px, pz, big] of [[-8.6, -2.0, 1], [8.6, -2.0, 1], [-7.4, -7.1, 0], [7.4, -7.1, 0], [-3.4, -7.15, 0]]) {
+  for (const [px, pz, big] of [[-2.2, -0.3, 1], [2.2, -0.3, 1], [-6.85, -6.45, 0], [6.85, -6.45, 0], [-3.4, -6.45, 0]]) {
     const pot = new THREE.Group();
     const k = big ? 1.25 : 1;
     pot.add(at(cyl(0.24 * k, 0.18 * k, 0.4 * k, C.terra, 14), 0, 0.2 * k, 0));
@@ -332,8 +332,8 @@ export function buildHouse(ctx, out) {
   }
   // A big clay water jar in the corner
   const jar = mesh(new THREE.LatheGeometry([[0, 0], [0.18, 0.02], [0.32, 0.25], [0.3, 0.55], [0.14, 0.75], [0.12, 0.85], [0.15, 0.88], [0, 0.88]].map(([a, b]) => new THREE.Vector2(a, b)), 16), mat('#c8743f'));
-  g.add(at(jar, -8.4, y0, -6.2));
-  colliders.push({ type: 'circle', x: -8.4, z: -6.2, r: 0.34 });
+  g.add(at(jar, -6.95, y0, -5.55));
+  colliders.push({ type: 'circle', x: -6.95, z: -5.55, r: 0.34 });
 
   // ---------------------------------------------------------------- the roof
   const ry = y0 + H.h + 0.12;
@@ -343,7 +343,7 @@ export function buildHouse(ctx, out) {
   tank.add(at(cyl(0.58, 0.58, 0.06, '#d8d0c0', 20), 0, 1.32, 0));
   tank.add(at(cyl(0.15, 0.15, 0.1, '#d8d0c0', 10), 0, 1.38, 0));
   for (const [sx, sz] of [[0.35, 0.35], [-0.35, 0.35], [0.35, -0.35], [-0.35, -0.35]]) tank.add(at(box(0.06, 0.2, 0.06, '#8a8a8a'), sx, 0.1, sz));
-  tank.position.set(-4.4, ry, -11.6);
+  tank.position.set(-4.0, ry, -11.1);
   g.add(tank);
   const ooo = panel(0.9, 0.34, 256, 96, (c, cw, ch) => {
     c.fillStyle = '#f4f0e8';
@@ -369,7 +369,7 @@ export function buildHouse(ctx, out) {
   const ooGeo = new THREE.CylinderGeometry(0.556, 0.556, 0.34, 20, 1, true, -0.85, 1.7);
   ooo.geometry.dispose();
   ooo.geometry = ooGeo;
-  ooo.position.set(-4.4, ry + 0.72, -11.6);
+  ooo.position.set(-4.0, ry + 0.72, -11.1);
   g.add(ooo);
   // Solar water heater
   const sol = new THREE.Group();
@@ -377,7 +377,7 @@ export function buildHouse(ctx, out) {
   for (let i = 0; i < 6; i++) sol.add(at(box(0.02, 0.07, 0.98, '#8fb3d9'), -0.62 + i * 0.25, 0.56, 0, -0.6, 0, 0));
   sol.add(at(cyl(0.22, 0.22, 1.6, '#e8e4dc', 14), 0, 0.92, -0.42, 0, 0, P / 2));
   for (const s of [1, -1]) sol.add(at(box(0.05, 0.8, 0.05, '#8a8a8a'), s * 0.65, 0.4, -0.35));
-  sol.position.set(1.4, ry, -11.4);
+  sol.position.set(1.4, ry, -10.9);
   g.add(sol);
   // Satellite dish
   const dish = new THREE.Group();
@@ -387,17 +387,17 @@ export function buildHouse(ctx, out) {
   dish.add(at(bowl, 0, 0.75, 0.05));
   dish.add(at(cyl(0.012, 0.012, 0.42, '#8a8a8a', 4), 0, 0.85, 0.28, 1.0, 0, 0));
   dish.add(at(sph(0.04, '#3b2b3f', 6, 4), 0, 0.98, 0.45));
-  dish.position.set(5.3, ry, -8.4);
+  dish.position.set(4.9, ry, -7.7);
   dish.rotation.y = -0.4;
   g.add(dish);
   // Clothesline with Sultan's tiny shirts
-  for (const s of [1, -1]) g.add(at(cyl(0.025, 0.025, 1.3, '#8a8a8a', 6), -1.8 + s * 1.6, ry + 0.65, -9.0));
-  g.add(at(cyl(0.008, 0.008, 3.2, '#e8e8e8', 4), -1.8, ry + 1.25, -9.0, 0, 0, P / 2));
+  for (const s of [1, -1]) g.add(at(cyl(0.025, 0.025, 1.3, '#8a8a8a', 6), -1.8 + s * 1.6, ry + 0.65, -8.4));
+  g.add(at(cyl(0.008, 0.008, 3.2, '#e8e8e8', 4), -1.8, ry + 1.25, -8.4, 0, 0, P / 2));
   const cloth = ['#ffd166', '#7fd3ff', '#ef5b6f', '#ffffff', '#3fbf7f'];
   for (let i = 0; i < 5; i++) {
     const cw = i % 2 ? 0.3 : 0.42;
-    g.add(at(box(cw, i % 2 ? 0.3 : 0.4, 0.02, cloth[i]), -3.0 + i * 0.6, ry + 1.05 - (i % 2 ? 0 : 0.05), -9.0));
-    g.add(at(box(0.03, 0.06, 0.04, '#c99a6b'), -3.0 + i * 0.6, ry + 1.25, -9.0));
+    g.add(at(box(cw, i % 2 ? 0.3 : 0.4, 0.02, cloth[i]), -3.0 + i * 0.6, ry + 1.05 - (i % 2 ? 0 : 0.05), -8.4));
+    g.add(at(box(0.03, 0.06, 0.04, '#c99a6b'), -3.0 + i * 0.6, ry + 1.25, -8.4));
   }
   // Sultan's toy car and ball, left on the roof (an easter egg)
   const car = new THREE.Group();
@@ -405,14 +405,14 @@ export function buildHouse(ctx, out) {
   car.add(at(rbox(0.18, 0.1, 0.17, '#e5484d', 0.04), -0.03, 0.2, 0));
   car.add(at(box(0.12, 0.06, 0.172, '#bfe3ee'), -0.03, 0.2, 0));
   for (const [wx, wz] of [[0.12, 0.1], [-0.12, 0.1], [0.12, -0.1], [-0.12, -0.1]]) car.add(at(cyl(0.05, 0.05, 0.04, '#3b2b3f', 10), wx, 0.05, wz, P / 2, 0, 0));
-  car.position.set(4.9, ry, -7.75);
+  car.position.set(4.3, ry, -7.3);
   car.rotation.y = 0.6;
   g.add(car);
   const ball = sph(0.13, '#ffd166', 12, 8);
-  g.add(at(ball, 5.6, ry + 0.13, -7.9));
-  g.add(at(tor(0.13, 0.015, '#3f7bf0', 4, 16), 5.6, ry + 0.13, -7.9, 0.4, 0, 0));
+  g.add(at(ball, 5.1, ry + 0.13, -7.45));
+  g.add(at(tor(0.13, 0.015, '#3f7bf0', 4, 16), 5.1, ry + 0.13, -7.45, 0.4, 0, 0));
   // A couple of plastic chairs where Odeh drinks his tea at sunset
-  for (const [cx2, cz2, cr] of [[2.6, -8.3, 0.3], [3.4, -8.5, -0.4]]) {
+  for (const [cx2, cz2, cr] of [[2.4, -7.9, 0.3], [3.2, -8.1, -0.4]]) {
     const ch = new THREE.Group();
     ch.add(at(rbox(0.42, 0.06, 0.4, '#ffffff', 0.03), 0, 0.42, 0));
     ch.add(at(rbox(0.42, 0.42, 0.06, '#ffffff', 0.03), 0, 0.66, -0.2));

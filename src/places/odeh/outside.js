@@ -1,21 +1,21 @@
 // Life on Odeh's hill: Odeh pottering in his garden and sitting by the fire, Hanan running out to
 // hug Roji, Basem walking up with a box of sweets and playing penalties with Homama, the family photo
-// in the courtyard, the camel, the goat, the well, the bench, and everyone waving goodbye at night.
+// in the courtyard, the camel, the goat, the well, the benches, and everyone waving goodbye at night.
 import { THREE, P, at, sph, cyl, box, rbox, tor, mat, mesh, Talk, SOUNDS, pick, clamp, easeOutCubic, canvasTexture, FONT, bakePart } from './kit.js';
 import { makePerson, Walker, actorSpeaker } from './family.js';
-import { L1, L2, SPOT, UP, DOWN, DOOR, LANDING, HOUSE, Z, levelAt } from './layout.js';
+import { TOP, TENT_Y, GARDEN_Y, HALF_Y, PLATEAU, SPOT, UP, DOWN, DOOR, GARDEN_TO_FIRE, FIRE_TO_GARDEN, levelAt } from './layout.js';
 import { L, fill } from './lines.js';
 import { wateringCan } from './hill.js';
 import { drawFamilyPhoto, flash } from './photos.js';
 
-const GARDEN_SPOT = { x: -6.1, z: 0.25, yaw: 0.5 };
-const FIRE_SEAT = { x: -9.35, z: 13.1, y: 0.12 };
+const GARDEN_SPOT = { x: 7.7, z: 3.15, yaw: P / 2 };
+const FIRE_SEAT = { x: -10.35, z: 9.55, y: TENT_Y + 0.12 };
 const FIRE_KIDS = [
-  { x: -8.15, z: 11.95, y: 0.12, yaw: 0.35 },
-  { x: -7.15, z: 11.95, y: 0.12, yaw: -0.15 },
+  { x: -9.65, z: 8.55, y: TENT_Y + 0.12, yaw: 0.2 },
+  { x: -8.5, z: 8.55, y: TENT_Y + 0.12, yaw: -0.2 },
 ];
-const TO_FIRE = [{ x: -1.2, z: 3.6 }, { x: 0, z: 4.4 }, { x: 0, z: 7.4 }, { x: -4.4, z: 14.3 }, { x: -9.1, z: 14.3 }, { x: -9.35, z: 13.3 }];
-const TO_GARDEN = [{ x: -9.1, z: 14.3 }, { x: -4.4, z: 14.3 }, { x: 0, z: 7.4 }, { x: 0, z: 4.4 }, { x: -1.2, z: 3.6 }, { x: -4.2, z: 0.25 }, { x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }];
+const TO_FIRE = [...GARDEN_TO_FIRE, { x: FIRE_SEAT.x, z: FIRE_SEAT.z + 0.1 }];
+const TO_GARDEN = [...FIRE_TO_GARDEN, { x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }];
 const DOOR_OUT = { x: DOOR.x, z: DOOR.z + 0.45 };
 
 export function setupOutside(ctx, F, H) {
@@ -42,7 +42,7 @@ export function setupOutside(ctx, F, H) {
   };
   const kidPos = (a) => api.localPos(a);
   const yawTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
-  const onPlateau = (a) => a.y > L2 - 0.15;
+  const onPlateau = (a) => a.y > TOP - 0.15;
 
   // Starting places
   odeh.place(GARDEN_SPOT.x, GARDEN_SPOT.z, GARDEN_SPOT.yaw);
@@ -173,18 +173,18 @@ export function setupOutside(ctx, F, H) {
         { who: 'roji', x: rojiAt.x, z: rojiAt.z, y: roji.y, yaw: yawTo(rojiAt, hanan.pos), pose: 'stand' },
         { who: 'homama', x: homAt.x, z: homAt.z, y: homama.y, yaw: yawTo(homAt, hanan.pos), pose: 'stand' },
       ],
-      focus: { x: (rojiAt.x + hanan.pos.x) / 2, z: (rojiAt.z + hanan.pos.z) / 2, y: L2 + 1.0, zoom: 0.52 },
+      focus: { x: (rojiAt.x + hanan.pos.x) / 2, z: (rojiAt.z + hanan.pos.z) / 2, y: TOP + 1.0, zoom: 0.52 },
       onEnd: () => (ended = true),
     });
     hanan.face({ x: rojiAt.x, z: rojiAt.z });
     await F.wait(0.3);
     hanan.emote('hug');
     roji.kid.emote('hug');
-    api.fx.heartsAt(api.world((rojiAt.x + hanan.pos.x) / 2, (rojiAt.z + hanan.pos.z) / 2, L2 + 1.4), 6);
+    api.fx.heartsAt(api.world((rojiAt.x + hanan.pos.x) / 2, (rojiAt.z + hanan.pos.z) / 2, TOP + 1.4), 6);
     await F.wait(1.6);
     if (live() && !ended) say('hanan', 'hananBless', 2800);
     // Sultan runs a happy circle round Homama
-    if (live()) runCircle(sultan, homAt, 0.95, 2.4);
+    if (live()) runCircle(sultan, { x: clamp(homAt.x, PLATEAU.x0 + 1.3, PLATEAU.x1 - 1.3), z: clamp(homAt.z, -5.6, PLATEAU.z1 - 1.25) }, 0.95, 2.4);
     await F.wait(2.4);
     if (live() && !ended) {
       await hanan.go([{ x: rojiAt.x + side * 0.4, z: rojiAt.z + 0.75 }, { x: homAt.x - side * 0.7, z: homAt.z + 0.62 }, { x: homAt.x - side * 0.64, z: homAt.z }]);
@@ -259,7 +259,7 @@ export function setupOutside(ctx, F, H) {
     await F.wait(6);
     if (live() && !F.isNight) {
       fromDoor(basem);
-      await basem.go(DOWN.slice(1, 5).concat([{ x: SPOT.goal.x - 1.2, z: SPOT.goal.z + 1.6 }]));
+      await basem.go(DOWN.slice(1, 9).concat([{ x: SPOT.goal.x - 1.2, z: SPOT.goal.z + 1.6 }]));
       brain.basemOut = true;
       say('basem', 'basemFootball', 3000);
     }
@@ -329,15 +329,17 @@ export function setupOutside(ctx, F, H) {
     const pid = me();
     const seats = FIRE_KIDS.map((s, i) => ({ who: i === 0 ? 'roji' : 'homama', ...s, pose: 'sit', hands: 'hold' }));
     const glasses = [teaGlass(), teaGlass()];
-    await stage('tea', { label: 'Get up', seats, focus: { x: -8.0, z: 12.7, y: 0.7, zoom: 0.5 }, night: night ? undefined : 0.1 }, async (c) => {
+    await stage('tea', { label: 'Get up', seats, focus: { x: -9.1, z: 9.1, y: TENT_Y + 0.7, zoom: 0.5 }, night: night ? undefined : 0.1 }, async (c) => {
       api.roji.kid.arms[1].add(at(glasses[0], 0, -0.33, 0.06));
       api.homama.kid.arms[1].add(at(glasses[1], 0, -0.33, 0.06));
       c.cleanup(() => glasses.forEach((g2) => g2.removeFromParent()));
       if (withOdeh) {
         c.cleanup(() => (brain.odeh = 'fire'));
         if (Math.hypot(odeh.pos.x - FIRE_SEAT.x, odeh.pos.z - FIRE_SEAT.z) > 0.5) {
-          if (odeh.y > 0.4) say(pid === 'roji' ? 'homama' : 'roji', pid === 'roji' ? 'Here comes your Baba!' : 'Baba is coming!', 2400);
-          await odeh.go(TO_FIRE.slice(Math.hypot(odeh.pos.x - TO_FIRE[3].x, odeh.pos.z - TO_FIRE[3].z) < 6 ? 3 : 0), { speed: 2.5, run: true });
+          if (Math.hypot(odeh.pos.x - FIRE_SEAT.x, odeh.pos.z - FIRE_SEAT.z) > 4) say(pid === 'roji' ? 'homama' : 'roji', pid === 'roji' ? 'Here comes your Baba!' : 'Baba is coming!', 2400);
+          // From wherever he is on the way: the garden, leg B of the path, or the tent terrace
+          const from = odeh.pos.x < -6 ? 2 : odeh.pos.x < 6.3 && Math.abs(odeh.pos.z - 6) < 1.2 ? 1 : 0;
+          await odeh.go(TO_FIRE.slice(from), { speed: 2.5, run: true });
         }
         if (!c.live()) return;
         odeh.sit({ ...FIRE_SEAT, yaw: yawTo(FIRE_SEAT, SPOT.fire) + 0.4, hands: 'hold' });
@@ -359,7 +361,7 @@ export function setupOutside(ctx, F, H) {
         say('roji', pick('fireNight', L.fireNight), 2800);
         if (!(await c.wait(3))) return;
         say('homama', pick('fireNightLove', L.fireNightLove), 3000);
-        api.fx.heartsAt(api.world(-7.65, 11.95, 1.2), 4);
+        api.fx.heartsAt(api.world(-9.05, 8.55, TENT_Y + 1.2), 4);
         if (!(await c.wait(30))) return;
       }
     });
@@ -375,10 +377,10 @@ export function setupOutside(ctx, F, H) {
       {
         label: 'Done',
         seats: [
-          { who: 'player', x: -8.4, z: 0.32, y: L1, yaw: 0, pose: 'stand', hands: 'hold' },
-          { who: 'partner', x: -4.45, z: 0.3, y: L1, yaw: 0.2, pose: 'stand', hands: 'stir' },
+          { who: 'player', x: 7.6, z: 5.6, y: GARDEN_Y, yaw: P / 2, pose: 'stand', hands: 'hold' },
+          { who: 'partner', x: 7.5, z: 4.4, y: GARDEN_Y, yaw: P / 2 - 0.2, pose: 'stand', hands: 'stir' },
         ],
-        focus: { x: -6.6, z: 1.5, y: L1 + 0.6, zoom: 0.55 },
+        focus: { x: 8.5, z: 5.0, y: GARDEN_Y + 0.6, zoom: 0.55 },
       },
       async (c) => {
         st.can.visible = false;
@@ -390,7 +392,7 @@ export function setupOutside(ctx, F, H) {
           watering.on = false;
         });
         if (!odeh.hidden && !F.isNight) {
-          odeh.go([{ x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }], { speed: 1.8 }).then(() => odeh.face({ x: -8.4, z: 0.4 }));
+          odeh.go([{ x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }], { speed: 1.8 }).then(() => odeh.face({ x: 7.6, z: 5.6 }));
         }
         watering.on = true;
         watering.drops = drops;
@@ -406,7 +408,7 @@ export function setupOutside(ctx, F, H) {
         const grown = Math.min(5, api.load('garden', 0) + 1);
         api.save('garden', grown);
         growGarden(grown);
-        api.fx.burst(api.world(-6.4, 1.6, L1 + 0.6), ['#7fd38a', '#ffd166', '#ffffff'], 30);
+        api.fx.burst(api.world(9.25, 5.0, GARDEN_Y + 0.6), ['#7fd38a', '#ffd166', '#ffffff'], 30);
         api.sound.ui?.('good');
         if (!odeh.hidden) say('odeh', 'Look how happy they are. Shukran, habibi.', 3000);
         await c.wait(2.6);
@@ -428,7 +430,10 @@ export function setupOutside(ctx, F, H) {
       spout.set(0.31, 0.29, 0).applyMatrix4(can.matrixWorld);
       d.position.copy(api.local(spout));
       d.position.y = spout.y;
-      d.userData.v = new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.4, 0.8 + Math.random() * 0.4);
+      const fy = api.player.yaw;
+      const fw = 0.8 + Math.random() * 0.4;
+      const sd = (Math.random() - 0.5) * 0.4;
+      d.userData.v = new THREE.Vector3(Math.sin(fy) * fw + Math.cos(fy) * sd, 0.4, Math.cos(fy) * fw - Math.sin(fy) * sd);
       g.add(d);
       ds.push(d);
     }
@@ -436,7 +441,7 @@ export function setupOutside(ctx, F, H) {
       const d = ds[i];
       d.userData.v.y -= 9 * dt;
       d.position.addScaledVector(d.userData.v, dt);
-      if (d.position.y < L1 + 0.3) {
+      if (d.position.y < GARDEN_Y + 0.3) {
         d.removeFromParent();
         ds.splice(i, 1);
       }
@@ -573,23 +578,23 @@ export function setupOutside(ctx, F, H) {
     const pid = me();
     const night = F.isNight;
     const list = [odeh, hanan, sultan, ...(F.visit?.basemIn ? [basem] : [])];
-    const lineup = { odeh: { x: -1.25, z: -5.85 }, hanan: { x: 1.2, z: -5.85 }, basem: { x: 2.2, z: -6.05 }, sultan: { x: 0.0, z: -4.95 } };
+    const lineup = { odeh: { x: -1.25, z: -5.15 }, hanan: { x: 1.2, z: -5.15 }, basem: { x: 2.2, z: -5.35 }, sultan: { x: 0.0, z: -4.25 } };
     await stage(
       'photo',
       {
         label: 'Get up',
         seats: [
-          { who: 'roji', x: -0.4, z: -5.65, y: L2, yaw: 0, pose: 'stand' },
-          { who: 'homama', x: 0.4, z: -5.65, y: L2, yaw: 0, pose: 'stand' },
+          { who: 'roji', x: -0.4, z: -4.95, y: TOP, yaw: 0, pose: 'stand' },
+          { who: 'homama', x: 0.4, z: -4.95, y: TOP, yaw: 0, pose: 'stand' },
         ],
-        focus: { x: 0.3, z: -5.3, y: L2 + 1.1, zoom: 0.6 },
+        focus: { x: 0.3, z: -4.6, y: TOP + 1.1, zoom: 0.6 },
       },
       async (c) => {
         c.cleanup(() => {
           for (const w of list) {
             w.script = null;
             if (w !== odeh || night) backInside(w);
-            else w.go([{ x: 0, z: -4.0 }, { x: 0, z: -0.4 }, { x: -1.4, z: 0.4 }, { x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }]);
+            else w.go([{ x: 0, z: -0.6 }, { x: 0, z: 1.75 }, { x: 6.95, z: 1.75 }, { x: 6.95, z: 3.15 }, { x: GARDEN_SPOT.x, z: GARDEN_SPOT.z }]);
           }
         });
         for (const w of list) {
@@ -641,10 +646,10 @@ export function setupOutside(ctx, F, H) {
       {
         label: 'Get up',
         seats: [
-          { who: 'roji', x: SPOT.bench.x - 0.42, z: SPOT.bench.z + 0.08, y: L2 + 0.47, yaw: 0, pose: 'sit' },
-          { who: 'homama', x: SPOT.bench.x + 0.42, z: SPOT.bench.z + 0.08, y: L2 + 0.47, yaw: 0, pose: 'sit' },
+          { who: 'roji', x: SPOT.bench.x - 0.42, z: SPOT.bench.z + 0.08, y: TOP + 0.47, yaw: 0, pose: 'sit' },
+          { who: 'homama', x: SPOT.bench.x + 0.42, z: SPOT.bench.z + 0.08, y: TOP + 0.47, yaw: 0, pose: 'sit' },
         ],
-        focus: { x: SPOT.bench.x, z: SPOT.bench.z + 0.4, y: L2 + 0.9, zoom: 0.5 },
+        focus: { x: SPOT.bench.x, z: SPOT.bench.z + 0.4, y: TOP + 0.9, zoom: 0.5 },
       },
       async (c) => {
         say('roji', 'bench', 2600);
@@ -664,7 +669,7 @@ export function setupOutside(ctx, F, H) {
         flower.rotation.y = P / 2;
         api.roji.kid.head.add(flower);
         api.emote('roji', 'heart');
-        api.fx.heartsAt(api.world(SPOT.bench.x, SPOT.bench.z, L2 + 1.5), 5);
+        api.fx.heartsAt(api.world(SPOT.bench.x, SPOT.bench.z, TOP + 1.5), 5);
         await c.wait(40);
       },
     );
@@ -672,6 +677,35 @@ export function setupOutside(ctx, F, H) {
     if (flower) jasmine.push(flower);
   }
   const jasmine = [];
+
+  // The bench half way up: a breather, the view over the town, and Homama's little sign
+  async function rest() {
+    const pid = me();
+    const B = SPOT.bench2;
+    await stage(
+      'rest',
+      {
+        label: 'Get up',
+        seats: [
+          { who: 'roji', x: B.x - 0.37, z: B.z + 0.08, y: HALF_Y + 0.47, yaw: 0, pose: 'sit' },
+          { who: 'homama', x: B.x + 0.37, z: B.z + 0.08, y: HALF_Y + 0.47, yaw: 0, pose: 'sit' },
+        ],
+        focus: { x: B.x, z: B.z + 0.9, y: HALF_Y + 0.9, zoom: 0.5 },
+      },
+      async (c) => {
+        say('roji', 'restPuff', 2600);
+        if (!(await c.wait(2.8))) return;
+        say('homama', 'restView', 2800);
+        if (!(await c.wait(3.0))) return;
+        say(pid === 'roji' ? 'roji' : 'homama', pid === 'roji' ? 'restSignRoji' : 'restSignHomama', 3000);
+        if (!(await c.wait(3.2))) return;
+        say(pid === 'roji' ? 'homama' : 'roji', pid === 'roji' ? 'restSignReply' : 'restSignSmile', 2800);
+        api.emote('roji', 'heart');
+        api.fx.heartsAt(api.world(B.x, B.z, HALF_Y + 1.5), 4);
+        await c.wait(40);
+      },
+    );
+  }
 
   function patCamel() {
     H.camel.awake(3.4);
@@ -697,25 +731,28 @@ export function setupOutside(ctx, F, H) {
     H.well.depth = 0.55;
     await F.wait(1.6);
     say('player', 'well', 2400);
-    api.fx.burst(api.world(SPOT.well.x, SPOT.well.z, L1 + 1.3), ['#bfe9ff', '#ffffff'], 14);
+    api.fx.burst(api.world(SPOT.well.x, SPOT.well.z, GARDEN_Y + 1.3), ['#bfe9ff', '#ffffff'], 14);
     await F.wait(2.4);
     H.well.water.visible = false;
     live.done();
   }
 
   // ---------------------------------------------------------------- hotspots
-  const at1 = (api_) => Math.abs(api_.player.y - L1) < 0.35;
-  const at2 = (api_) => api_.player.y > L2 - 0.3;
+  const atTent = (api_) => Math.abs(api_.player.y - TENT_Y) < 0.3;
+  const atGarden = (api_) => Math.abs(api_.player.y - GARDEN_Y) < 0.3;
+  const atHalf = (api_) => Math.abs(api_.player.y - HALF_Y) < 0.2;
+  const at2 = (api_) => api_.player.y > TOP - 0.3;
   const at0 = (api_) => api_.player.y < 0.4;
   const free = () => !F.busy || ['well'].includes(F.busy);
   const hotspots = [
-    { x: -7.65, z: 12.6, r: 1.45, label: () => (F.isNight || odeh.hidden ? 'Sit by the fire' : 'Tea with Odeh'), icon: 'o-tea', when: (a) => at0(a) && free(), act: () => teaByTheFire() },
-    { x: -6.6, z: 0.0, r: 1.3, label: 'Water the garden', icon: 'o-drop', when: (a) => at1(a) && free(), act: () => waterGarden() },
-    { x: 7.5, z: 12.7, r: 1.3, label: 'Pat the camel', icon: 'heart', when: (a) => at0(a), act: () => patCamel() },
-    { track: () => ({ x: H.goat.pos.x, z: H.goat.pos.z + 0.55 }), r: 1.1, label: 'Pet the goat', icon: 'heart', when: (a) => at1(a), act: () => petGoat() },
-    { x: SPOT.well.x, z: SPOT.well.z + 1.15, r: 1.0, label: 'Draw water', icon: 'o-drop', when: (a) => at1(a) && free(), act: () => drawWater() },
+    { x: -7.7, z: 9.3, r: 1.4, label: () => (F.isNight || odeh.hidden ? 'Sit by the fire' : 'Tea with Odeh'), icon: 'o-tea', when: (a) => atTent(a) && free(), act: () => teaByTheFire() },
+    { x: 7.35, z: 5.3, r: 1.2, label: 'Water the garden', icon: 'o-drop', when: (a) => atGarden(a) && free(), act: () => waterGarden() },
+    { x: SPOT.camel.x + 2.05, z: SPOT.camel.z + 0.35, r: 1.3, label: 'Pat the camel', icon: 'heart', when: (a) => at0(a), act: () => patCamel() },
+    { track: () => ({ x: H.goat.pos.x, z: H.goat.pos.z + 0.55 }), r: 1.1, label: 'Pet the goat', icon: 'heart', when: (a) => at2(a), act: () => petGoat() },
+    { x: SPOT.well.x - 1.15, z: SPOT.well.z + 0.2, r: 1.0, label: 'Draw water', icon: 'o-drop', when: (a) => atGarden(a) && free(), act: () => drawWater() },
+    { x: SPOT.bench2.x, z: SPOT.bench2.z + 0.95, r: 1.1, label: 'Rest on the bench', icon: 'smile', when: (a) => atHalf(a) && free(), act: () => rest() },
     { track: () => ({ x: basem.pos.x, z: basem.pos.z + 0.75 }), r: 1.3, label: 'Penalties with Basem', icon: 'o-ball', when: (a) => at0(a) && !basem.hidden && brain.basemOut === true && free(), act: () => football() },
-    { x: -2.5, z: -4.5, r: 1.2, label: 'Family photo', icon: 'o-camera', when: (a) => at2(a) && free(), act: () => familyPhoto() },
+    { x: -2.4, z: -3.6, r: 1.2, label: 'Family photo', icon: 'o-camera', when: (a) => at2(a) && free(), act: () => familyPhoto() },
     { x: SPOT.bench.x, z: SPOT.bench.z + 0.95, r: 1.1, label: 'Sit on the bench', icon: 'smile', when: (a) => at2(a) && free(), act: () => bench() },
   ];
 
@@ -750,7 +787,7 @@ export function setupOutside(ctx, F, H) {
         odeh.kid.hands = Math.sin(t * 0.4) > 0.2 ? 'stir' : null;
         const P0 = kidPos(api.player);
         const d = Math.hypot(P0.x - odeh.pos.x, P0.z - odeh.pos.z);
-        if (d < 3.2 && Math.abs(api.player.y - L1) < 0.4) {
+        if (d < 3.2 && Math.abs(api.player.y - GARDEN_Y) < 0.4) {
           odeh.face({ x: P0.x, z: P0.z });
           if (!v.said.has('odehHello')) {
             v.said.add('odehHello');
@@ -763,7 +800,7 @@ export function setupOutside(ctx, F, H) {
     // Hanan runs out the first time Roji and Homama come up to the courtyard
     if (v && !v.hugged && !F.busy && !farewell && !api.activityRunning) {
       const P0 = kidPos(api.player);
-      if (onPlateau(api.player) && P0.z < Z.t2Top + 0.2) arrival();
+      if (onPlateau(api.player) && P0.z < PLATEAU.z1 - 0.3) arrival();
     }
     // Basem arrives during the visit
     if (v && v.basem === 'arrive' && !v.basemIn && v.t > v.basemArriveAt && !F.busy && !farewell && !api.activityRunning) basemArrives();
@@ -822,5 +859,5 @@ export function setupOutside(ctx, F, H) {
     talk.clear();
   }
 
-  return { people, hotspots, update, goodbye, enterHouse, away, talk, brain, debug: { arrival, basemArrives, football, familyPhoto } };
+  return { people, hotspots, update, goodbye, enterHouse, away, talk, brain, debug: { arrival, basemArrives, football, familyPhoto, rest } };
 }

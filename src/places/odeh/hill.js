@@ -1,8 +1,10 @@
-// Odeh's hill: golden sand, soft dunes, stone terraces with steps, date palms, cactus and aloe,
-// Odeh's vegetable garden, a stone well, an olive tree, a Bedouin tent with cushions and a coffee
-// pot by a little fire, a sleeping camel, a goat, lanterns that glow at night, and the sign.
+// Odeh's hill: a big golden sand hill with dunes and rocky outcrops, a stepped stone path that winds
+// up its front (rope posts and lanterns on the way, a resting bench half way), the tent terrace with
+// its fire and cushions, Odeh's garden terrace with the well, date palms and cactus on the slopes, a
+// sleeping camel and a football goal down in the yard, and the sign by the street.
 import { THREE, mat, umat, mesh, box, rbox, cyl, sph, cone, tor, caps, at, sc, panel, canvasTexture, roundRect, FONT, rng, P, C, glowTexture, bakePart } from './kit.js';
-import { L1, L2, STEP, STAIR, STEPS_A, STEPS_B, Z, T1, T2, SPOT } from './layout.js';
+import { TOP, TENT_Y, GARDEN_Y, HALF_Y, WALK, SPOT, NOOK, walkAt } from './layout.js';
+import { heightAt, sandMesh } from './terrain.js';
 
 // ---------------------------------------------------------------- textures
 let stoneTexCache = null;
@@ -86,15 +88,6 @@ export function rugTex(base = '#b83a3a', edge = '#f2d48a', motif = '#2b4a6e') {
       ctx.fillRect(x, h - 10, 4, 10);
     }
   });
-}
-
-// A stone face: a plane with the sandstone texture, tiled by its size
-function stoneFace(stoneMat, w, h, x, y, z, ry = 0) {
-  const g = new THREE.PlaneGeometry(w, h);
-  const uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 2.2), uv.getY(i) * (h / 1.1));
-  const m = mesh(g, stoneMat, { cast: false });
-  return at(m, x, y, z, 0, ry, 0);
 }
 
 // ---------------------------------------------------------------- plants
@@ -261,8 +254,8 @@ function lampPost(g, glass, x, y, z, halos) {
 function tent(g, dynamic, weave, rug) {
   const T = new THREE.Group();
   const { x, z } = SPOT.tent;
-  const W = 5.2;
-  const D = 3.4;
+  const W = 3.6;
+  const D = 2.6;
   // Poles
   for (const [px, pz, ph] of [[-W / 2, -D / 2, 1.9], [0, -D / 2, 2.3], [W / 2, -D / 2, 1.9], [-W / 2, D / 2, 1.55], [0, D / 2, 1.85], [W / 2, D / 2, 1.55]]) {
     T.add(at(cyl(0.05, 0.06, ph, C.woodDark, 8), px, ph / 2, pz));
@@ -289,7 +282,7 @@ function tent(g, dynamic, weave, rug) {
   const side = mesh(new THREE.PlaneGeometry(D * 0.7, 1.7), wmat);
   T.add(at(side, -W / 2 - 0.05, 0.85, -D * 0.15, 0, P / 2, 0));
   // Guy ropes and pegs
-  for (const [px, pz, tx, tz] of [[-W / 2, D / 2, -W / 2 - 0.6, D / 2 + 0.9], [W / 2, D / 2, W / 2 + 0.6, D / 2 + 0.9]]) {
+  for (const [px, pz, tx, tz] of [[-W / 2, D / 2, -W / 2 - 0.15, D / 2 + 0.75], [W / 2, D / 2, W / 2 + 0.15, D / 2 + 0.75]]) {
     const len = Math.hypot(tx - px, tz - pz, 1.55);
     const rope = cyl(0.012, 0.012, len, '#e8d8b8', 4);
     rope.position.set((px + tx) / 2, 0.78, (pz + tz) / 2);
@@ -299,11 +292,11 @@ function tent(g, dynamic, weave, rug) {
     T.add(at(cyl(0.03, 0.02, 0.18, C.woodDark, 5), tx, 0.06, tz));
   }
   // Rug and cushions
-  const rugM = mesh(new THREE.PlaneGeometry(W - 0.4, D - 0.3), new THREE.MeshStandardMaterial({ map: rug, roughness: 0.95 }), { cast: false });
+  const rugM = mesh(new THREE.PlaneGeometry(D - 0.3, W - 0.4), new THREE.MeshStandardMaterial({ map: rug, roughness: 0.95 }), { cast: false });
   T.add(at(rugM, 0, 0.012, 0, -P / 2, 0, P / 2));
   const cushCols = ['#c0392b', '#e7b54a', '#7a2e3a', '#d9774f', '#2b4a6e'];
-  for (let i = 0; i < 5; i++) {
-    const cx = -W / 2 + 0.7 + i * 0.95;
+  for (let i = 0; i < 3; i++) {
+    const cx = -W / 2 + 0.7 + i * 1.0;
     T.add(at(rbox(0.85, 0.18, 0.6, cushCols[i], 0.07), cx, 0.09, -D / 2 + 0.45));
     T.add(at(rbox(0.8, 0.42, 0.18, cushCols[(i + 2) % 5], 0.07), cx, 0.3, -D / 2 + 0.16, -0.12, 0, 0));
   }
@@ -317,7 +310,7 @@ function tent(g, dynamic, weave, rug) {
   for (let i = 0; i < 3; i++) T.add(at(cyl(0.035, 0.025, 0.05, C.cream, 10), 0.36 + i * 0.09, 0.36, 0.0 + (i % 2) * 0.08));
   T.add(at(cyl(0.11, 0.08, 0.05, '#e7d6b8', 12), 0.38, 0.36, 0.26));
   for (let i = 0; i < 6; i++) T.add(at(caps(0.022, 0.03, '#6b3420'), 0.33 + (i % 3) * 0.045, 0.4, 0.23 + Math.floor(i / 3) * 0.05, 0, 0, P / 2));
-  T.position.set(x, 0, z);
+  T.position.set(x, TENT_Y, z);
   g.add(T);
   return { W, D };
 }
@@ -377,11 +370,11 @@ function firePit(g, dynamic) {
   const kettle = mesh(new THREE.LatheGeometry([[0, 0], [0.1, 0.01], [0.12, 0.08], [0.08, 0.16], [0.03, 0.18], [0, 0.19]].map(([a, b]) => new THREE.Vector2(a, b)), 12), mat(C.copper, { rough: 0.35, metal: 0.5 }));
   F.add(at(kettle, 0, 0.62, 0));
   F.add(at(box(0.01, 0.3, 0.01, iron), 0, 0.92, 0));
-  F.position.set(x, 0, z);
+  F.position.set(x, TENT_Y, z);
   g.add(F);
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: '#ffb870', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.5 }));
   halo.scale.set(2.4, 2.4, 1);
-  halo.position.set(x, 0.55, z);
+  halo.position.set(x, TENT_Y + 0.55, z);
   g.add(halo);
   dynamic.push(halo);
   return {
@@ -466,7 +459,7 @@ function makeCamel(g, dynamic) {
   body.add(neck);
   holder.add(body);
   holder.position.set(SPOT.camel.x, 0, SPOT.camel.z);
-  holder.rotation.y = P * 0.92;
+  holder.rotation.y = -0.15;
   g.add(holder);
   dynamic.push(holder);
   bakePart(body, [neck]);
@@ -525,6 +518,7 @@ function makeCamel(g, dynamic) {
   };
 }
 
+const UPV = new THREE.Vector3(0, 1, 0);
 function makeGoat(g, dynamic) {
   const holder = new THREE.Group();
   const body = new THREE.Group();
@@ -563,11 +557,12 @@ function makeGoat(g, dynamic) {
   // Stake and rope
   const sx = SPOT.goatStake.x;
   const sz = SPOT.goatStake.z;
-  g.add(at(cyl(0.03, 0.03, 0.4, C.woodDark, 6), sx, L1 + 0.2, sz));
+  g.add(at(cyl(0.03, 0.03, 0.4, C.woodDark, 6), sx, TOP + 0.2, sz));
   const rope = cyl(0.008, 0.008, 1, '#e8d8b8', 4);
   g.add(rope);
   dynamic.push(rope);
   const st = { a: 0, r: 1.0, t: 0, nibble: 0, bleat: 0, x: sx + 1, z: sz, yaw: 0, speed: 0, react: 0 };
+  const ropeDir = new THREE.Vector3();
   return {
     holder,
     get pos() {
@@ -588,7 +583,7 @@ function makeGoat(g, dynamic) {
       st.x = sx + Math.cos(st.a) * st.r;
       st.z = sz + Math.sin(st.a) * st.r;
       st.yaw = -st.a + (walk ? P : P / 2);
-      holder.position.set(st.x, L1, st.z);
+      holder.position.set(st.x, TOP, st.z);
       holder.rotation.y = st.yaw;
       const ph = st.t * 7;
       legs.forEach((l, i) => (l.rotation.z = walk ? Math.sin(ph + (i % 2 ? P : 0) + (i > 1 ? P / 2 : 0)) * 0.4 : 0));
@@ -601,25 +596,27 @@ function makeGoat(g, dynamic) {
       const mx = (sx + nx) / 2;
       const mz = (sz + nz) / 2;
       const len = Math.hypot(nx - sx, nz - sz, 0.3);
-      rope.position.set(mx, L1 + 0.42, mz);
+      rope.position.set(mx, TOP + 0.42, mz);
       rope.scale.set(1, len, 1);
-      rope.lookAt(nx, L1 + 0.57, nz);
-      rope.rotateX(P / 2);
+      ropeDir.set(nx - sx, 0.37, nz - sz).normalize();
+      rope.quaternion.setFromUnitVectors(UPV, ropeDir);
     },
   };
 }
 
 // ---------------------------------------------------------------- the garden
+export const GARDEN_BEDS = [
+  { x: 9.25, z: 6.3, w: 2.3, d: 0.8, kind: 'tomato' },
+  { x: 9.25, z: 5.05, w: 2.3, d: 0.8, kind: 'mint' },
+  { x: 9.25, z: 3.8, w: 2.3, d: 0.8, kind: 'pepper' },
+];
+export const SCARECROW = { x: 10.45, z: 2.55 };
 function garden(g, dynamic) {
   const out = { plants: [] };
-  const beds = [
-    { x: -7.6, z: 3.2, w: 3.0, d: 1.0, kind: 'tomato' },
-    { x: -7.6, z: 1.4, w: 3.0, d: 1.0, kind: 'mint' },
-    { x: -3.9, z: 2.3, w: 1.6, d: 2.6, kind: 'pepper' },
-  ];
-  for (const b of beds) {
-    g.add(at(box(b.w, 0.26, b.d, C.woodDark), b.x, L1 + 0.13, b.z));
-    g.add(at(box(b.w - 0.16, 0.05, b.d - 0.16, '#6b4a30'), b.x, L1 + 0.265, b.z));
+  const Y = GARDEN_Y;
+  for (const b of GARDEN_BEDS) {
+    g.add(at(box(b.w, 0.26, b.d, C.woodDark), b.x, Y + 0.13, b.z));
+    g.add(at(box(b.w - 0.16, 0.05, b.d - 0.16, '#6b4a30'), b.x, Y + 0.265, b.z));
     const r = rng(Math.round(b.x * 10 + b.z));
     const cols = Math.max(1, Math.round(b.w / 0.55));
     const rows = Math.max(1, Math.round(b.d / 0.55));
@@ -644,13 +641,13 @@ function garden(g, dynamic) {
         bed.add(p);
       }
     }
-    bed.position.set(b.x, L1 + 0.27, b.z);
+    bed.position.set(b.x, Y + 0.27, b.z);
     g.add(bed);
     dynamic.push(bed);
     bakePart(bed);
     out.plants.push(bed);
   }
-  // Sunflowers along the back
+  // Sunflowers along the hill side of the garden
   for (let i = 0; i < 4; i++) {
     const f = new THREE.Group();
     f.add(at(cyl(0.025, 0.03, 1.3, '#5c9c4f', 6), 0, 0.65, 0));
@@ -664,7 +661,7 @@ function garden(g, dynamic) {
     head.position.set(0, 1.34, 0.04);
     head.rotation.x = -0.25;
     f.add(head);
-    f.position.set(-9.4 + i * 0.6, L1, -0.4 + (i % 2) * 0.2);
+    f.position.set(10.5 - (i % 2) * 0.12, Y, 3.55 + i * 0.95);
     g.add(f);
   }
   // A little scarecrow in Odeh's old cap
@@ -677,12 +674,12 @@ function garden(g, dynamic) {
   crow.add(at(cyl(0.13, 0.15, 0.12, '#c0392b', 12), 0, 1.42, 0));
   for (const s of [1, -1]) crow.add(at(sph(0.022, '#3b2b3f', 6, 4), s * 0.06, 1.27, 0.14));
   crow.add(at(tor(0.05, 0.012, '#3b2b3f', 4, 10, P), 0, 1.2, 0.145, 0, 0, P));
-  crow.position.set(-2.8, L1 + 0.27, 0.9);
-  crow.rotation.y = -0.4;
+  crow.position.set(SCARECROW.x, Y, SCARECROW.z);
+  crow.rotation.y = -0.5;
   g.add(crow);
   // Watering can
   out.can = wateringCan();
-  out.can.position.set(-5.7, L1, 0.35);
+  out.can.position.set(SPOT.can.x, Y, SPOT.can.z);
   out.can.rotation.y = 0.6;
   g.add(out.can);
   dynamic.push(out.can);
@@ -732,7 +729,7 @@ function well(g, dynamic, stoneMat) {
   const rope = cyl(0.008, 0.008, 1, '#e8d8b8', 4);
   W.add(rope);
   W.add(bucket);
-  W.position.set(x, L1, z);
+  W.position.set(x, GARDEN_Y, z);
   g.add(W);
   dynamic.push(bucket, rope);
   const st = { depth: 0.55, want: 0.55 };
@@ -753,108 +750,295 @@ function well(g, dynamic, stoneMat) {
   };
 }
 
+// ---------------------------------------------------------------- the path, its walls and rope posts
+const SIDES = [
+  { id: 'N', axis: 'x', line: (r) => r.z0, a0: (r) => r.x0, a1: (r) => r.x1, n: [0, -1] },
+  { id: 'S', axis: 'x', line: (r) => r.z1, a0: (r) => r.x0, a1: (r) => r.x1, n: [0, 1] },
+  { id: 'W', axis: 'z', line: (r) => r.x0, a0: (r) => r.z0, a1: (r) => r.z1, n: [-1, 0] },
+  { id: 'E', axis: 'z', line: (r) => r.x1, a0: (r) => r.z0, a1: (r) => r.z1, n: [1, 0] },
+];
+const onLine = (S, line, a, off = 0) => (S.axis === 'x' ? { x: a, z: line + S.n[1] * off } : { x: line + S.n[0] * off, z: a });
+
+// Every edge of every walkable piece, cut in 0.25 m chunks: what lies beyond it decides what it gets
+// (a retaining wall where the sand rises, rope posts where it falls away, a parapet round the courtyard)
+function edgeRuns() {
+  const lines = new Map();
+  for (const r of WALK) {
+    for (const S of SIDES) {
+      const line = S.line(r);
+      const key = `${S.id}:${line.toFixed(3)}`;
+      if (!lines.has(key)) lines.set(key, { S, line, chunks: [] });
+      const L = lines.get(key);
+      for (let a = S.a0(r) + 0.125; a < S.a1(r) - 0.01; a += 0.25) {
+        const p = onLine(S, line, a, 0.125);
+        const nb = walkAt(p.x, p.z);
+        if (nb) {
+          if (nb.h < r.h - 0.01) L.chunks.push({ a, r, nb, type: 'riser' });
+          continue;
+        }
+        const q = onLine(S, line, a, 0.42);
+        const out = heightAt(q.x, q.z);
+        const type = r.kind === 'court' ? 'parapet' : r.h < 0.1 && out < 0.08 ? 'open' : out > r.h - 0.06 ? 'wall' : 'posts';
+        L.chunks.push({ a, r, out, type });
+      }
+    }
+  }
+  const runs = [];
+  for (const L of lines.values()) {
+    L.chunks.sort((p, q) => p.a - q.a);
+    let cur = null;
+    for (const c of L.chunks) {
+      const same = cur && cur.type === c.type && c.a - cur.chunks[cur.chunks.length - 1].a < 0.4 && (c.type !== 'riser' || cur.chunks[0].r === c.r);
+      if (!same) {
+        cur = { S: L.S, line: L.line, type: c.type, chunks: [] };
+        runs.push(cur);
+      }
+      cur.chunks.push(c);
+    }
+  }
+  return runs;
+}
+
+function buildPath(g, out, glass, brass) {
+  const r = rng(77);
+  const stones = ['#eadbbf', '#e2d0b0', '#efe2ca'];
+  // Treads: stone slabs, each 0.09 m above the last, with a few flagstones on top
+  WALK.forEach((w, i) => {
+    if (w.kind !== 'pave' && w.kind !== 'apron') return;
+    const sx = w.x1 - w.x0;
+    const sz = w.z1 - w.z0;
+    const top = w.kind === 'apron' ? 0.014 : w.h;
+    const depth = w.kind === 'apron' ? 0.2 : 0.45;
+    g.add(at(box(sx, depth, sz, stones[i % 3]), (w.x0 + w.x1) / 2, top - depth / 2, (w.z0 + w.z1) / 2));
+    const n = Math.max(1, Math.round((sx * sz) / 1.1));
+    for (let k = 0; k < n; k++) {
+      const fw = 0.38 + r() * 0.3;
+      const fd = 0.34 + r() * 0.3;
+      const fx = w.x0 + 0.1 + fw / 2 + r() * Math.max(0, sx - fw - 0.2);
+      const fz = w.z0 + 0.1 + fd / 2 + r() * Math.max(0, sz - fd - 0.2);
+      g.add(at(box(fw, 0.016, fd, r() < 0.5 ? '#f6ecd9' : '#d8c6a6'), fx, top + 0.006, fz, 0, (r() - 0.5) * 0.3, 0));
+    }
+  });
+  for (const run of edgeRuns()) {
+    const { S, line, type, chunks } = run;
+    const [nx, nz] = S.n;
+    const len = chunks[chunks.length - 1].a - chunks[0].a + 0.25;
+    const mid = (chunks[0].a + chunks[chunks.length - 1].a) / 2;
+    const rect = chunks[0].r;
+    const piece = (alen, thick, y0, y1, off, a, color) => {
+      const p = onLine(S, line, a, off);
+      const bx = S.axis === 'x' ? alen : thick;
+      const bz = S.axis === 'x' ? thick : alen;
+      g.add(at(box(bx, y1 - y0, bz, color), p.x, (y0 + y1) / 2, p.z));
+    };
+    // Stone edging round the sand terraces
+    if (rect.kind === 'sand' && type !== 'riser') piece(len, 0.18, rect.h - 0.35, rect.h + 0.025, -0.09, mid, C.stoneEdge);
+    if (type === 'riser') {
+      const low = chunks[0].nb.h;
+      if (rect.kind === 'pave') piece(len, 0.12, rect.h - 0.02, rect.h + 0.012, -0.06, mid, C.stoneEdge);
+      else piece(len, 0.24, low - 0.1, rect.h + 0.012, -0.12, mid, C.stoneEdge);
+    } else if (type === 'wall') {
+      // Retaining wall: as tall as the sand behind it, in steps of 0.12 m
+      let seg = null;
+      const flush = () => {
+        if (!seg) return;
+        // Reach the ends of the tread, so the wall has no gaps between treads
+        const e0 = seg.a0 - 0.125 - S.a0(seg.r) < 0.26 ? S.a0(seg.r) : seg.a0 - 0.125;
+        const e1 = S.a1(seg.r) - (seg.a1 + 0.125) < 0.26 ? S.a1(seg.r) : seg.a1 + 0.125;
+        const l = e1 - e0;
+        const m = (e0 + e1) / 2;
+        piece(l, 0.26, seg.h - 0.35, seg.top, 0.13, m, '#d6ab78');
+        piece(l + 0.02, 0.32, seg.top, seg.top + 0.06, 0.13, m, '#f1e4cb');
+        seg = null;
+      };
+      for (const c of chunks) {
+        const top = +(c.r.h + 0.42).toFixed(3);
+        if (seg && seg.r === c.r && c.a - seg.a1 < 0.4) seg.a1 = c.a;
+        else {
+          flush();
+          seg = { a0: c.a, a1: c.a, top, h: c.r.h, r: c.r };
+        }
+      }
+      flush();
+    } else if (type === 'parapet') {
+      const bottom = Math.max(TOP - 2.6, Math.min(...chunks.map((c) => c.out)) - 0.3);
+      piece(len, 0.22, bottom, TOP + 0.55, 0.11, mid, C.lime);
+      piece(len + 0.06, 0.3, TOP + 0.55, TOP + 0.63, 0.11, mid, C.stoneEdge);
+    } else if (type === 'posts') {
+      // Wooden posts planted in the slope with a rope between them; every third holds a lantern
+      const a0 = chunks[0].a - 0.125;
+      const a1 = chunks[chunks.length - 1].a + 0.125;
+      const n = Math.max(2, Math.round((a1 - a0) / 1.15) + 1);
+      const posts = [];
+      for (let i = 0; i < n; i++) {
+        const a = a0 + ((a1 - a0) * i) / (n - 1) + (i === 0 ? 0.08 : i === n - 1 ? -0.08 : 0);
+        const c = chunks.reduce((b, q) => (Math.abs(q.a - a) < Math.abs(b.a - a) ? q : b));
+        const p = onLine(S, line, a, 0.14);
+        const top = c.r.h + 0.62;
+        const base = Math.min(top - 0.4, heightAt(p.x, p.z) - 0.12);
+        g.add(at(cyl(0.055, 0.065, top - base, C.woodDark, 6), p.x, (top + base) / 2, p.z));
+        g.add(at(sph(0.07, C.wood, 6, 4), p.x, top, p.z));
+        posts.push({ p, top });
+        if (i % 3 === 1 && a1 - a0 > 1.6) {
+          const lan = lantern(glass, brass);
+          lan.scale.setScalar(0.75);
+          lan.position.set(p.x, top + 0.02, p.z);
+          g.add(lan);
+          out.halos.push(new THREE.Vector3(p.x, top + 0.2, p.z));
+        }
+      }
+      for (let i = 0; i < posts.length - 1; i++) {
+        const A = posts[i];
+        const B = posts[i + 1];
+        const va = new THREE.Vector3(A.p.x, A.top - 0.1, A.p.z);
+        const vb = new THREE.Vector3(B.p.x, B.top - 0.1, B.p.z);
+        const vm = va.clone().lerp(vb, 0.5);
+        vm.y -= 0.09;
+        const tube = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(va, vm, vb), 4, 0.022, 3, false);
+        g.add(mesh(tube, mat('#e8d3a8'), { cast: false }));
+      }
+    }
+  }
+}
+
+// A sandstone outcrop: a few chunky rocks sunk into the slope (never onto the path)
+function outcrop(g, x, z, s, seed) {
+  const r = rng(seed);
+  const cols = ['#cf9f66', '#c08d55', '#d8ad74', '#b9824c'];
+  const n = 2 + Math.floor(r() * 3);
+  for (let i = 0; i < n; i++) {
+    const rs = s * (0.55 + r() * 0.5);
+    const rx = x + (r() - 0.5) * s * 1.1;
+    const rz = z + (r() - 0.5) * s * 0.9;
+    let clear = true;
+    for (const [dx, dz] of [[rs, 0], [-rs, 0], [0, rs], [0, -rs], [0, 0]]) if (walkAt(rx + dx, rz + dz, 0.08)) clear = false;
+    if (!clear) continue;
+    const rock = mesh(new THREE.DodecahedronGeometry(1, 0), mat(cols[Math.floor(r() * cols.length)], { rough: 0.9 }));
+    rock.scale.set(rs, rs * (0.55 + r() * 0.3), rs * (0.7 + r() * 0.3));
+    rock.rotation.set(r() * 0.5, r() * P, r() * 0.4);
+    rock.position.set(rx, heightAt(rx, rz) - rs * 0.12, rz);
+    g.add(rock);
+  }
+}
+
+function smallBench(g, x, y, z, ry = 0) {
+  const B = new THREE.Group();
+  B.add(at(rbox(1.6, 0.1, 0.5, C.wood, 0.03), 0, 0.42, 0));
+  for (const s of [1, -1]) B.add(at(box(0.1, 0.42, 0.42, C.woodDark), s * 0.7, 0.21, 0));
+  B.add(at(rbox(1.6, 0.42, 0.08, C.wood, 0.03), 0, 0.7, -0.22));
+  B.add(at(rbox(0.68, 0.09, 0.42, '#e7b54a', 0.04), -0.37, 0.51, 0.02));
+  B.add(at(rbox(0.68, 0.09, 0.42, '#c0392b', 0.04), 0.37, 0.51, 0.02));
+  B.position.set(x, y, z);
+  B.rotation.y = ry;
+  g.add(B);
+  return B;
+}
+
+// "Almost there, habibti": Homama's little hand-painted sign, exactly half way up (an easter egg)
+function halfwaySign(g, x, z) {
+  const y = heightAt(x, z) - 0.1;
+  const top = HALF_Y + 1.05;
+  const postTop = top - 0.34;
+  g.add(at(box(0.07, postTop - y, 0.07, C.woodDark), x, (postTop + y) / 2, z));
+  const board = panel(0.94, 0.5, 256, 136, (c, w, h) => {
+    c.fillStyle = '#c99a6b';
+    roundRect(c, 0, 0, w, h, 18);
+    c.fill();
+    c.fillStyle = '#f7e9cf';
+    roundRect(c, 8, 8, w - 16, h - 16, 14);
+    c.fill();
+    c.fillStyle = '#7a4a2a';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `700 34px ${FONT}`;
+    c.fillText('Almost there,', w / 2, 46);
+    c.fillStyle = '#ef5b6f';
+    c.font = `700 40px ${FONT}`;
+    c.fillText('habibti', w / 2 - 14, 92);
+    // A little heart and an H in the corner
+    c.beginPath();
+    const hx = w - 50;
+    const hy = 88;
+    c.moveTo(hx, hy + 12);
+    c.bezierCurveTo(hx - 18, hy, hx - 9, hy - 13, hx, hy - 4);
+    c.bezierCurveTo(hx + 9, hy - 13, hx + 18, hy, hx, hy + 12);
+    c.fill();
+    c.fillStyle = '#3f7bf0';
+    c.font = `700 18px ${FONT}`;
+    c.fillText('H', w - 24, h - 24);
+  });
+  board.position.set(x, top - 0.12, z + 0.08);
+  board.rotation.set(-0.04, 0.32, 0.04);
+  g.add(board);
+  // An arrow pointing up the hill
+  const arrow = panel(0.3, 0.16, 96, 48, (c, w, h) => {
+    c.fillStyle = '#c99a6b';
+    c.beginPath();
+    c.moveTo(4, 14);
+    c.lineTo(62, 14);
+    c.lineTo(62, 2);
+    c.lineTo(92, 24);
+    c.lineTo(62, 46);
+    c.lineTo(62, 34);
+    c.lineTo(4, 34);
+    c.fill();
+  });
+  arrow.position.set(x + 0.08, top + 0.26, z + 0.09);
+  arrow.rotation.set(0, 0.32, 0.55);
+  g.add(arrow);
+}
+
 // ---------------------------------------------------------------- build
 export function buildHill(ctx, out) {
   const { g, dynamic } = out;
   const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex(), roughness: 0.92 });
   out.stoneMat = stoneMat;
-  const S = STAIR.hw;
+  // Lantern glass: one glowing material for all (the game brightens it after dark)
+  const glass = umat('#ffd88a', { emissive: '#ffb347', ei: 0.55, rough: 0.4 });
+  out.glass = glass;
+  out.glassBase = 0.55;
+  const brass = mat(C.brass, { rough: 0.4, metal: 0.4 });
+  out.halos = [];
 
-  // The levels: boxes with sandy tops and stone fronts, capped with a lighter coping
-  const level = (x0, x1, z0, z1, h, top) => {
-    g.add(at(box(x1 - x0, h, z1 - z0, top), (x0 + x1) / 2, h / 2, (z0 + z1) / 2));
-  };
-  level(T1.x0, -S, Z.back, Z.t1Front, L1, '#efd29c');
-  level(S, T1.x1, Z.back, Z.t1Front, L1, '#efd29c');
-  level(-S, S, Z.back, Z.t1Top, L1, '#e8c58c');
-  level(T2.x0, -S, Z.back, Z.t2Front, L2, '#e9cfa2');
-  level(S, T2.x1, Z.back, Z.t2Front, L2, '#e9cfa2');
-  level(-S, S, Z.back, Z.t2Top, L2, '#e9cfa2');
-  // Steps (stone treads)
-  for (let i = 0; i < STEPS_A; i++) {
-    const z0 = Z.t1Front - 0.6 * (i + 1);
-    g.add(at(box(S * 2, STEP * (i + 1), 0.6, C.stone), 0, (STEP * (i + 1)) / 2, z0 + 0.3));
-    g.add(at(rbox(S * 2, 0.06, 0.64, C.stoneEdge, 0.02), 0, STEP * (i + 1) - 0.02, z0 + 0.3));
-  }
-  for (let i = 0; i < STEPS_B; i++) {
-    const z0 = Z.t2Front - 0.6 * (i + 1);
-    const h = L1 + STEP * (i + 1);
-    g.add(at(box(S * 2, h, 0.6, C.stone), 0, h / 2, z0 + 0.3));
-    g.add(at(rbox(S * 2, 0.06, 0.64, C.stoneEdge, 0.02), 0, h - 0.02, z0 + 0.3));
-  }
-  // Stone fronts of the terrace walls (textured) and their coping
-  for (const [x0, x1] of [[T1.x0, -S], [S, T1.x1]]) {
-    g.add(stoneFace(stoneMat, x1 - x0, L1, (x0 + x1) / 2, L1 / 2, Z.t1Front + 0.006));
-    g.add(at(rbox(x1 - x0 + 0.06, 0.08, 0.26, C.stoneEdge, 0.03), (x0 + x1) / 2, L1 + 0.02, Z.t1Front - 0.08));
-  }
-  for (const [x0, x1] of [[T2.x0, -S], [S, T2.x1]]) {
-    g.add(stoneFace(stoneMat, x1 - x0, L2 - L1, (x0 + x1) / 2, L1 + (L2 - L1) / 2, Z.t2Front + 0.006));
-    g.add(at(rbox(x1 - x0 + 0.06, 0.08, 0.26, C.stoneEdge, 0.03), (x0 + x1) / 2, L2 + 0.02, Z.t2Front - 0.08));
-  }
-  // The side walls of the steps
-  for (const s of [1, -1]) {
-    g.add(stoneFace(stoneMat, Z.t1Front - Z.t1Top, L1, s * S, L1 / 2, (Z.t1Front + Z.t1Top) / 2, (s * -P) / 2));
-    g.add(stoneFace(stoneMat, Z.t2Front - Z.t2Top, L2, s * S, L2 / 2, (Z.t2Front + Z.t2Top) / 2, (s * -P) / 2));
-  }
-  // Sides of the terraces where the dunes do not cover them
-  g.add(stoneFace(stoneMat, Z.t1Front - Z.back, L1, T1.x0 - 0.006, L1 / 2, (Z.t1Front + Z.back) / 2, -P / 2));
-  g.add(stoneFace(stoneMat, Z.t1Front - Z.back, L1, T1.x1 + 0.006, L1 / 2, (Z.t1Front + Z.back) / 2, P / 2));
+  // The sand hill itself, and the stepped stone path with its walls and rope posts
+  g.add(sandMesh());
+  buildPath(g, out, glass, brass);
 
-  // Dunes: soft sand slopes against the sides and the back
-  const duneMat = mat(C.dune, { rough: 0.95 });
-  const dune = (x, y, z, sx, sy, sz, c = duneMat) => {
-    const d = mesh(new THREE.SphereGeometry(1, 18, 10, 0, P * 2, 0, P / 2), c);
-    d.scale.set(sx, sy, sz);
-    d.position.set(x, y, z);
-    g.add(d);
-  };
-  for (let i = 0; i < 4; i++) {
-    const z = Z.t1Front - 1.4 - i * 4.6;
-    dune(-11.6, 0, z, 1.6, 1.0 + i * 0.25, 2.8);
-    dune(11.6, 0, z + 1.2, 1.6, 0.9 + i * 0.3, 2.8);
+  // Stepping stones from the pad to the foot of the path
+  for (let i = 0; i < 5; i++) {
+    const k = i / 4;
+    const s = rbox(0.62, 0.05, 0.48, i % 2 ? '#e3cfa6' : '#ecdbb8', 0.04);
+    g.add(at(s, -0.7 + k * 3.6, 0.012, 15.0 - k * 3.1, 0, 0.5 + i * 0.3, 0));
   }
-  dune(-6, 0, -14.6, 6.5, 1.9, 1.3);
-  dune(6, 0, -14.6, 6.5, 2.0, 1.3);
-  dune(0, 0, -14.8, 4.5, 2.4, 1.0);
-  // Little dunes in the front yard corners
-  dune(-11.2, 0, 14.0, 1.4, 0.38, 1.0);
-  dune(11.0, 0, 9.4, 1.2, 0.32, 1.1);
-  dune(-11.4, 0, 7.6, 1.0, 0.3, 0.9);
 
-  // Plants
+  // Rocky outcrops on the slopes
+  [
+    [3.3, 8.15, 0.62], [5.1, 8.2, 0.7], [-4.1, 2.2, 0.85], [-7.2, 2.7, 0.8], [4.2, 3.85, 0.55], [-4.4, 12.05, 0.45],
+    [9.2, 8.6, 0.7], [-11.5, -4.2, 1.0], [-10.7, -9.4, 0.9], [-3.2, -14.6, 0.95], [3.6, -14.4, 0.9], [9.1, -14.1, 0.85],
+    [11.5, -5.6, 1.0], [11.7, 1.3, 0.75], [-11.8, 1.8, 0.7], [0.4, 7.9, 0.45], [7.9, -0.15, 0.32],
+  ].forEach(([x, z, s], i) => outcrop(g, x, z, s, 31 + i * 7));
+
+  // Date palms, cactus and aloe on the slopes and in the yard
+  const onSand = (x, z) => heightAt(x, z) - 0.1;
   out.palms = [
-    datePalm(g, -11.0, 0, 12.2, 4.4, 3),
-    datePalm(g, 11.0, 0, 7.2, 4.8, 7),
-    datePalm(g, -10.6, L1, 4.4, 3.8, 11),
-    datePalm(g, 9.6, L1, 4.9, 3.6, 13),
-    datePalm(g, -8.6, L2, -12.4, 4.6, 17),
-    datePalm(g, 8.4, L2, -12.6, 4.2, 19),
-    datePalm(g, 11.1, 0, 14.6, 3.4, 23),
+    datePalm(g, -11.8, onSand(-11.8, 2.4), 2.4, 4.2, 3),
+    datePalm(g, -11.5, onSand(-11.5, 8.2), 8.2, 4.4, 7),
+    datePalm(g, 11.5, onSand(11.5, -1.2), -1.2, 4.6, 11),
+    datePalm(g, 5.45, onSand(5.45, 9.5), 9.5, 3.8, 13),
+    datePalm(g, -10.3, onSand(-10.3, -11.4), -11.4, 4.4, 17),
+    datePalm(g, 10.3, onSand(10.3, -11.6), -11.6, 4.0, 19),
+    datePalm(g, -11.7, 0, 13.9, 3.6, 23),
+    datePalm(g, 11.8, 0, 13.6, 4.2, 29),
+    datePalm(g, 12.3, onSand(12.3, 8.8), 8.8, 3.6, 37),
   ];
-  cactus(g, -3.4, 0, 13.8, 1.4, 4);
-  cactus(g, 4.2, 0, 7.4, 1.1, 8);
-  cactus(g, -10.0, L1, -0.3, 1.2, 12);
-  cactus(g, 9.8, 0, 11.0, 0.9, 16);
-  aloe(g, 1.9, 0, 6.8, 1, 5, true);
-  aloe(g, -1.9, 0, 6.8, 1, 6, true);
-  aloe(g, -2.2, 0, 14.6, 0.9, 7);
-  aloe(g, -10.4, 0, 9.6, 0.8, 8);
-  aloe(g, 2.1, L1, -0.6, 0.85, 9, true);
-  aloe(g, -2.1, L1, -0.6, 0.85, 10, true);
-  barrelCactus(g, 3.9, 0, 13.6, 1);
-  barrelCactus(g, -4.4, 0, 7.0, 0.8);
-  barrelCactus(g, 9.4, L1, 2.6, 0.9);
-  // Pebbles and stones along the path
-  const r = rng(21);
-  for (let i = 0; i < 18; i++) {
-    const side = i % 2 ? 1 : -1;
-    const s = sph(0.08 + r() * 0.08, i % 3 ? '#e3d2b2' : '#cdb795', 8, 6);
-    s.scale.y = 0.55;
-    g.add(at(s, side * (1.6 + r() * 0.5), 0.02, 7.2 + r() * 7.2));
-  }
+  for (const [x, z, h, seed] of [[-2.9, 8.15, 1.3, 4], [1.2, 8.2, 1.0, 8], [-11.8, 5.2, 1.2, 12], [9.7, 7.9, 1.1, 16], [12.0, 6.6, 0.9, 20], [-7.1, 3.7, 1.0, 24], [-9.6, 1.0, 1.3, 28]]) cactus(g, x, onSand(x, z), z, h, seed);
+  for (const [x, z, s, seed] of [[-1.6, 8.5, 0.8, 5], [6.0, 4.0, 0.7, 6], [-11.9, 11.2, 0.8, 9], [11.9, 9.2, 0.8, 10], [-6.3, 1.4, 0.75, 14]]) aloe(g, x, onSand(x, z), z, s, seed);
+  aloe(g, 1.55, 0, 11.9, 0.9, 15, true);
+  aloe(g, 4.95, 0, 11.9, 0.9, 18, true);
+  for (const [x, z, s] of [[-0.4, 8.6, 1], [-5.4, 8.3, 0.85], [8.6, 9.6, 0.9], [-9.8, 12.0, 0.8], [5.2, 2.7, 0.75]]) barrelCactus(g, x, onSand(x, z) + 0.05, z, s);
 
-  // Olive tree, with R + H carved in its trunk
-  oliveTree(g, SPOT.olive.x, L1, SPOT.olive.z);
+  // The olive tree in the courtyard, with R + H carved in its trunk
+  oliveTree(g, SPOT.olive.x, TOP, SPOT.olive.z);
   const carve = panel(0.22, 0.16, 128, 96, (c, w, h) => {
     c.fillStyle = '#7d6a52';
     c.fillRect(0, 0, w, h);
@@ -870,7 +1054,7 @@ export function buildHill(ctx, out) {
     c.bezierCurveTo(w / 2 + 20, 50, w / 2 + 34, 66, w / 2, 86);
     c.stroke();
   });
-  carve.position.set(SPOT.olive.x + 0.04, L1 + 0.62, SPOT.olive.z + 0.27);
+  carve.position.set(SPOT.olive.x + 0.04, TOP + 0.62, SPOT.olive.z + 0.27);
   carve.rotation.set(0, 0.05, -0.12);
   g.add(carve);
 
@@ -881,8 +1065,27 @@ export function buildHill(ctx, out) {
   out.goat = makeGoat(g, dynamic);
   out.garden = garden(g, dynamic);
   out.well = well(g, dynamic, stoneMat);
+  // Two floor cushions by the fire, where Roji and Homama sit
+  for (const [cx, cz, col] of [[-9.65, 8.55, '#c0392b'], [-8.5, 8.55, '#2b4a6e']]) g.add(at(rbox(0.56, 0.12, 0.5, col, 0.05), cx, TENT_Y + 0.06, cz));
+  g.add(at(rbox(0.5, 0.12, 0.56, '#e7b54a', 0.05), -10.35, TENT_Y + 0.06, 9.55));
 
-  // A little goal for kicking a ball about: two water jugs and a line in the sand
+  // The resting bench in its nook half way up, with Homama's sign and a lantern
+  smallBench(g, SPOT.bench2.x, HALF_Y, SPOT.bench2.z);
+  halfwaySign(g, NOOK.x0 - 0.22, 4.5);
+  {
+    const x = NOOK.x1 + 0.2;
+    const z = 4.25;
+    const base = heightAt(x, z) - 0.1;
+    const top = HALF_Y + 0.95;
+    g.add(at(cyl(0.045, 0.055, top - base, '#3b2b3f', 7), x, (top + base) / 2, z));
+    const lan = lantern(glass, brass);
+    lan.scale.setScalar(0.8);
+    lan.position.set(x, top, z);
+    g.add(lan);
+    out.halos.push(new THREE.Vector3(x, top + 0.22, z));
+  }
+
+  // A little goal for kicking a ball about in the yard: two water jugs and a line in the sand
   for (const s of [-1, 1]) {
     const jug = new THREE.Group();
     jug.add(at(cyl(0.2, 0.22, 0.5, '#3f7bf0', 12), 0, 0.25, 0));
@@ -892,8 +1095,7 @@ export function buildHill(ctx, out) {
     g.add(jug);
   }
   out.ball = new THREE.Group();
-  const bw = sph(0.15, '#ffffff', 14, 10);
-  out.ball.add(bw);
+  out.ball.add(sph(0.15, '#ffffff', 14, 10));
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * P * 2;
     out.ball.add(at(sph(0.05, '#3b2b3f', 6, 4), Math.sin(a) * 0.12, Math.cos(a) * 0.08, Math.cos(a) * 0.07));
@@ -903,80 +1105,77 @@ export function buildHill(ctx, out) {
   g.add(out.ball);
   dynamic.push(out.ball);
 
-  // Lanterns on posts by the steps: one glowing glass material for all (brighter after dark)
-  const glass = umat('#ffd88a', { emissive: '#ffb347', ei: 0.55, rough: 0.4 });
-  out.glass = glass;
-  out.glassBase = 0.55;
-  const halos = [];
-  lampPost(g, glass, -1.8, 0, 6.9, halos);
-  lampPost(g, glass, 1.8, 0, 6.9, halos);
-  lampPost(g, glass, -1.75, L1, -0.55, halos);
-  lampPost(g, glass, 1.75, L1, -0.55, halos);
-  lampPost(g, glass, -5.6, 0, 13.6, halos);
-  // Hanging lanterns at the tent front
-  const brass = mat(C.brass, { rough: 0.4, metal: 0.4 });
-  for (const [lx, lz] of [[-1.9, 1.75], [1.9, 1.75]]) {
+  // Lamp posts at the foot of the path; hanging lanterns at the tent front
+  lampPost(g, glass, 1.85, 0, 11.65, out.halos);
+  lampPost(g, glass, 4.4, 0, 11.65, out.halos);
+  for (const [lx, lz] of [[-1.4, 1.38], [1.4, 1.38]]) {
     const l = lantern(glass, brass);
-    l.position.set(SPOT.tent.x + lx, 1.02, SPOT.tent.z + lz);
+    l.position.set(SPOT.tent.x + lx, TENT_Y + 0.72, SPOT.tent.z + lz);
     g.add(l);
-    halos.push(new THREE.Vector3(SPOT.tent.x + lx, 1.24, SPOT.tent.z + lz));
+    out.halos.push(new THREE.Vector3(SPOT.tent.x + lx, TENT_Y + 0.94, SPOT.tent.z + lz));
   }
-  out.halos = halos;
+
+  // Two small dunes in the yard corners
+  const duneMat = mat(C.dune, { rough: 0.95 });
+  for (const [x, z, sx, sy, sz] of [[-10.9, 14.5, 1.3, 0.34, 0.8], [11.2, 11.6, 1.0, 0.3, 0.9]]) {
+    const d = mesh(new THREE.SphereGeometry(1, 18, 8, 0, P * 2, 0, P / 2), duneMat);
+    d.scale.set(sx, sy, sz);
+    d.position.set(x, -0.02, z);
+    g.add(d);
+  }
 
   // The sign by the street
   const sign = ctx.sign(['Welcome to', "Odeh's Home"], { width: 2.5, height: 1.05, accent: '#c8743f', postHeight: 0.9, color: '#8a5a3a' });
   sign.position.set(SPOT.sign.x, 0, SPOT.sign.z);
-  sign.rotation.y = -0.18;
+  sign.rotation.y = 0.16;
   g.add(sign);
 
-  // Ground: golden sand over the whole hill, a worn path up the middle
+  // Ground: golden sand round the whole hill, a worn path from the pad, the kicking spot
   out.ground = [
-    { x: 0, z: 0, hw: 12.2, hd: 15.2, color: C.sand, feather: 2.6 },
-    { x: -0.5, z: 11.2, hw: 1.5, hd: 4.6, color: '#e6bf86', feather: 0.9 },
-    { x: SPOT.fire.x, z: SPOT.fire.z, hw: 1.0, hd: 0.9, color: '#dcb27a', feather: 0.7 },
-    { x: SPOT.kick.x, z: 9.3, hw: 2.0, hd: 2.4, color: '#eac692', feather: 1.0 },
+    { x: 0, z: -1.5, hw: 6.5, hd: 9.5, color: '#e9bd80', feather: 6.8 },
+    { x: 0, z: 13.3, hw: 11.6, hd: 1.4, color: '#efcb92', feather: 1.6 },
+    { x: 1.1, z: 13.4, hw: 1.2, hd: 1.9, color: '#e2b47a', feather: 1.0 },
+    { x: SPOT.kick.x, z: 12.6, hw: 2.0, hd: 2.0, color: '#ecc790', feather: 1.0 },
   ];
 
-  // Colliders for the props on the hill (the terraces are in layout.js)
+  // Colliders for the props (the treads, terraces and slopes are in layout.js and terrain.js)
+  const T = SPOT.tent;
+  const W = out.tent.W;
+  const D = out.tent.D;
   out.colliders.push(
-    { type: 'box', x: SPOT.tent.x, z: SPOT.tent.z - out.tent.D / 2 - 0.05, hw: out.tent.W / 2 + 0.2, hd: 0.15 },
-    { type: 'box', x: SPOT.tent.x - out.tent.W / 2 - 0.05, z: SPOT.tent.z - 0.4, hw: 0.15, hd: out.tent.D / 2 - 0.2 },
-    { type: 'circle', x: SPOT.tent.x + out.tent.W / 2, z: SPOT.tent.z + out.tent.D / 2, r: 0.12 },
-    { type: 'circle', x: SPOT.tent.x, z: SPOT.tent.z + out.tent.D / 2, r: 0.12 },
-    { type: 'circle', x: SPOT.tent.x + out.tent.W / 2, z: SPOT.tent.z - out.tent.D / 2, r: 0.12 },
-    { type: 'circle', x: SPOT.tent.x + 0.2, z: SPOT.tent.z + 0.1, r: 0.45, h: 0.34 },
-    { type: 'circle', x: SPOT.fire.x, z: SPOT.fire.z, r: 0.55 }, // the fire, its tripod and the kettle: walk round it
+    { type: 'box', x: T.x, z: T.z - D / 2 - 0.05, hw: W / 2 + 0.15, hd: 0.15 },
+    { type: 'box', x: T.x - W / 2 - 0.05, z: T.z - 0.2, hw: 0.15, hd: D / 2 - 0.15 },
+    { type: 'circle', x: T.x + W / 2, z: T.z + D / 2, r: 0.12 },
+    { type: 'circle', x: T.x, z: T.z + D / 2, r: 0.12 },
+    { type: 'circle', x: T.x - W / 2, z: T.z + D / 2, r: 0.12 },
+    { type: 'circle', x: T.x + W / 2, z: T.z - D / 2, r: 0.12 },
+    { type: 'circle', x: T.x + 0.2, z: T.z + 0.1, r: 0.45, h: TENT_Y + 0.34 },
+    { type: 'circle', x: T.x + W / 2 + 0.15, z: T.z + D / 2 + 0.75, r: 0.06 },
+    { type: 'circle', x: T.x - W / 2 - 0.15, z: T.z + D / 2 + 0.75, r: 0.06 },
+    { type: 'circle', x: SPOT.fire.x, z: SPOT.fire.z, r: 0.55 },
     { type: 'circle', x: SPOT.camel.x, z: SPOT.camel.z, r: 1.0 },
-    { type: 'circle', x: SPOT.camel.x + Math.cos(P * 0.92) * 1.45, z: SPOT.camel.z - Math.sin(P * 0.92) * 1.45, r: 0.42 },
-    { type: 'circle', x: SPOT.well.x, z: SPOT.well.z, r: 0.8, h: L1 + 0.74 },
+    { type: 'circle', x: SPOT.camel.x + Math.cos(-0.15) * 1.45, z: SPOT.camel.z + Math.sin(-0.15) * -1.45, r: 0.42 },
+    { type: 'circle', x: SPOT.camel.x - 1.0, z: SPOT.camel.z, r: 0.55 },
+    { type: 'circle', x: SPOT.well.x, z: SPOT.well.z, r: 0.8, h: GARDEN_Y + 0.74 },
     { type: 'circle', x: SPOT.olive.x, z: SPOT.olive.z, r: 0.35 },
-    { type: 'box', x: -7.6, z: 3.2, hw: 1.5, hd: 0.5, h: L1 + 0.32 },
-    { type: 'box', x: -7.6, z: 1.4, hw: 1.5, hd: 0.5, h: L1 + 0.32 },
-    { type: 'box', x: -3.9, z: 2.3, hw: 0.8, hd: 1.3, h: L1 + 0.32 },
-    { type: 'circle', x: -2.8, z: 0.9, r: 0.18 },
+    ...GARDEN_BEDS.map((b) => ({ type: 'box', x: b.x, z: b.z, hw: b.w / 2, hd: b.d / 2, h: GARDEN_Y + 0.32 })),
+    { type: 'box', x: 10.48, z: 4.95, hw: 0.27, hd: 1.75 }, // the sunflowers
+    { type: 'circle', x: SCARECROW.x, z: SCARECROW.z, r: 0.2 },
+    { type: 'box', x: SPOT.bench2.x, z: SPOT.bench2.z - 0.02, hw: 0.82, hd: 0.27, h: HALF_Y + 0.5 },
     { type: 'circle', x: SPOT.sign.x, z: SPOT.sign.z, r: 0.5 },
-    { type: 'circle', x: SPOT.sign.x - 0.84, z: SPOT.sign.z - 0.15, r: 0.36 },
-    { type: 'circle', x: SPOT.sign.x + 0.84, z: SPOT.sign.z + 0.15, r: 0.36 },
-    { type: 'circle', x: 1.9, z: 6.8, r: 0.3, h: 0.35 },
-    { type: 'circle', x: -1.9, z: 6.8, r: 0.3, h: 0.35 },
-    { type: 'circle', x: 2.1, z: -0.6, r: 0.3, h: L1 + 0.35 },
-    { type: 'circle', x: -2.1, z: -0.6, r: 0.3, h: L1 + 0.35 },
-    { type: 'circle', x: -3.4, z: 13.8, r: 0.3 },
-    { type: 'circle', x: 4.2, z: 7.4, r: 0.28 },
-    { type: 'circle', x: 9.8, z: 11.0, r: 0.25 },
-    { type: 'circle', x: -10.0, z: -0.3, r: 0.28 },
-    { type: 'circle', x: -11.0, z: 12.2, r: 0.3 },
-    { type: 'circle', x: 11.0, z: 7.2, r: 0.3 },
-    { type: 'circle', x: -10.6, z: 4.4, r: 0.3 },
-    { type: 'circle', x: 9.6, z: 4.9, r: 0.3 },
-    { type: 'circle', x: 11.1, z: 14.6, r: 0.3 },
-    { type: 'circle', x: -11.2, z: 14.0, r: 1.0 },
-    { type: 'circle', x: -11.4, z: 7.6, r: 0.75 },
-    { type: 'circle', x: 11.0, z: 9.4, r: 0.85 },
+    { type: 'circle', x: SPOT.sign.x - 0.84, z: SPOT.sign.z + 0.13, r: 0.36 },
+    { type: 'circle', x: SPOT.sign.x + 0.84, z: SPOT.sign.z - 0.13, r: 0.36 },
     { type: 'circle', x: SPOT.goal.x - 1.3, z: SPOT.goal.z, r: 0.24 },
     { type: 'circle', x: SPOT.goal.x + 1.3, z: SPOT.goal.z, r: 0.24 },
     { type: 'circle', x: SPOT.goatStake.x, z: SPOT.goatStake.z, r: 0.06 },
+    { type: 'circle', x: 1.85, z: 11.65, r: 0.14 },
+    { type: 'circle', x: 4.4, z: 11.65, r: 0.14 },
+    { type: 'circle', x: 1.55, z: 11.9, r: 0.3, h: 0.35 },
+    { type: 'circle', x: 4.95, z: 11.9, r: 0.3, h: 0.35 },
+    { type: 'circle', x: -11.7, z: 13.9, r: 0.3 },
+    { type: 'circle', x: 11.8, z: 13.6, r: 0.3 },
+    { type: 'circle', x: -10.9, z: 14.5, r: 1.0 },
+    { type: 'circle', x: 11.2, z: 11.6, r: 0.8 },
   );
-  for (const [x, y, z] of [[-1.8, 0, 6.9], [1.8, 0, 6.9], [-1.75, L1, -0.55], [1.75, L1, -0.55], [-5.6, 0, 13.6]]) out.colliders.push({ type: 'circle', x, z, r: 0.14 });
   return out;
 }
