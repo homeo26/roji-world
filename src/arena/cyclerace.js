@@ -2,6 +2,9 @@
 // through a forest with logs to hop, across a bridge over a stream and past the flower fields.
 // The stick points the way (the bike follows the road on its own), pedalling is automatic, hold the
 // action button to pedal hard while stamina lasts, Space hops over logs. Collect coins on the way.
+// Played together online, the partner's bike is the other player, riding on their own device; the
+// computer riders belong to the one who opened the race and both screens show them in the same place.
+import { raceLink, round } from './races/together.js';
 import { makeBike, BIKE_SEAT } from '../places/parks/bike.js';
 import { skinify } from '../places/parks/rig.js';
 import { part, merge } from '../places/parks/kit.js';
@@ -555,6 +558,97 @@ export default {
     const N2 = makeRacer('sami', lanes[3], true, 0.955);
     const racers = [Pl, Cp, N1, N2];
 
+    // ---------------------------------------------------------- playing together online
+    // x, y, z, yaw, v, turn, flags (1 air, 2 sprint, 4 tired), stumble, stamina
+    const KINDS = 'lllallnll';
+    const link = raceLink(ctx, { lead: 4200, kinds: KINDS, aiKinds: KINDS });
+    const { r2, r3 } = round;
+    const npcs = [N1, N2];
+    let spectate = false;
+    let themT = -1;
+    const sampleOf = (o) => [r2(o.x), r2(o.y), r2(o.z), r3(o.yaw), r2(o.v), r2(o.turn), (o.air ? 1 : 0) | (o.sprint ? 2 : 0) | (o.tired ? 4 : 0), r2(Math.max(0, o.stumble)), r2(o.stamina)];
+    // A rider that was driven from the other device carries on as a computer rider
+    const takeOver = (o) => {
+      o.remote = false;
+      const s = -o.z;
+      for (const lg of LOGS) if (lg.s < s + 0.5) o.logDone.add(lg);
+    };
+    const goTogether = () => {
+      // The one who opened the race starts on the left of the middle, the one who joined on the right
+      const mine = link.host ? lanes[1] : lanes[2];
+      for (const [o, lane] of [[Pl, mine], [Cp, mine === lanes[1] ? lanes[2] : lanes[1]]]) {
+        o.lane = o.prefU = lane;
+        o.x = cx(1) + lane;
+        o.y = groundY(o.x, o.z);
+      }
+      Cp.remote = true;
+      // The same order on both screens when two times are equal
+      Pl.slot = link.host ? 0 : 1;
+      Cp.slot = link.host ? 1 : 0;
+      npcs.forEach((o, i) => (o.slot = 2 + i));
+      if (!link.host) npcs.forEach((o, i) => ((o.remote = true), (o.aiIndex = i)));
+      link.onLeave(() => {
+        for (const o of racers) if (o.remote) takeOver(o);
+        if (Cp.finish === null) msg(`${look[them].name} left the race`, 1600);
+      });
+    };
+    const rs = [];
+    let theirF = null;
+    let theirFAt = 0;
+    const follow = (o, a) => {
+      o.x = a[0];
+      o.y = a[1];
+      o.z = a[2];
+      o.yaw = a[3];
+      o.v = a[4];
+      o.turn = a[5];
+      o.air = !!(a[6] & 1);
+      o.sprint = !!(a[6] & 2);
+      o.tired = !!(a[6] & 4);
+      o.stumble = a[7];
+      o.stamina = a[8];
+      // Coins they ride through are gone here too (they count on their own screen)
+      const sNow = -o.z;
+      for (const c of coins) {
+        if (!c.alive || Math.abs(c.s - sNow) > 1.2) continue;
+        if (Math.hypot(c.x - o.x, c.z - o.z) < 0.85 && Math.abs(c.y - (o.y + 0.9)) < 0.75) {
+          c.alive = false;
+          if (Math.hypot(o.x - Pl.x, o.z - Pl.z) < 25) fx.burst(new THREE.Vector3(c.x, c.y, c.z), ['#ffd166', '#ffffff'], 6);
+        }
+      }
+    };
+    const followRemote = () => {
+      const st = link.last;
+      for (const o of racers) {
+        if (!o.remote) continue;
+        const tr = o === Cp ? link.them : link.ai[o.aiIndex];
+        const a = tr && link.sample(tr, rs);
+        if (a) follow(o, a);
+        if (!st) continue;
+        // Their finish time arrives a moment before we see them cross
+        if (o === Cp) {
+          if (Number.isFinite(st.f) && theirF === null) {
+            theirF = st.f;
+            theirFAt = link.now();
+          }
+          if (Number.isFinite(st.c)) Cp.coins = st.c;
+          if (theirF !== null && Cp.finish === null && (-Cp.z >= L - 0.3 || link.now() - theirFAt > 700)) Cp.finish = theirF;
+        } else if (Array.isArray(st.af) && Number.isFinite(st.af[o.aiIndex]) && o.finish === null && (-o.z >= L - 0.3 || st.ae)) o.finish = st.af[o.aiIndex];
+      }
+    };
+    const shareMe = () => {
+      if (!link.inRoom) return;
+      // After the race everyone stands by their bikes here, so only the times travel
+      const st = { f: Pl.finish, c: Pl.coins };
+      if (!finished) st.me = sampleOf(Pl);
+      if (link.host && link.together) {
+        if (!finished) st.ai = npcs.map(sampleOf);
+        st.af = npcs.map((o) => o.finish);
+        if (finished) st.ae = 1; // the race is over here: these times are final
+      }
+      link.share(st);
+    };
+
     // ---------------------------------------------------------- race state and helpers
     let running = false;
     let finished = false;
@@ -727,7 +821,7 @@ export default {
       }
       // Finish line
       if (rc.finish === null && -rc.z >= L) {
-        rc.finish = raceT;
+        rc.finish = link.together ? r2(raceT) : raceT;
         if (!rc.ai) {
           const place = racers.filter((o) => o.finish !== null).length;
           msg(place === 1 ? 'First place!' : 'Finish!', 1600);
@@ -775,18 +869,19 @@ export default {
         if (snap) camLook.copy(tmp);
         else camLook.lerp(tmp, 1 - Math.exp(-4 * dt));
       } else {
-        const s = -Pl.z;
+        const F = spectate ? Cp : Pl;
+        const s = -F.z;
         const ry = roadYaw(s + 4);
         let d = ry - camYaw;
         d = Math.atan2(Math.sin(d), Math.cos(d));
         camYaw += d * (snap ? 1 : 1 - Math.exp(-2.5 * dt));
         const back = 6.6;
-        tmp.set(Pl.x - Math.sin(camYaw) * back, 0, Pl.z - Math.cos(camYaw) * back);
-        tmp.y = Math.max(Pl.y + 3.3, groundY(tmp.x, tmp.z) + 2.0);
+        tmp.set(F.x - Math.sin(camYaw) * back, 0, F.z - Math.cos(camYaw) * back);
+        tmp.y = Math.max(F.y + 3.3, groundY(tmp.x, tmp.z) + 2.0);
         if (snap) camPos.copy(tmp);
         else camPos.lerp(tmp, 1 - Math.exp(-7 * dt));
-        tmp.set(Pl.x + Math.sin(camYaw) * 5.5, 0, Pl.z + Math.cos(camYaw) * 5.5);
-        tmp.y = Math.max(Pl.y, groundY(tmp.x, tmp.z)) + 0.9;
+        tmp.set(F.x + Math.sin(camYaw) * 5.5, 0, F.z + Math.cos(camYaw) * 5.5);
+        tmp.y = Math.max(F.y, groundY(tmp.x, tmp.z)) + 0.9;
         if (snap) camLook.copy(tmp);
         else camLook.lerp(tmp, 1 - Math.exp(-8 * dt));
       }
@@ -806,12 +901,12 @@ export default {
     const ord = (n) => ['1st', '2nd', '3rd', '4th'][n - 1];
     const colorOf = (id) => (id === 'roji' ? '#ef5b6f' : id === 'homama' ? '#3f7bf0' : id === 'lulu' ? '#3fbf7f' : '#f0a020');
     const drawHud = () => {
-      order = racers.slice().sort((a, b) => (a.finish ?? 1e9) - (b.finish ?? 1e9) || a.z - b.z);
+      order = racers.slice().sort((a, b) => (a.finish ?? 1e9) - (b.finish ?? 1e9) || (link.together && a.finish !== null ? (a.slot ?? 0) - (b.slot ?? 0) : 0) || a.z - b.z);
       const place = order.indexOf(Pl) + 1;
       const dot = (k, c) => `<i style="position:absolute;top:-4px;left:calc(${(k * 100).toFixed(1)}% - 6px);width:12px;height:12px;border-radius:50%;background:${c};box-shadow:0 0 0 2px #fff"></i>`;
       const bar = `<span style="display:inline-block;width:64px;height:9px;border-radius:5px;background:#eadfe6;overflow:hidden;vertical-align:middle"><b style="display:block;height:100%;width:${Math.round(Pl.stamina * 100)}%;background:${Pl.tired ? '#c9b8c2' : Pl.sprint ? '#ef5b6f' : '#3fbf7f'}"></b></span>`;
       const track = `<span style="position:relative;display:inline-block;width:86px;height:5px;border-radius:3px;background:#e6dce3;vertical-align:middle">${racers.filter((o) => o !== Pl).map((o) => dot(clamp(-o.z / L, 0, 1), colorOf(o.id))).join('')}${dot(clamp(-Pl.z / L, 0, 1), colorOf(Pl.id))}</span>`;
-      hud.score(`<span style="display:inline-flex;align-items:center;gap:10px;white-space:nowrap">${ord(place)}<span style="font-weight:600;font-size:.82em;color:#a07a1a">${Pl.coins} ${Pl.coins === 1 ? 'coin' : 'coins'}</span>${bar}${track}</span>`);
+      hud.score(`<span style="display:inline-flex;align-items:center;gap:10px;white-space:nowrap">${ord(place)} <span style="font-weight:600;font-size:.82em;color:#a07a1a">${Pl.coins} ${Pl.coins === 1 ? 'coin' : 'coins'}</span>${bar}${track}</span>`);
     };
     drawHud();
 
@@ -830,7 +925,7 @@ export default {
     const results = () => {
       if (disposed) return;
       const times = racers.map((o) => ({ o, t: o.finish ?? raceT + Math.max(0, (L + o.z) / Math.max(5, o.v || V_CRUISE)) }));
-      times.sort((a, b) => a.t - b.t);
+      times.sort((a, b) => a.t - b.t || (a.o.slot ?? 0) - (b.o.slot ?? 0));
       const place = times.findIndex((x) => x.o === Pl) + 1;
       const myT = times.find((x) => x.o === Pl).t;
       const prev = ctx.load('best', null);
@@ -851,10 +946,13 @@ export default {
     };
 
     const endRace = () => {
+      spectate = false;
+      // Together, the host settles the computer riders' times and shares them, so both lists agree
+      if (link.together) for (const o of racers) if (o.finish === null && !o.remote) o.finish = r2(raceT + Math.max(0, (L + o.z) / Math.max(5, o.v || V_CRUISE)));
       drawHud();
       finished = true;
       running = false;
-      order = racers.slice().sort((a, b) => (a.finish ?? 1e9) - (b.finish ?? 1e9) || a.z - b.z);
+      order = racers.slice().sort((a, b) => (a.finish ?? 1e9) - (b.finish ?? 1e9) || (link.together ? (a.slot ?? 0) - (b.slot ?? 0) : 0) || a.z - b.z);
       // Everyone hops off and stands beside their bike, facing the camera
       const mz = Math.max(...racers.map((o) => o.z)) - 3;
       order.forEach((o, i) => {
@@ -881,7 +979,7 @@ export default {
 
     // ---------------------------------------------------------- update
     const tick = (dt) => {
-      if (running) raceT += dt;
+      if (running) raceT = link.together ? Math.max(0, link.elapsed()) : raceT + dt;
       if (!running) return;
       const ax = input.axis();
       let pc;
@@ -897,16 +995,35 @@ export default {
         pc = { yaw: ry - rel, sprint: input.held('action') || input.held('run'), hop: input.pressed('jump'), brake: ax.y < -0.5 ? 0.6 : 0 };
       }
       stepRacer(Pl, dt, pc);
-      for (const rc of racers) if (rc.ai) stepRacer(rc, dt, rc.finish !== null ? { yaw: roadYaw(-rc.z + 4), sprint: false, hop: false } : driver(rc, dt));
+      for (const rc of racers) if (rc.ai && !rc.remote) stepRacer(rc, dt, rc.finish !== null ? { yaw: roadYaw(-rc.z + 4), sprint: false, hop: false } : driver(rc, dt));
       if (Pl.finish !== null && doneT < 0) doneT = 0;
       if (doneT >= 0 && !finished) {
         doneT += dt;
-        if ((racers.every((o) => o.finish !== null) && doneT > 1.5) || doneT > 6) endRace();
+        if (!link.together) {
+          if ((racers.every((o) => o.finish !== null) && doneT > 1.5) || doneT > 6) endRace();
+        } else {
+          // Together: wait for the other player (watch them ride in), and on the joining side for the
+          // computer riders' times from the host
+          const them = Cp.finish !== null;
+          if (them && themT < 0) themT = doneT;
+          if (!them && doneT > 2.6 && !spectate) {
+            spectate = true;
+            msg(`Go, ${look[Cp.id].name}!`, 1400);
+          }
+          if (them) spectate = false;
+          const npcKnown = npcs.every((o) => o.finish !== null);
+          const ended = !link.host && !Cp.remote ? true : !!link.last?.ae;
+          if (them && doneT > 1.5 && doneT - themT > 1.2 && (npcKnown || (link.host ? doneT > 6 : ended || doneT > 14))) endRace();
+          else if (doneT > 90) endRace();
+        }
       }
     };
 
     const update = (dt, t) => {
+      link.update();
+      if (running && !finished) followRemote();
       tick(dt);
+      shareMe();
       for (const rc of racers) poseRacer(rc, dt, t);
       coins.forEach((c, i) => {
         if (!c.alive) {
@@ -935,17 +1052,22 @@ export default {
     };
 
     // Dev hooks for headless checks (only in the dev harness)
-    if (window.__dev) {
+    if (window.__dev || window.__roji) {
       window.__cyclerace = {
         P: Pl,
         racers,
         coins,
+        link,
+        get finished() {
+          return finished;
+        },
         get raceT() {
           return raceT;
         },
         auto: (on = true) => (auto = on),
         warp(s) {
           for (const rc of racers) {
+            if (rc.remote) continue;
             rc.z = -s;
             rc.x = cx(s) + rc.lane;
             rc.y = groundY(rc.x, rc.z);
@@ -968,7 +1090,15 @@ export default {
     setTimeout(() => !disposed && bell(), 500);
     setTimeout(async () => {
       if (disposed) return;
-      await hud.countdown(3);
+      // In a room: wait for the other player, then both count down to the same moment
+      const mode = await link.begin();
+      if (disposed) return;
+      if (mode === 'together') {
+        goTogether();
+        for (const rc of racers) poseRacer(rc, 0.016, 0);
+        placeCam(0.016, true);
+        await link.countdown();
+      } else await hud.countdown(3);
       if (disposed) return;
       running = true;
     }, 900);
@@ -977,6 +1107,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        link.dispose();
         if (window.__cyclerace) delete window.__cyclerace;
       },
     };

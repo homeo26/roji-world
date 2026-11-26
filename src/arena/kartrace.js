@@ -1,7 +1,10 @@
 // Kart Race: three laps of the Roji World circuit against your partner, Kai and Mina.
 // Point the stick (or hold left / right) where you want to go; the kart drives itself forward.
 // Up for full speed, E / Space / the Use button for an item. Tight turns make drift sparks and a mini boost.
+// Played together online, the partner's kart is the other player, driving on their own device; Kai and
+// Mina belong to the one who opened the race, so both screens show the same race, bananas and places.
 import * as THREE from 'three';
+import { raceLink, round, rank } from './races/together.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mat, mesh, canvasTexture, roundRect, FONT, rng, damp, dampAngle, clamp, lerp, easeInOut } from '../util.js';
 import * as K from './riding/kit.js';
@@ -464,6 +467,115 @@ export default {
     const me = racers.find((r) => r.me);
     const partner = racers.find((r) => r.real && !r.me);
 
+    // ---------------------------------------------------------------- playing together online
+    // p, d, yaw, v, turn, slip, spin angle, flags (1 boost, 2 drifting, 4 on the bumper), drift charge
+    const KINDS = 'llalllanl';
+    const link = raceLink(ctx, { lead: 6600, kinds: KINDS, aiKinds: KINDS });
+    const { r2, r3 } = round;
+    const rivals = racers.filter((r) => !r.real);
+    const GREEN = 3.0 + 5 * 0.55 + 0.6; // the intro time when the lights go green (startSequence)
+    let spectate = false;
+    const sampleOf = (r) => [r2(r.p), r2(r.d), r3(r.yaw), r2(r.v), r2(r.turn), r3(r.slip), r3(r.spinA), (r.boost > 0 ? 1 : 0) | (r.drifting ? 2 : 0) | (r.onWall ? 4 : 0), r2(r.charge)];
+    const toGrid = (r, gp) => {
+      r.def.grid = gp;
+      r.p = gp.p;
+      r.s = S(gp.p);
+      r.d = r.laneT = gp.d;
+      r.yaw = T.yaw(r.s);
+      const q = T.at(r.s, r.d);
+      r.x = q.x;
+      r.z = q.z;
+    };
+    // A kart driven from the other device carries on as a computer driver
+    const takeOver = (r) => {
+      r.remote = false;
+      r.laneT = r.d;
+      r.laneCd = 0;
+      r.hint = -1;
+    };
+    const goTogether = () => {
+      // Both players on the front row: the one who opened the race on pole, Kai and Mina behind
+      const host = link.host ? me : partner;
+      const guest = host === me ? partner : me;
+      toGrid(host, GRID[0]);
+      toGrid(guest, GRID[1]);
+      toGrid(rivals[0], GRID[2]);
+      toGrid(rivals[1], GRID[3]);
+      host.slot = 0;
+      guest.slot = 1;
+      rivals.forEach((r, i) => (r.slot = 2 + i));
+      camYaw = me.yaw;
+      partner.remote = true;
+      if (!link.host) rivals.forEach((r, i) => ((r.remote = true), (r.aiIndex = i)));
+      link.onLeave(() => {
+        for (const r of racers) if (r.remote) takeOver(r);
+        if (!partner.finished) pop(`${partnerName} left the race`, '#ffe1e6', 1600);
+      });
+      // Bananas: each copy drops its own racers' bananas and says so; a hit removes it on both
+      link.on('bn', (d) => {
+        if (!d || !Number.isFinite(d.s) || !Number.isFinite(d.d)) return;
+        const owner = racers.find((r) => r.slot === d.o) || partner;
+        const p = T.at(d.s, d.d);
+        if (bananas.length >= MAXB) bananas.shift();
+        bananas.push({ id: d.i, x: p.x, z: p.z, s: d.s, d: d.d, owner, t: 0, yaw: (d.i % 7) * 0.9 });
+        if (near(owner)) sound.ui('pop');
+      });
+      link.on('bh', (d) => {
+        const k = bananas.findIndex((b) => b.id === d?.i);
+        if (k >= 0) {
+          const b = bananas[k];
+          bananas.splice(k, 1);
+          if (Math.hypot(b.x - me.x, b.z - me.z) < 30) fx.puff(tmp.set(b.x, 0.3, b.z));
+        }
+      });
+    };
+    let bananaN = 0;
+    const rs = [];
+    const seenF = new Map();
+    function followRemote() {
+      const st = link.last;
+      for (const r of racers) {
+        if (!r.remote) continue;
+        const tr = r === partner ? link.them : link.ai[r.aiIndex];
+        const a = tr && link.sample(tr, rs);
+        if (a) {
+          r.p = a[0];
+          r.s = S(a[0]);
+          r.d = a[1];
+          r.yaw = a[2];
+          r.v = a[3];
+          r.turn = a[4];
+          r.slip = a[5];
+          r.spinA = a[6];
+          r.boost = a[7] & 1 ? 0.2 : 0;
+          r.drifting = !!(a[7] & 2);
+          r.onWall = !!(a[7] & 4);
+          r.charge = a[8];
+          const q = T.at(r.s, r.d, tmp);
+          r.x = q.x;
+          r.z = q.z;
+        }
+        // Their finish time arrives a moment before we see them cross the line
+        const f = !st ? null : r === partner ? st.f : Array.isArray(st.af) ? st.af[r.aiIndex] : null;
+        if (Number.isFinite(f) && !r.finished) {
+          if (!seenF.has(r)) seenF.set(r, link.now());
+          if (r.p >= LAPS * L - 0.3 || link.now() - seenF.get(r) > 700) {
+            r.crossed = true;
+            finishRider(r, f);
+          }
+        }
+      }
+    }
+    function shareMe() {
+      if (!link.inRoom) return;
+      const st = { me: sampleOf(me), f: me.finished ? me.time : null };
+      if (link.host && link.together) {
+        st.ai = rivals.map(sampleOf);
+        st.af = rivals.map((r) => (r.finished ? r.time : null));
+      }
+      link.share(st);
+    }
+
     // ---------------------------------------------------------------- HUD
     const ui = K.overlay(
       CSS,
@@ -611,6 +723,7 @@ export default {
 
     // ---------------------------------------------------------------- race state
     let phase = 'intro'; // intro | race | done | podium
+    let bothT = -1;
     let introT = 0;
     let raceT = 0;
     let finishCount = 0;
@@ -638,6 +751,24 @@ export default {
       },
       L,
       give: (item) => (me.item = item),
+      link,
+      get shown() {
+        return resultShown;
+      },
+      // Tests: put our own karts at a distance along the race
+      warp(p) {
+        for (const r of racers) {
+          if (r.remote || r.finished) continue;
+          r.p = p;
+          r.s = S(p);
+          const q = T.at(r.s, r.d);
+          r.x = q.x;
+          r.z = q.z;
+          r.yaw = T.yaw(r.s);
+          r.lastLap = Math.floor(p / L) + 1;
+          r.hint = -1;
+        }
+      },
       finishNow: () => forceFinish(),
       podiumNow: () => {
         forceFinish();
@@ -654,11 +785,26 @@ export default {
       return d;
     };
 
-    function finishRider(r) {
+    let firstDone = false;
+    function finishRider(r, at = null) {
       r.finished = true;
       r.place = ++finishCount;
       r.time = raceT;
-      if (r.place === 1) {
+      if (link.together) {
+        r.time = at ?? r2(Math.max(0, link.elapsed()));
+        rank(racers);
+        if (r.me) {
+          // Places settle a moment later (the other player's crossing reaches us with a little delay)
+          setTimeout(() => {
+            if (!window.__kart || window.__kart !== dbg) return;
+            rank(racers);
+            pop(me.place === 1 ? 'You win!' : `${K.ord(me.place)} place`, '#fff6c8', 1600);
+            if (me.place === 1) fx.heartsAt(tmp.set(me.x, 2.4, me.z), 6);
+          }, 650);
+        }
+      }
+      if (!firstDone) {
+        firstDone = true;
         fx.burst(T.at(START, 0, new THREE.Vector3()).setY(2.5), ['#ff7fa3', '#ffd166', '#ffffff', '#7fd3a7', '#6fb8ff'], 90);
         crowd.cheer(1);
         K.sfx.cheer(sound, 0.08, 2);
@@ -667,13 +813,16 @@ export default {
         phase = 'done';
         doneT = 0;
         sound.ui(r.place === 1 ? 'win' : 'good');
-        pop(r.place === 1 ? 'You win!' : `${K.ord(r.place)} place`, '#fff6c8', 1800);
-        if (r.place === 1) fx.heartsAt(tmp.set(r.x, 2.4, r.z), 6);
+        if (link.together) pop('Finish!', '#fff6c8', 700);
+        else {
+          pop(r.place === 1 ? 'You win!' : `${K.ord(r.place)} place`, '#fff6c8', 1800);
+          if (r.place === 1) fx.heartsAt(tmp.set(r.x, 2.4, r.z), 6);
+        }
       }
     }
     function forceFinish() {
-      const rest = racers.filter((r) => !r.finished).sort((a, b) => b.p - a.p);
-      for (const r of rest) finishRider(r);
+      const rest = racers.filter((r) => !r.finished && !r.remote).sort((a, b) => b.p - a.p);
+      for (const r of rest) finishRider(r, link.together ? r2(Math.max(0, link.elapsed()) + Math.max(0, LAPS * L - r.p) / MAX) : null);
     }
 
     // ---------------------------------------------------------------- items
@@ -700,7 +849,9 @@ export default {
       } else {
         const p = T.at(r.s - 1.9, r.d);
         if (bananas.length >= MAXB) bananas.shift();
-        bananas.push({ x: p.x, z: p.z, s: T.mod(r.s - 1.9), d: r.d, owner: r, t: 0, yaw: Math.random() * 6 });
+        const id = (r.slot ?? r.i) * 1000 + (bananaN++ % 1000);
+        bananas.push({ id, x: p.x, z: p.z, s: T.mod(r.s - 1.9), d: r.d, owner: r, t: 0, yaw: Math.random() * 6 });
+        if (link.together) link.send('bn', { i: id, o: r.slot, s: r2(T.mod(r.s - 1.9)), d: r2(r.d) });
         if (near(r)) sound.ui('pop');
         if (r.me) pop('Banana dropped!', '#fff6c8', 700);
       }
@@ -913,10 +1064,22 @@ export default {
 
     // ---------------------------------------------------------------- simulation step
     function step(dt, t) {
-      if (phase === 'intro') introT += dt;
-      else raceT += dt;
+      // In a room the lights wait for the other player; together they turn green at the shared start
+      if (phase === 'intro') introT = link.together ? clamp(GREEN - (link.at - link.now()) / 1000, 0, GREEN + 0.5) : link.inRoom && link.mode !== 'solo' ? 0 : introT + dt;
+      else raceT = link.together ? Math.max(0, link.elapsed()) : raceT + dt;
       for (const r of racers) {
         if (phase === 'intro') continue;
+        if (r.remote) {
+          // Moved by the other device: here it only takes the item boxes it drives through
+          for (const b of boxes) {
+            if (b.off > 0 || r.finished) continue;
+            if (Math.hypot(r.x - b.x, r.z - b.z) < 1.35) {
+              b.off = 3;
+              if (near(r)) fx.burst(tmp.set(b.x, 0.9, b.z), ['#ff8fb1', '#ffd166', '#7fd3a7', '#6fb8ff'], 10);
+            }
+          }
+          continue;
+        }
         if (r.me) controlPlayer(r, dt);
         else controlAI(r, dt, t);
         r.boost -= dt;
@@ -953,6 +1116,7 @@ export default {
           if (Math.hypot(r.x - b.x, r.z - b.z) < 1.0) {
             bananas.splice(k, 1);
             spinOut(r);
+            if (link.together && b.id !== undefined) link.send('bh', { i: b.id });
           }
         }
         // Laps
@@ -981,12 +1145,12 @@ export default {
           const dd = b.d - a.d;
           if (Math.abs(dd) > 1.3) continue;
           const push = (1.3 - Math.abs(dd)) * 0.5 * (Math.sign(dd) || 1);
-          a.d = clamp(a.d - push, -LIM, LIM);
-          b.d = clamp(b.d + push, -LIM, LIM);
+          if (!a.remote) a.d = clamp(a.d - push, -LIM, LIM);
+          if (!b.remote) b.d = clamp(b.d + push, -LIM, LIM);
           if (Math.abs(dd) < 0.9) {
             const back = dp > 0 ? a : b;
             const front = dp > 0 ? b : a;
-            back.v = Math.min(back.v, front.v * 0.97);
+            if (!back.remote) back.v = Math.min(back.v, front.v * 0.97);
           }
           if ((a.me || b.me) && me.bumpCd <= 0) {
             me.bumpCd = 0.5;
@@ -1005,8 +1169,30 @@ export default {
       if (phase === 'done') {
         doneT += dt;
         const top3 = racers.filter((r) => r.finished).length;
-        if (doneT > 2.6 && top3 < racers.length && (top3 >= 3 || doneT > 5)) forceFinish();
-        if (doneT > 3.2 && racers.every((r) => r.finished)) startPodium();
+        if (!link.together) {
+          if (doneT > 2.6 && top3 < racers.length && (top3 >= 3 || doneT > 5)) forceFinish();
+          if (doneT > 3.2 && racers.every((r) => r.finished)) startPodium();
+        } else {
+          // Together: wait for the other player (and watch them drive in), then the rest as always
+          const theirs = !partner.remote || partner.finished;
+          if (!theirs && doneT > 4 && !spectate) {
+            spectate = true;
+            pop(`Go, ${partnerName}!`, '#fff6c8', 1400);
+          }
+          if (theirs && bothT < 0) bothT = doneT;
+          if (theirs && spectate && doneT - bothT > 1.6) {
+            spectate = false;
+            doneT = 2.4; // back to the happy driver
+            bothT = doneT;
+          }
+          const k = bothT < 0 ? 0 : doneT - bothT;
+          if (k > 2.6 && top3 < racers.length && (top3 >= 3 || k > 5)) forceFinish();
+          if (k > 3.2 && racers.every((r) => r.finished)) startPodium();
+          if (doneT > 95 && !theirs) {
+            partner.remote = false; // they never came: settle it here
+            forceFinish();
+          }
+        }
       }
       if (phase === 'podium') podT += dt;
       cheerCd -= dt;
@@ -1216,12 +1402,13 @@ export default {
 
     function updateCamera(dt) {
       const wide = camera.aspect > 1.9;
-      const boosting = me.boost > 0;
+      const F = spectate ? partner : me;
+      const boosting = F.boost > 0;
       const dist = (wide ? 5.3 : 6.8) + (boosting ? 0.6 : 0);
       const high = wide ? 2.5 : 3.1;
-      camYaw = dampAngle(camYaw, me.yaw + me.slip * 0.4, 3.2, dt);
-      const chasePos = tmp.set(me.x - Math.sin(camYaw) * dist, high, me.z - Math.cos(camYaw) * dist);
-      const chaseLook = tmp2.set(me.x + Math.sin(camYaw) * 5, 1.0, me.z + Math.cos(camYaw) * 5);
+      camYaw = dampAngle(camYaw, F.yaw + F.slip * 0.4, spectate ? 2.4 : 3.2, dt);
+      const chasePos = tmp.set(F.x - Math.sin(camYaw) * dist, high, F.z - Math.cos(camYaw) * dist);
+      const chaseLook = tmp2.set(F.x + Math.sin(camYaw) * 5, 1.0, F.z + Math.cos(camYaw) * 5);
       let fovT = boosting ? 60 : 50;
       if (phase === 'intro') {
         // Sweep in front of the grid, then settle behind the player before the lights
@@ -1244,7 +1431,7 @@ export default {
         camPos.lerp(cp, k);
         camLook.lerp(cl, k);
         fovT = 50;
-      } else if (phase === 'done') {
+      } else if (phase === 'done' && !spectate) {
         // Swing round to the front of the kart to see the happy driver
         const k = easeInOut(clamp(doneT / 2.4, 0, 1));
         const a = me.yaw + Math.PI * 0.85 * k;
@@ -1305,9 +1492,18 @@ export default {
     for (const r of racers) poseRacer(r, 0.016, 0);
     updateCamera(1);
     hud.message('Kart Race', 1300);
+    // In a room: the lights wait for the other player, then turn green at the same moment on both
+    link.begin().then((mode) => {
+      if (mode !== 'together' || window.__kart !== dbg) return;
+      goTogether();
+      for (const r of racers) poseRacer(r, 0.016, 0);
+      updateCamera(1);
+    });
 
     return {
       update(dt, t) {
+        link.update();
+        if (link.together && phase !== 'intro') followRemote();
         const n = clamp(Math.round(dbg.fast) || 1, 1, 24);
         for (let k = 0; k < n; k++) {
           step(dt, t + k * dt);
@@ -1329,11 +1525,13 @@ export default {
         if (phase === 'podium' && podT > 1.2 && Math.random() < dt * 2) fx.burst(new THREE.Vector3(pdp.x, 3.4, pdp.z), ['#ff7fa3', '#ffd166', '#ffffff', '#7fd3a7', '#6fb8ff'], 24);
         if (phase === 'podium' && podT > 5.2 && !resultShown) showResult();
         engineTick(me.v, phase === 'race' || phase === 'done');
+        shareMe();
         updateScenery(dt, t);
         updateCamera(dt * n);
         updateHud();
       },
       dispose() {
+        link.dispose();
         engineStop();
         ui.remove();
         K.hotButton('action', false);

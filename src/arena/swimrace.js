@@ -6,6 +6,7 @@ import { makeSfx } from './swimrace/sfx.js';
 import { runRace } from './swimrace/race.js';
 import { runRings } from './swimrace/rings.js';
 import { runSync } from './swimrace/sync.js';
+import { raceLink } from './races/together.js';
 
 // Splash Gala: a swimming day in a bright 3D pool, five events in a row.
 //   1 Sprint: one length, dive at the whistle, swim in rhythm with the ring; the partner waits with a towel.
@@ -14,6 +15,9 @@ import { runSync } from './swimrace/sync.js';
 //   4 Ring Dive: dive for rings on the pool floor before your air runs out; a heart ring hides in a chest.
 //   5 Synchronised Swim: copy the partner's moves on the beat, then a big finish together.
 // Stars for every event (1 to 3), a saved best and best times; rivals get quicker as your best grows.
+// Played together online, each swims their own kid: the sprint and the race against each other in the
+// next lane, the relay as one team (the one who opened the gala swims the first length), with one
+// whistle on the shared clock; the ring dive and the synchronised swim each on their own.
 
 const NPCS = [
   { name: 'Kai', cap: '#3fbf7f', look: { id: 'kai', name: 'Kai', gender: 'boy', skin: '#c98f68', hair: '#141010', hairstyle: 'curly', outfit: 'tee-shorts', top: '#3fbf7f', bottom: '#2c3e66', shoes: '#3b2b3f', accent: '#ffd166' } },
@@ -56,6 +60,8 @@ export default {
     let disposed = false;
     const waits = [];
     const dbg = { auto: false, speed: 1, rival: 1 };
+    const link = raceLink(ctx, {});
+    dbg.link = link;
     const G = {
       ctx,
       pool,
@@ -71,6 +77,10 @@ export default {
       clockT: 0,
       focusX: 0,
       alive: () => !disposed,
+      link,
+      together: false,
+      partnerLeft: false,
+      shareState: null,
       wait: (s) => new Promise((res) => waits.push({ at: G.now + s, res })),
       until: (fn) => new Promise((res) => waits.push({ fn, res })),
       line: (html, ms = 2800) => ui.line(html, ms),
@@ -155,6 +165,16 @@ export default {
       G.events = events;
       const results = [];
       G.results = results;
+      // In a room: wait for the other player before the first event
+      const mode = await link.begin();
+      if (disposed) return;
+      G.together = mode === 'together';
+      if (G.together)
+        link.onLeave(() => {
+          if (G.partnerLeft || disposed) return;
+          G.partnerLeft = true;
+          ui.pop?.(`${G.names.pal} had to go`, '#ffffff', 1400);
+        });
       const startAt = dbg.startAt || 0;
       for (let i = startAt; i < events.length; i++) {
         const ev = events[i];
@@ -171,6 +191,12 @@ export default {
         G.drape = null;
         setTimeout(() => !disposed && ui.wipe(false), 120);
         let res;
+        // Together: both arrive at the blocks, then one whistle on the shared clock
+        if (ev.kind && G.together && !G.partnerLeft) {
+          ev.at = await link.meet(`e${i}`, 4100 + Math.floor(Math.random() * 1000));
+          if (disposed) return;
+          if (ev.at === null) delete ev.at;
+        }
         if (ev.kind) res = await runRace(G, ev);
         else if (ev.id === 'rings') res = await runRings(G, ev);
         else res = await runSync(G, ev);
@@ -245,7 +271,8 @@ export default {
       await G.wait(1.2);
       if (disposed) return;
       const rows = events.map((e, i) => `${e.title}: ${results[i] ? stars(results[i].stars) : '-'}`).join('<br>');
-      const title = total >= 13 ? 'Gala champions!' : total >= 9 ? 'What a splashy day!' : 'A lovely swim together';
+      // Together the card's banner says who scored more, so the title only says how the day went
+      const title = total >= 13 ? (G.together ? 'What a gala!' : 'Gala champions!') : total >= 9 ? 'What a splashy day!' : 'A lovely swim together';
       ctx.finish({
         win: total >= 9,
         stars: total,
@@ -266,11 +293,13 @@ export default {
       b.click();
       return true;
     };
+    dbg.G = G;
     window.__swimrace = dbg;
 
     // ---------------------------------------------------------------- frame
     function step(dt, t) {
       G.now += dt;
+      link.update();
       for (let i = waits.length - 1; i >= 0; i--) {
         const w = waits[i];
         if (w.fn ? w.fn() : G.now >= w.at) {
@@ -292,6 +321,8 @@ export default {
           step(h, gt);
         }
         const t = gt;
+        const shared = G.shareState?.();
+        if (shared) link.share(shared);
         pool.update(dt, t, G.foam, G.clockT);
         // camera
         const k = 1 - Math.exp(-cam.rate * dt * (dbg.speed || 1));
@@ -309,6 +340,7 @@ export default {
       },
       dispose() {
         disposed = true;
+        link.dispose();
         waits.length = 0;
         ui.remove();
         if (window.__swimrace === dbg) delete window.__swimrace;

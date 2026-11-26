@@ -1,6 +1,9 @@
 // Horse Race: ride your pony round the Meadow Cup course against your partner, Kai and Mina.
 // Steer like in town, hold forward to gallop, Shift or the Sprint button to sprint, Space to jump.
+// Played together online, the partner's pony is the other player, riding on their own device; Kai and
+// Mina belong to the one who opened the race, so both screens show the same race and the same places.
 import * as THREE from 'three';
+import { raceLink, round, rank } from './races/together.js';
 import { mat, damp, dampAngle, clamp, easeInOut, easeOutBack } from '../util.js';
 import { makeTrack, placeObstacles, buildCourse, LIM } from './riding/course.js';
 import * as K from './riding/kit.js';
@@ -77,6 +80,89 @@ export default {
     const riders = defs.map((def, i) => makeRider(def, i));
     const me = riders.find((r) => r.me);
     const partner = riders.find((r) => r.real && !r.me);
+
+    // ---------------------------------------------------------------- playing together online
+    // p, d, yaw, y, vy, v, turn, flags (1 sprint, 2 tired), stumble
+    const KINDS = 'llallllnl';
+    const link = raceLink(ctx, { lead: 4200, kinds: KINDS, aiKinds: KINDS });
+    const { r2, r3 } = round;
+    const rivals = riders.filter((r) => !r.real);
+    let spectate = false;
+    const sampleOf = (r) => [r2(r.p), r2(r.d), r3(r.yaw), r2(r.y), r2(r.vy), r2(r.v), r2(r.turn), (r.sprint ? 1 : 0) | (r.tired ? 2 : 0), r2(Math.max(0, r.stumble))];
+    const placeAt = (r, p, d) => {
+      r.p = p;
+      r.s = T.mod(p);
+      r.d = r.laneT = d;
+      const q = T.at(r.s, r.d);
+      r.x = q.x;
+      r.z = q.z;
+    };
+    // A rider driven from the other device carries on as a computer rider
+    const takeOver = (r) => {
+      r.remote = false;
+      r.nextOb = obsList.findIndex((ob) => ob.p > r.p);
+      if (r.nextOb < 0) r.nextOb = obsList.length;
+      r.plan = -1;
+      r.laneT = r.d;
+      r.hint = -1;
+    };
+    const goTogether = () => {
+      // The one who opened the race rides on the inside, the one who joined next to them
+      const mine = link.host ? 1.05 : -1.05;
+      placeAt(me, me.p, mine);
+      placeAt(partner, partner.p, -mine);
+      me.slot = link.host ? 0 : 1;
+      partner.slot = link.host ? 1 : 0;
+      rivals.forEach((r, i) => (r.slot = 2 + i));
+      partner.remote = true;
+      if (!link.host) rivals.forEach((r, i) => ((r.remote = true), (r.aiIndex = i)));
+      link.onLeave(() => {
+        for (const r of riders) if (r.remote) takeOver(r);
+        if (!partner.finished) pop(`${partnerName} left the race`, '#ffe1e6', 1600);
+      });
+    };
+    const rs = [];
+    const seenF = new Map();
+    function followRemote() {
+      const st = link.last;
+      for (const r of riders) {
+        if (!r.remote) continue;
+        const tr = r === partner ? link.them : link.ai[r.aiIndex];
+        const a = tr && link.sample(tr, rs);
+        if (a) {
+          const p = a[0];
+          r.p = p;
+          r.s = T.mod(p);
+          r.d = a[1];
+          r.yaw = a[2];
+          r.y = Math.max(0, a[3]);
+          r.vy = a[4];
+          r.v = a[5];
+          r.turn = a[6];
+          r.sprint = !!(a[7] & 1);
+          r.tired = !!(a[7] & 2);
+          r.stumble = a[8];
+          const q = T.at(r.s, r.d, tmp);
+          r.x = q.x;
+          r.z = q.z;
+        }
+        // Their finish time arrives a moment before we see them cross the line
+        const f = !st ? null : r === partner ? st.f : Array.isArray(st.af) ? st.af[r.aiIndex] : null;
+        if (Number.isFinite(f) && !r.finished) {
+          if (!seenF.has(r)) seenF.set(r, link.now());
+          if (r.p >= LAPS * L - 0.3 || link.now() - seenF.get(r) > 700) finishRider(r, f);
+        }
+      }
+    }
+    function shareMe() {
+      if (!link.inRoom) return;
+      const st = { me: sampleOf(me), f: me.finished ? me.time : null };
+      if (link.host && link.together) {
+        st.ai = rivals.map(sampleOf);
+        st.af = rivals.map((r) => (r.finished ? r.time : null));
+      }
+      link.share(st);
+    }
 
     function helmet(kid, color) {
       // Hide the hair the helmet covers so nothing pokes through it
@@ -306,6 +392,10 @@ export default {
     let raceT = 0;
     let introT = 0;
     let finishCount = 0;
+    let ribbonDone = false;
+    let resultShown = false;
+    let waitT = 0;
+    let heldBack = false;
     let endTimer = -1;
     let ribbon = 'hidden'; // hidden | up | broken
     let ribbonT = 0;
@@ -319,7 +409,36 @@ export default {
     let doneT = 0;
     const doneFrom = new THREE.Vector3();
     const tmp = new THREE.Vector3();
-    const dbg = { fast: 1, auto: false, riders, T, obs: course.obs, get phase() { return phase; }, get raceT() { return raceT; }, L };
+    const dbg = {
+      fast: 1,
+      auto: false,
+      riders,
+      T,
+      obs: course.obs,
+      link,
+      get phase() {
+        return phase;
+      },
+      get raceT() {
+        return raceT;
+      },
+      get shown() {
+        return resultShown;
+      },
+      L,
+      // Tests: put our own riders at a distance along the race
+      warp(p) {
+        for (const r of riders) {
+          if (r.remote || r.finished) continue;
+          placeAt(r, p, r.d);
+          r.hint = -1;
+          r.nextOb = obsList.findIndex((ob) => ob.p > p);
+          if (r.nextOb < 0) r.nextOb = obsList.length;
+          r.y = 0;
+          r.vy = 0;
+        }
+      },
+    };
     window.__riding = dbg;
 
     const near = (r) => Math.hypot(r.x - me.x, r.z - me.z) < 26;
@@ -354,11 +473,24 @@ export default {
       if (r.me) pop('Splash!', '#dff6ff');
     }
 
-    function finishRider(r) {
+    function finishRider(r, at = null) {
       r.finished = true;
       r.place = ++finishCount;
       r.time = raceT;
-      if (r.place === 1) {
+      if (link.together) {
+        r.time = at ?? r2(Math.max(0, link.elapsed()));
+        rank(riders);
+        if (r.me) {
+          // Places settle a moment later (the other player's crossing reaches us with a little delay)
+          setTimeout(() => {
+            if (disposed) return;
+            rank(riders);
+            pop(me.place === 1 ? 'You win!' : `${K.ord(me.place)} place`, '#fff6c8', 1600);
+          }, 650);
+        }
+      }
+      if (r.place === 1 && !ribbonDone) {
+        ribbonDone = true;
         ribbon = 'broken';
         ribbonT = 0;
         fx.burst(T.at(0, 0, new THREE.Vector3()).setY(1.6), ['#ff7fa3', '#ffd166', '#ffffff', '#7fd3a7', '#6fb8ff'], 90);
@@ -372,13 +504,13 @@ export default {
         doneFrom.copy(camPos);
         if (r.place === 1) fx.heartsAt(tmp.set(r.x, 2.6, r.z), 6);
         sound.ui(r.place === 1 ? 'win' : 'good');
-        pop(r.place === 1 ? 'You win!' : `${K.ord(r.place)} place`, '#fff6c8', 1800);
+        pop(link.together ? 'Finish!' : r.place === 1 ? 'You win!' : `${K.ord(r.place)} place`, '#fff6c8', link.together ? 700 : 1800);
       }
     }
 
     function forceFinish() {
-      const rest = riders.filter((r) => !r.finished).sort((a, b) => b.p - a.p);
-      for (const r of rest) finishRider(r);
+      const rest = riders.filter((r) => !r.finished && !r.remote).sort((a, b) => b.p - a.p);
+      for (const r of rest) finishRider(r, link.together ? r2(Math.max(0, link.elapsed()) + Math.max(0, LAPS * L - r.p) / 9) : null);
     }
 
     // ---------------------------------------------------------------- control
@@ -518,10 +650,11 @@ export default {
 
     // ---------------------------------------------------------------- simulation step
     function step(dt, t) {
-      if (phase === 'race' || phase === 'done') raceT += dt;
+      if (phase === 'race' || phase === 'done') raceT = link.together ? Math.max(0, link.elapsed()) : raceT + dt;
       if (phase === 'intro') introT += dt;
       const live = phase !== 'intro';
       for (const r of riders) {
+        if (r.remote) continue;
         if (live) {
           if (r.me) controlPlayer(r, dt);
           else controlAI(r, dt, t);
@@ -580,12 +713,12 @@ export default {
           const dd = b.d - a.d;
           if (Math.abs(dd) > 0.95) continue;
           const push = (0.95 - Math.abs(dd)) * 0.5 * (Math.sign(dd) || 1);
-          a.d = clamp(a.d - push, -LIM, LIM);
-          b.d = clamp(b.d + push, -LIM, LIM);
+          if (!a.remote) a.d = clamp(a.d - push, -LIM, LIM);
+          if (!b.remote) b.d = clamp(b.d + push, -LIM, LIM);
           if (Math.abs(dd) < 0.6) {
             const back = dp > 0 ? a : b;
             const front = dp > 0 ? b : a;
-            back.v = Math.min(back.v, front.v + 0.2);
+            if (!back.remote) back.v = Math.min(back.v, front.v + 0.2);
           }
           for (const r of [a, b]) {
             if (!r.me) continue;
@@ -605,6 +738,26 @@ export default {
       if (live && raceT > TIME_CAP && !me.finished) forceFinish();
       if (endTimer > 0) {
         endTimer -= dt;
+        // Together: the result waits for the other player to finish (up to a minute and a half)
+        const waiting = link.together && partner.remote && !partner.finished && waitT < 90;
+        if (waiting) {
+          endTimer = Math.max(endTimer, 0.01);
+          waitT += dt;
+          heldBack = true;
+        } else if (heldBack) {
+          heldBack = false;
+          endTimer = Math.max(endTimer, spectate ? 2.2 : 1.4); // a moment to see them cross
+        }
+        if (waiting && doneT > 4 && !spectate) {
+          spectate = true;
+          pop(`Go, ${partnerName}!`, '#fff6c8', 1400);
+        }
+        if (!waiting && spectate) {
+          spectate = false;
+          endTimer = Math.max(endTimer, 2.2);
+          doneFrom.copy(camPos);
+          doneT = 0.0001;
+        }
         if (endTimer <= 0) showResult();
       }
       if (phase === 'done') doneT += dt;
@@ -612,6 +765,11 @@ export default {
     }
 
     function showResult() {
+      resultShown = true;
+      if (link.together) {
+        if (!partner.finished && partner.remote) partner.place = 0;
+        rank(riders);
+      }
       const place = me.place;
       const total = me.clean + me.hits;
       const time = me.time.toFixed(1);
@@ -712,9 +870,10 @@ export default {
       const wide = camera.aspect > 1.9;
       const dist = wide ? 6.6 : 7.3;
       const high = wide ? 3.0 : 3.4;
-      camYaw = dampAngle(camYaw, me.yaw, 3.2, dt);
-      const chasePos = tmp.set(me.x - Math.sin(camYaw) * dist, high + me.y * 0.45, me.z - Math.cos(camYaw) * dist);
-      const chaseLook = new THREE.Vector3(me.x + Math.sin(me.yaw) * 4, 1.25 + me.y * 0.4, me.z + Math.cos(me.yaw) * 4);
+      const F = spectate ? partner : me;
+      camYaw = dampAngle(camYaw, F.yaw, spectate ? 2.2 : 3.2, dt);
+      const chasePos = tmp.set(F.x - Math.sin(camYaw) * dist, high + F.y * 0.45, F.z - Math.cos(camYaw) * dist);
+      const chaseLook = new THREE.Vector3(F.x + Math.sin(F.yaw) * 4, 1.25 + F.y * 0.4, F.z + Math.cos(F.yaw) * 4);
       if (phase === 'intro' || raceT < 1.4) {
         const sp = T.at(-6 + 13 - Math.min(introT, 6) * 0.3, 3.5 - Math.min(introT, 6) * 0.25);
         const ip = new THREE.Vector3(sp.x, 2.6, sp.z);
@@ -723,7 +882,7 @@ export default {
         camPos.lerpVectors(ip, chasePos, k);
         camPos.y += Math.sin(k * Math.PI) * 3.2; // swing up over the riders, not through them
         camLook.lerpVectors(il, chaseLook, k);
-      } else if (phase === 'done') {
+      } else if (phase === 'done' && !spectate) {
         // Swing past to the front of the rider, near the inner rail, to see their happy face
         const k = easeInOut(clamp(doneT / 2.2, 0, 1));
         // high enough that riders still crossing the line pass under the view
@@ -799,10 +958,20 @@ export default {
     (async () => {
       await new Promise((res) => setTimeout(res, 700));
       if (disposed) return;
-      hud.message('Meadow Cup', 1100);
-      await new Promise((res) => setTimeout(res, 1300));
+      // In a room: wait for the other player, then both count down to the same moment
+      const mode = await link.begin();
       if (disposed) return;
-      await hud.countdown(3);
+      if (mode === 'together') {
+        goTogether();
+        for (const r of riders) poseRider(r, 0.016, 0);
+        hud.message('Meadow Cup', 1100);
+        await link.countdown();
+      } else {
+        hud.message('Meadow Cup', 1100);
+        await new Promise((res) => setTimeout(res, 1300));
+        if (disposed) return;
+        await hud.countdown(3);
+      }
       if (disposed) return;
       phase = 'race';
       raceT = 0;
@@ -812,8 +981,11 @@ export default {
 
     return {
       update(dt, t) {
+        link.update();
+        if (link.together && phase !== 'intro') followRemote();
         const n = clamp(Math.round(dbg.fast) || 1, 1, 24);
         for (let k = 0; k < n; k++) step(dt, t + k * dt);
+        shareMe();
         for (const r of riders) poseRider(r, dt, t);
         updateScenery(dt, t);
         updateCamera(dt);
@@ -821,6 +993,7 @@ export default {
       },
       dispose() {
         disposed = true;
+        link.dispose();
         ui.remove();
         if (window.__riding === dbg) delete window.__riding;
       },
