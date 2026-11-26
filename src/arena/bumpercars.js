@@ -4,6 +4,11 @@
 // ball goals, last car moving (the outer tiles switch off) and Roji and Homama as a team against
 // the mascots Mimi and Bobo. Stars for every round, a saved best night.
 // Controls: stick or WASD / arrows point where to drive; Space, E or the Honk button honks or uses the power-up.
+// Online (both in a room and both play): Roji and Homama each drive their own car in the same arena.
+// The device that started the game (the host) runs the computer cars, the balls, the bumps and every
+// score; the other device drives its own car (and bounces off what it sees) and shows what the host sends.
+// A bump the other driver makes counts from their own screen: they report it, the host checks it is
+// close to what it sees, knocks the car that was hit and scores it.
 import * as THREE from 'three';
 import { canvasTexture } from '../util.js';
 import * as K from './riding/kit.js';
@@ -12,7 +17,8 @@ import { makeCar } from './bumpercars/cars.js';
 import { CR, BR, MAX, newBody, stepCar, wallBounce, carHit, ballHit, stepBall, backOff } from './bumpercars/sim.js';
 import { BumperFx } from './bumpercars/fx.js';
 import { ROUNDS } from './bumpercars/rounds.js';
-import { closeChoices } from '../engine/choose.js';
+import { choose, closeChoices } from '../engine/choose.js';
+import { Link, lerpA } from './duels/link.js';
 
 const ICONS = {
   horn: `<svg viewBox="0 0 48 48" width="38" height="38"><path d="M8 20h7l17-10v28L15 28H8z" fill="#ffd166" stroke="#c99a2e" stroke-width="2.4" stroke-linejoin="round"/><path d="M36 16c3 2 4 5 4 8s-1 6-4 8M40 11c5 3 7 8 7 13s-2 10-7 13" fill="none" stroke="#ef5b6f" stroke-width="2.6" stroke-linecap="round"/></svg>`,
@@ -69,6 +75,14 @@ export default {
     const sfx = fx;
     let disposed = false;
     const nameOf = (id) => looks[id]?.name || (id === 'roji' ? 'Roji' : 'Homama');
+    // ---------------------------------------------------------------- online
+    const link = new Link(ctx.online);
+    let net = false; // both drive in this arena together right now
+    let played = false; // the night started together (for the result card)
+    const now = () => link.now();
+    const authority = () => !net || link.host; // runs the computer cars, the balls and the scores
+    const r2 = (v) => Math.round(v * 100);
+    const r1 = (v) => Math.round(v * 10) / 10;
 
     // ---------------------------------------------------------------- cars
     const IDS = ['roji', 'homama', 'mimi', 'bobo', 'nina', 'sam'];
@@ -197,6 +211,27 @@ export default {
       p.z = at.z;
       p.y = 1.9;
     };
+    // Words for whoever they are about: lines { [carId]: text | [text, color, big], '*': everyone else }.
+    // The host also sends the other driver their own line.
+    const pick = (lines, id, color, big) => {
+      const v = id in lines ? lines[id] : lines['*'];
+      if (v == null) return null;
+      const a = Array.isArray(v) ? v : [v];
+      return [a[0], a[1] ?? color, a[2] ?? big];
+    };
+    const tell = (lines, at, color = '#fff', big = false) => {
+      const mine = pick(lines, G.me?.id, color, big);
+      if (mine) pop(mine[0], at, mine[1], mine[2]);
+      if (net && link.host && G.partner?.remote && !G.inSetup) {
+        const v = pick(lines, G.partner.id, color, big);
+        if (v) link.add(['p', v[0], r1(at.x), r1(at.z), v[1], v[2] ? 1 : 0]);
+      }
+    };
+    // A big centre message for one driver (ours here, or sent to the other)
+    const shout = (c, html, ms) => {
+      if (c === G.me) hud.message(html, ms);
+      else if (net && link.host && c.remote) link.add(['m', html, ms]);
+    };
     // the round result banner, hidden again in game time (so the test speed-up keeps it in step)
     let resId = 0;
     const showRes = (html, ms = 2600) => {
@@ -226,6 +261,7 @@ export default {
     let phase = 'menu';
     let plan = [0, 1, 2, 3, 4];
     const results = [];
+    const guestResults = []; // online, host: the other driver's stars per round
     let shake = 0;
     const G = {
       cars,
@@ -246,8 +282,13 @@ export default {
       need: [0, 0, 0],
       playerBias: 0.7,
       teamScore: [0, 0],
-      pop,
-      toast,
+      humans: null,
+      pop: (text, at, color, big) => tell({ '*': text }, at, color, big),
+      tell,
+      toast(html, ms) {
+        toast(html, ms);
+        if (net && link.host) link.add(['t', html, ms || 2600]);
+      },
       skill(c) {
         const r = G.ri + (plan.length === 1 ? plan[0] : 0) * 0.6;
         const base = { speed: Math.min(0.98, 0.8 + r * 0.045), aim: 0.35 + r * 0.13, block: 0.1 + r * 0.16, turn: 2.7 + r * 0.18 };
@@ -265,6 +306,7 @@ export default {
       },
       fxHearts(c) {
         ctx.fx.heartsAt(new THREE.Vector3(c.x, 1.9, c.z), 4);
+        if (net && link.host) link.add(['h', r1(c.x), r1(c.z)]);
       },
       addBall(gold = false) {
         const b = balls.find((x) => !x.on);
@@ -280,8 +322,7 @@ export default {
         v.safeT = G.now + 2.6;
         v.lights = Math.max(0, v.lights - 1);
         fx.spark({ x: v.x, y: 0.8, z: v.z }, 14, { color: ['#ff9eb5', '#fff3c4'], speed: 2.4, up: 1.2, life: 0.5 });
-        if (v === G.me && v.lights > 0) pop(v.lights === 1 ? 'Last light! Careful!' : 'A light went out', v, '#ffd1dc', true);
-        if (v.lights > 0) return;
+        if (v.lights > 0) return tell({ [v.id]: [v.lights === 1 ? 'Last light! Careful!' : 'A light went out', '#ffd1dc', true] }, v);
         v.alive = false;
         v.outT = 0;
         G.outOrder.push(v);
@@ -291,19 +332,19 @@ export default {
         gesture(v, 'shrug', 2.2);
         const tip = tipOf(v);
         fx.spark(tip, 24, { color: ['#c7e9ff', '#ffffff'], speed: 2, up: 0.4, life: 0.8 });
-        if (v === G.me) {
-          ctx.hud.message('Out!', 1200);
-        } else pop(`${v.name} is out!`, v, '#ffffff', by === G.me);
-        if (by === G.me) G.me.score++;
+        shout(v, 'Out!', 1200);
+        tell({ [v.id]: null, ...(by ? { [by.id]: [`${v.name} is out!`, '#ffffff', true] } : {}), '*': `${v.name} is out!` }, v);
+        if (by?.human) by.score++;
+        if (net && link.host) link.add(['o', v.i]);
         // Homama keeps Roji company once her car stops
         const h = byId.homama;
-        if (v.id === 'roji' && h.alive && h.active && h !== G.me) {
+        if (v.id === 'roji' && h.alive && h.active && !h.human) {
           h.keepCompany = true;
           after(0.8, () => toast(`${G.me === v ? 'You are out.' : 'Roji is out.'} Homama drives over to keep her company.`, 3200));
-        } else if (v.id === 'roji' && G.me === byId.homama && h.alive) {
+        } else if (v.id === 'roji' && h.human && h.alive) {
           after(0.6, () => {
             gesture(v, 'cheer', 2.5);
-            toast('Roji waves from her car: "Go, Homama!"', 2800);
+            G.toast('Roji waves from her car: "Go, Homama!"', 2800);
           });
         }
       },
@@ -316,7 +357,7 @@ export default {
           if (G.now - (G.loved.tap || -9) < 5) return;
           G.loved.tap = G.now;
           G.fxHearts({ x: (h.x + r.x) / 2, z: (h.z + r.z) / 2 });
-          pop('Love tap!', ev, '#ffd1dc', true);
+          G.pop('Love tap!', ev, '#ffd1dc', true);
           return;
         }
         if (G.loved[kind]) return;
@@ -325,13 +366,13 @@ export default {
           gesture(h, 'kiss', 1.6);
           after(0.5, () => G.fxHearts(h));
           after(1.0, () => G.fxHearts(r));
-          after(0.4, () => toast('Homama blows Roji a kiss across the floor.', 2800));
+          after(0.4, () => G.toast('Homama blows Roji a kiss across the floor.', 2800));
         } else if (kind === 'sorry') {
           gesture(h, 'kiss', 1.6);
-          pop('Sorry, love!', h, '#ffd1dc', true);
+          G.pop('Sorry, love!', h, '#ffd1dc', true);
           after(0.5, () => G.fxHearts(h));
         } else if (kind === 'rescue') {
-          pop('Homama to the rescue!', h, '#8fd3ff', true);
+          G.pop('Homama to the rescue!', h, '#8fd3ff', true);
           gesture(h, 'cheer', 1.2);
           after(0.4, () => toast(`${ev.name} bumped Roji. Homama is coming for ${ev.name === 'Mimi' ? 'her' : 'him'}!`, 2600));
         }
@@ -339,8 +380,10 @@ export default {
     };
 
     // ---------------------------------------------------------------- driver gestures
+    const GEST = ['', 'cheer', 'wave', 'kiss', 'shrug', 'hold', 'laugh'];
     const gesture = (c, type, dur = 1.2) => {
       c.gest = { type, t: 0, dur };
+      c.gn = (c.gn || 0) + 1; // the host shares gestures with the other device by this count
     };
     const tipOf = (c) => ({ x: c.x - Math.sin(c.yaw) * 0.8, y: GRID_Y, z: c.z - Math.cos(c.yaw) * 0.8 });
     const local = (c, lx, ly, lz, out) => out.set(c.x + Math.cos(c.yaw) * lx + Math.sin(c.yaw) * lz, ly, c.z - Math.sin(c.yaw) * lx + Math.cos(c.yaw) * lz);
@@ -459,11 +502,29 @@ export default {
 
     // ---------------------------------------------------------------- collisions and their effects
     const cool = new Map();
+    const coolX = new Map(); // host: the other driver's reported bumps, per pair of cars
+    const seenHit = new Map(); // host: when it last saw the other driver's car touch each car
+    const pairKey = (a, b) => (a.i < b.i ? a.i * 16 + b.i : b.i * 16 + a.i);
+    const KINDS = ['touch', 'bump', 'mega', 'clonk', 'block'];
+    // A bump: the sparks, the sounds, the wobble, and (on the device that keeps the score) the round's
+    // scoring. Online the host also sends it to the other device (ev.net: one that came from the host).
     function onEvent(ev) {
       if (!ev || ev.quiet) return;
       const { a, b, kind, power } = ev;
       const R = G.round;
-      const playing = phase === 'play';
+      const live = phase === 'play';
+      // host: a bump the other driver made is scored from their report, not from what the host sees
+      const rc = net && link.host && G.partner?.remote ? G.partner : null;
+      const theirs = rc && !ev.reported && !ev.net && (a === rc || b === rc);
+      const bumpKind = kind === 'bump' || kind === 'mega';
+      if (theirs) seenHit.set(pairKey(a, b), G.now);
+      const playing = live && authority() && !ev.net && !(theirs && a === rc && bumpKind);
+      // ... and a bump on their car is sent to them, so their car feels it
+      if (theirs && b === rc && bumpKind && live) {
+        const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        link.add(['k', r1(((b.x - a.x) / l) * power * 1.1), r1(((b.z - a.z) / l) * power * 1.1), r1((Math.random() - 0.5) * power * 0.5), r1(0.35 + Math.min(0.6, power * 0.08)), a.i]);
+      }
+      if (net && link.host && (kind !== 'touch' || power > 1.2)) link.add(['b', a.i, b.i, KINDS.indexOf(kind), r1(power), r1(ev.x), r1(ev.z)]);
       const nx0 = b.x - a.x;
       const nz0 = b.z - a.z;
       const nl = Math.hypot(nx0, nz0) || 1;
@@ -475,7 +536,7 @@ export default {
         }
         if (playing) R.onContact?.(G, ev);
         // computer drivers that just lean on each other give up and come round again
-        if (power > 0.6) for (const [c, o] of [[a, b], [b, a]]) if ((c !== G.me || dbg.auto) && Math.random() < 0.2) backOff(c, o, 0.5);
+        if (power > 0.6) for (const [c, o] of [[a, b], [b, a]]) if ((!c.human || dbg.auto) && Math.random() < 0.2) backOff(c, o, 0.5);
         return;
       }
       sfx.bonk(power / 4);
@@ -490,14 +551,14 @@ export default {
       sfx.crackle(0.8);
       if (G.me === a || G.me === b) shake = Math.max(shake, Math.min(0.45, power * 0.06));
       if (kind === 'clonk' || kind === 'block') {
-        for (const [c, o] of [[a, b], [b, a]]) if ((c !== G.me || dbg.auto) && Math.random() < 0.7) backOff(c, o, 0.5 + Math.random() * 0.4);
+        for (const [c, o] of [[a, b], [b, a]]) if ((!c.human || dbg.auto) && Math.random() < 0.7) backOff(c, o, 0.5 + Math.random() * 0.4);
       }
       if (kind === 'clonk') {
         sfx.clonk();
-        if (playing && (a === G.me || b === G.me)) pop('Clonk!', ev, '#c7e9ff');
+        if (live && (a === G.me || b === G.me)) pop('Clonk!', ev, '#c7e9ff');
       } else if (kind === 'block') {
-        if (playing && b === G.me) pop('Blocked!', ev, '#c7e9ff', true);
-        else if (playing && a === G.me) pop('Blocked!', ev, '#c7e9ff');
+        if (live && b === G.me) pop('Blocked!', ev, '#c7e9ff', true);
+        else if (live && a === G.me) pop('Blocked!', ev, '#c7e9ff');
       } else {
         // a real bump
         S.crowd.cheer(kind === 'mega' ? 1 : 0.6);
@@ -509,8 +570,8 @@ export default {
           sfx.boing(380);
         }
         if (b.d.mascot && Math.random() < 0.4) sfx.boing(b.d.laugh * 0.5);
-        if (a !== G.me || dbg.auto) backOff(a, b, 0.6 + Math.random() * 0.4);
-        if (b !== G.me && Math.random() < 0.45) {
+        if (!a.human || dbg.auto) backOff(a, b, 0.6 + Math.random() * 0.4);
+        if (!b.human && Math.random() < 0.45) {
           b.ai.revenge = a;
           b.ai.timer = 2.5;
         }
@@ -526,11 +587,15 @@ export default {
       }
     }
 
-    function horn(c) {
+    function hornFx(c) {
       sfx.megaHorn();
       fx.ring(c, 4.6, '#ffe08a');
       fx.flash({ x: c.x, y: 1, z: c.z }, 3.5, '#ffe08a', 0.4);
       if (c === G.me) shake = 0.35;
+    }
+    function horn(c) {
+      hornFx(c);
+      if (net && link.host) link.add(['H', c.i]);
       gesture(c, 'cheer', 0.9);
       const hit = [];
       for (const o of G.active) {
@@ -540,9 +605,12 @@ export default {
         const d = Math.hypot(dx, dz);
         if (d > 4.8 || d < 1e-3) continue;
         const push = 6.5 * (1 - d / 5.4) + 2.6;
+        const spin = (Math.random() - 0.5) * 7;
+        // the other driver's car is theirs to move: send them the blast
+        if (o.remote && net) link.add(['k', r1((dx / d) * push), r1((dz / d) * push), r1(spin), 0.7]);
         o.vx += (dx / d) * push;
         o.vz += (dz / d) * push;
-        o.spin += (Math.random() - 0.5) * 7;
+        o.spin += spin;
         o.dizzy = Math.max(o.dizzy, 0.7);
         impact(o, dx / d, dz / d, push);
         gesture(o, 'laugh', 0.8);
@@ -571,6 +639,17 @@ export default {
       if (!it) return false;
       c.item = null;
       if (c === G.me) setItem(null);
+      if (net && !link.host && c === G.me) {
+        // the host blows our horn (it moves the other cars); a boost we feel at once
+        link.send('use', { it });
+        if (it === 'boost') {
+          c.boost = 2.2;
+          sfx.whoosh();
+          fx.flash({ x: c.x, y: 0.8, z: c.z }, 2.4, '#ffb347', 0.35);
+          pop('Boost!', c, '#ffb347', true);
+        }
+        return true;
+      }
       if (it === 'horn') horn(c);
       else {
         c.boost = 2.2;
@@ -584,7 +663,9 @@ export default {
     // ---------------------------------------------------------------- rounds
     function formation(R) {
       const spots = R.start(G);
-      const order = [G.me, G.partner, ...R.cars.map((id) => byId[id]).filter((c) => c !== G.me && c !== G.partner)];
+      // online both devices put the host's car on the first spot
+      const [first, second] = net && !link.host ? [G.partner, G.me] : [G.me, G.partner];
+      const order = [first, second, ...R.cars.map((id) => byId[id]).filter((c) => c !== G.me && c !== G.partner)];
       return order.map((c, i) => ({ c, ...spots[i] }));
     }
 
@@ -640,7 +721,12 @@ export default {
       G.rescued = false;
       G.teamScore = [0, 0];
       G.outOrder = [];
+      G.goAt = 0;
+      G.readyMe = G.readyThem = false;
+      G.inSetup = true; // the other device runs the same setup itself
       R.setup?.(G);
+      G.inSetup = false;
+      if (net && link.host) link.send('round', { ri, plan });
       boardDirty = true;
       phase = 'intro';
       hud.score('');
@@ -651,7 +737,8 @@ export default {
         if (disposed || G.round !== R || phase !== 'intro') return;
         countdown();
       };
-      if (dbg.auto) after(0.3, go);
+      if (net) readyCard(ri, R);
+      else if (dbg.auto) after(0.3, go);
       else {
         hud
           .choose({
@@ -661,6 +748,29 @@ export default {
           })
           .then(go);
       }
+    }
+
+    // Online: both read the round card and tap Go; the host starts the countdown at a shared moment
+    function readyCard(ri, R) {
+      const done = () => {
+        if (disposed || G.round !== R || phase !== 'intro' || G.readyMe) return;
+        G.readyMe = true;
+        if (!net) return countdown(); // the other player left meanwhile
+        if (G.goAt) return;
+        if (link.host) {
+          G.readyBy = now() + 20000;
+          checkGo();
+        } else link.send('ready', { ri });
+        if (!G.goAt) toast(`Waiting for ${nameOf(ctx.partner)}...`, 3000);
+      };
+      if (dbg.auto) return after(0.3, done);
+      choose({ title: `Round ${ri + 1} of ${plan.length}: ${R.name}`, text: R.goal(G), options: [{ id: 'go', label: ri === 0 ? "Let's bump!" : 'Go!' }], exit: () => ctx.end({ quit: true }) }).then(done);
+    }
+    function checkGo(force = false) {
+      if (!net || !link.host || phase !== 'intro' || G.goAt || !G.readyMe) return;
+      if (!force && G.partner.remote && !G.readyThem) return;
+      G.goAt = now() + 450;
+      link.send('go', { ri: G.ri, at: G.goAt });
     }
 
     function countdown() {
@@ -722,10 +832,22 @@ export default {
 
     function endRound() {
       if (phase !== 'play') return;
-      phase = 'post';
       const R = G.round;
-      sfx.stopMusic();
       const res = R.result(G);
+      // the other driver's stars, worked out here with their car as "me"
+      if (net && link.host && G.partner.remote) {
+        const theirs = R.result({ ...G, me: G.partner });
+        guestResults[G.ri] = theirs.stars;
+        link.send('rend', { ri: G.ri, s: theirs.stars, x: String(theirs.text).slice(0, 360) });
+      }
+      postRound(R, res);
+      after(4.3, () => (G.ri + 1 < plan.length ? beginRound(G.ri + 1) : finale()));
+    }
+
+    // Time! The round's stars on the board and a banner (both devices)
+    function postRound(R, res) {
+      phase = 'post';
+      sfx.stopMusic();
       results[G.ri] = { id: R.id, name: R.name, stars: res.stars };
       dbg.log.push({ round: R.id, stars: res.stars, me: G.me.id, took: +G.elapsed.toFixed(1), scores: G.active.map((c) => `${c.id}:${R.id === 'tag' ? c.itTime.toFixed(1) : R.id === 'last' ? (c.alive ? c.lights : 'out') : c.score}`).join(' '), team: R.team ? G.teamScore.join(':') : undefined });
       progress.best[R.id] = Math.max(progress.best[R.id] || 0, res.stars);
@@ -738,15 +860,21 @@ export default {
         ctx.sound?.ui(res.stars > 0 ? 'win' : 'lose');
         if (res.stars > 0) ctx.fx.burst(new THREE.Vector3(G.me.x, 1.6, G.me.z), ['#ffd166', '#ff9eb5', '#8fd3ff', '#ffffff'], 40 + res.stars * 20);
         gesture(G.me, res.stars > 0 ? 'cheer' : 'shrug', 1.8);
-        gesture(G.partner, 'cheer', 1.8);
+        if (!G.partner.human) gesture(G.partner, 'cheer', 1.8);
         S.crowd.cheer(1);
         K.sfx.cheer(ctx.sound, 0.05, 1.4);
       });
-      after(4.3, () => (G.ri + 1 < plan.length ? beginRound(G.ri + 1) : finale()));
     }
 
-    function finale() {
+    // theirs: the other driver's stars tonight (online; the host knows them, the joiner hears them)
+    function finale(theirs = null) {
       if (disposed) return;
+      if (net && link.host) {
+        theirs = guestResults.reduce((s, x) => s + (x || 0), 0);
+        link.send('fin', { h: results.reduce((s, x) => s + (x?.stars || 0), 0), g: theirs });
+      }
+      if (!net) theirs = null;
+      plan.forEach((ri, i) => (results[i] ||= { id: ROUNDS[ri].id, name: ROUNDS[ri].name, stars: 0 }));
       phase = 'final';
       hud.score('');
       boardEl.innerHTML = '';
@@ -805,27 +933,48 @@ export default {
         phase = 'done';
         const rows = results.map((x) => `${x.name} ${stars(x.stars)}`).join('<br>');
         const best = whole ? progress.bestNight : progress.best[results[0].id] * 1;
-        const title = whole ? (total >= 13 ? 'Bumper champions!' : total >= 9 ? 'What a night!' : total >= 5 ? 'So much fun!' : 'Bonk, bonk!') : results[0].stars === 3 ? 'Three stars!' : results[0].stars ? 'Well bumped!' : 'Bonk, bonk!';
+        let title = whole ? (total >= 13 ? 'Bumper champions!' : total >= 9 ? 'What a night!' : total >= 5 ? 'So much fun!' : 'Bonk, bonk!') : results[0].stars === 3 ? 'Three stars!' : results[0].stars ? 'Well bumped!' : 'Bonk, bonk!';
+        let win = total >= Math.ceil(of / 3);
+        let vs = '';
+        if (theirs != null) {
+          // driven together: the title says who got more stars, the same as the shared result
+          const me = nameOf(ctx.me);
+          const them = nameOf(ctx.partner);
+          const what = whole ? 'night' : 'round';
+          title = total > theirs ? `${me} wins the ${what}!` : total < theirs ? `${them} wins the ${what}!` : `A tie under the big top!`;
+          win = total > theirs ? true : total < theirs ? false : null;
+          vs = ` ${them}: ${theirs} of ${of}.`;
+        }
         ctx.finish({
-          win: total >= Math.ceil(of / 3),
+          win,
           stars: total,
           title,
-          text: `<b>${total} of ${of} stars</b>${whole ? ` tonight (best ${best} of 15)` : ` (best ${best} of 3)`}.<br><span style="font-size:.9em">${rows}</span><br>${line}`,
+          text: `<b>${total} of ${of} stars</b>${whole ? ` tonight (best ${best} of 15)` : ` (best ${best} of 3)`}.${vs}<br><span style="font-size:.9em">${rows}</span><br>${line}`,
         });
       });
     }
 
-    function startNight(who, pick) {
+    function seat(who) {
       G.me = byId[who];
       G.partner = byId[who === 'roji' ? 'homama' : 'roji'];
-      ctx.hud.title('Bumper Cars', `${nameOf(who)} drives`);
+      for (const c of cars) {
+        c.human = c === G.me || (net && c === G.partner);
+        c.remote = net && link.host && c === G.partner; // driven from the other device
+      }
+      G.humans = net ? [G.me, G.partner] : null;
+      ctx.hud.title('Bumper Cars', net ? `${nameOf(ctx.me)} and ${nameOf(ctx.partner)} drive` : `${nameOf(who)} drives`);
+    }
+
+    function startNight(who, pick) {
+      seat(who);
       plan = pick === 'all' || pick == null ? [0, 1, 2, 3, 4] : [+pick];
       results.length = 0;
+      guestResults.length = 0;
       beginRound(0);
     }
 
     // ---------------------------------------------------------------- the opening cards
-    setTimeout(async () => {
+    async function openCards() {
       if (disposed) return;
       if (dbg.auto) {
         startNight(dbg.who || ctx.me, dbg.pick || 'all');
@@ -856,7 +1005,70 @@ export default {
         if (disposed) return;
       }
       startNight(who || first, pick || 'all');
+    }
+
+    // Online: wait for the other player, then each drives their own car. The host picks the rounds.
+    const partnerColor = ctx.partner === 'roji' ? 'pink' : 'blue';
+    setTimeout(async () => {
+      if (disposed) return;
+      if (!link.inRoom) return openCards();
+      const yes = await link.begin({ title: `Waiting for ${nameOf(ctx.partner)}`, text: `${nameOf(ctx.partner)} is invited to drive the ${partnerColor} car with you.`, solo: `Drive without ${nameOf(ctx.partner)}`, exit: () => ctx.end({ quit: true }) });
+      if (disposed) return;
+      if (!yes) return openCards();
+      net = played = true;
+      if (!link.host) {
+        if (phase === 'menu') toast(`${nameOf(ctx.partner)} is choosing what to play...`, 6000);
+        return;
+      }
+      let pick = 'all';
+      if (ROUNDS.some((r) => progress.best[r.id] != null) && !dbg.auto) {
+        pick = await hud.choose({
+          title: 'What shall we play?',
+          text: `${nameOf(ctx.me)} and ${nameOf(ctx.partner)} each drive their own car.`,
+          options: [
+            { id: 'all', label: 'The whole night', sub: '5 rounds in a row' },
+            ...ROUNDS.map((r, i) => ({ id: String(i), label: r.name, sub: progress.best[r.id] != null ? `Best ${progress.best[r.id]} of 3 stars` : 'Not played yet' })),
+          ],
+        });
+        if (disposed) return;
+      }
+      if (!net) return openCards(); // they left while we chose
+      startNight(ctx.me, dbg.pick ?? pick ?? 'all');
     }, 350);
+
+    // ---------------------------------------------------------------- messages between the two devices
+    // joiner: the host's rounds, the countdown, the results
+    link.listen('round', (d) => {
+      if (link.host || !d || !Number.isInteger(d.ri)) return;
+      net = played = true;
+      if (!G.me) {
+        seat(ctx.me);
+        results.length = 0;
+      }
+      if (Array.isArray(d.plan) && d.plan.length && d.plan.every((i) => Number.isInteger(i) && ROUNDS[i])) plan = d.plan.slice(0, 5);
+      if (plan[d.ri] === undefined) return;
+      closeChoices();
+      beginRound(d.ri);
+    });
+    link.listen('go', (d) => {
+      if (link.host || !d || d.ri !== G.ri || phase !== 'intro') return;
+      G.goAt = d.at;
+      closeChoices(); // the host did not wait for our tap
+    });
+    link.listen('rend', (d) => {
+      if (link.host || !d || d.ri !== G.ri || !G.round) return;
+      if (phase === 'play' || phase === 'count') postRound(G.round, { stars: clampStars(d.s), text: String(d.x || '') });
+    });
+    link.listen('fin', (d) => !link.host && d && finale(clampStars(d.h, 15)));
+    // host: the other driver's taps
+    link.listen('ready', (d) => {
+      if (!link.host || !d || d.ri !== G.ri) return;
+      G.readyThem = true;
+      checkGo();
+    });
+    link.listen('use', () => link.host && G.partner?.remote && phase === 'play' && useItem(G.partner));
+    link.listen('ev', (d) => Array.isArray(d?.e) && d.e.forEach(link.host ? onGuestEvent : onHostEvent));
+    const clampStars = (v, max = 3) => Math.max(0, Math.min(max, v | 0));
 
     // ---------------------------------------------------------------- debug and test hook
     const dbg = {
@@ -879,6 +1091,14 @@ export default {
         balls: balls.filter((b) => b.on).length,
         tokens: tokens.filter((t) => t.on).map((t) => t.type),
         loved: G.loved,
+        net,
+        host: link.host,
+        human: cars.filter((c) => c.human).map((c) => c.id),
+        remote: cars.filter((c) => c.remote).map((c) => c.id),
+        pos: Object.fromEntries(cars.filter((c) => c.active).map((c) => [c.id, [+c.x.toFixed(2), +c.z.toFixed(2)]])),
+        ready: [!!G.readyMe, !!G.readyThem],
+        guestResults: [...guestResults],
+        it: G.active.find((c) => c.it)?.id || null,
       }),
       endRound: () => {
         G.time = 0.01;
@@ -889,6 +1109,21 @@ export default {
       tp: (x, z) => {
         G.me.x = x;
         G.me.z = z;
+      },
+      // drive our car fast into the back of another car (tests)
+      ram: (id) => {
+        const o = byId[id];
+        const m = G.me;
+        if (!o || !m) return false;
+        const fx0 = Math.sin(o.yaw);
+        const fz0 = Math.cos(o.yaw);
+        m.x = o.x - fx0 * 1.9;
+        m.z = o.z - fz0 * 1.9;
+        m.yaw = o.yaw;
+        m.vx = fx0 * 6 + (o.vx || 0);
+        m.vz = fz0 * 6 + (o.vz || 0);
+        m.thr = 1;
+        return true;
       },
     };
     window.__bumpercars = dbg;
@@ -978,6 +1213,11 @@ export default {
       }
       // drive every car
       for (const c of G.active) {
+        if (c.remote) {
+          remoteCar(c);
+          if (!c.alive) c.outT = (c.outT || 0) + dt;
+          continue;
+        }
         let ctl;
         if (!playing) ctl = { dx: 0, dz: 0, thr: 0 };
         else if (c === G.me && !dbg.auto) ctl = readPlayer();
@@ -1019,6 +1259,7 @@ export default {
         for (let j = i + 1; j < G.active.length; j++) onEvent(carHit(G.active[i], G.active[j], G.now, cool));
       }
       for (const c of G.active) {
+        if (c.remote) continue; // its own device keeps it inside the rails
         const hit = wallBounce(c, CR, 0.72);
         if (hit > 1.5) {
           S.rails.hit(c.x * 1.04, c.z * 1.04, hit / 4);
@@ -1067,13 +1308,8 @@ export default {
         // a goal?
         if (Math.abs(b.x) > GOAL.x && Math.abs(b.z) < GOAL.hz) {
           const g = S.goals.find((x) => x.side === Math.sign(b.x));
-          g.flash = 1.4;
-          sfx.goal();
-          S.crowd.cheer(1);
-          K.sfx.cheer(ctx.sound, 0.05, 1.2);
-          ctx.fx.burst(new THREE.Vector3(g.side * (HW - 0.6), 2.4, 0), [g.color, '#ffd166', '#ffffff'], 60);
-          fx.flash({ x: b.x, y: 1, z: b.z }, 3, '#a08a40', 0.5);
-          S.floorFx.flash(g.color);
+          goalFx(g, b);
+          if (net && link.host) link.add(['g', g.side, r1(b.x), r1(b.z)]);
           if (phase === 'play') G.round.onGoal?.(G, b, b.last);
           if (b.last) gesture(b.last, 'cheer', 1.4);
           b.on = false;
@@ -1083,7 +1319,7 @@ export default {
             after(1.4, () => {
               if (phase === 'play' && G.round.balls) {
                 G.addBall(false);
-                pop('A new ball!', { x: 0, z: 0 }, '#ffffff');
+                G.pop('A new ball!', { x: 0, z: 0 }, '#ffffff');
               }
             });
           }
@@ -1116,11 +1352,25 @@ export default {
           if (c === G.me) {
             setItem(tk.type);
             pop(tk.type === 'horn' ? 'A big horn!' : 'A boost!', c, '#ffd166', true);
-          }
+          } else if (c.remote && net) link.add(['i', tk.type]);
           break;
         }
       }
-      // sparks, glows and floor lights for every car
+      carFx(dt);
+    }
+
+    function goalFx(g, b) {
+      g.flash = 1.4;
+      sfx.goal();
+      S.crowd.cheer(1);
+      K.sfx.cheer(ctx.sound, 0.05, 1.2);
+      ctx.fx.burst(new THREE.Vector3(g.side * (HW - 0.6), 2.4, 0), [g.color, '#ffd166', '#ffffff'], 60);
+      fx.flash({ x: b.x, y: 1, z: b.z }, 3, '#a08a40', 0.5);
+      S.floorFx.flash(g.color);
+    }
+
+    // sparks, glows and floor lights for every car
+    function carFx(dt) {
       crackleT -= dt;
       for (const c of G.active) {
         const tip = tipOf(c);
@@ -1139,6 +1389,304 @@ export default {
           sfx.crackle(0.5);
         }
       }
+    }
+
+    // ---------------------------------------------------------------- online: the host
+    // The other driver's car, where their device drove it (about 100 ms behind)
+    function remoteCar(c) {
+      const sm = link.sample();
+      if (!sm) return;
+      const { a, b, k } = sm;
+      const L = (p) => (a[p] ?? 0) + ((b[p] ?? 0) - (a[p] ?? 0)) * k;
+      c.x = L('x');
+      c.z = L('z');
+      c.yaw = lerpA(a.y || 0, b.y || 0, k);
+      c.vx = L('vx');
+      c.vz = L('vz');
+      c.thr = b.th || 0;
+      c.speed = Math.hypot(c.vx, c.vz);
+      c.steerRate = b.sr || 0;
+      c.boost = b.bo ? Math.max(c.boost, 0.2) : 0;
+      c.dizzy = b.dz || 0;
+      c.mass = c.boost > 0 ? 1.8 : c.alive ? 1 : 1.3;
+    }
+
+    // Everything the other device shows: every car, the balls, the power-ups, the clock and scores
+    function shareHost() {
+      const gi = (c) => (c.gest ? GEST.indexOf(c.gest.type) : 0);
+      link.share({
+        ph: phase,
+        ri: G.ri,
+        tm: r1(G.time),
+        ts: G.teamScore,
+        dk: r2(S.floorFx.darkAt || 0),
+        c: cars.map((c) => [r2(c.x), r2(c.z), r2(c.yaw), r1(c.speed), (c.active ? 1 : 0) | (c.alive ? 2 : 0) | (c.it ? 4 : 0) | (c.boost > 0 ? 8 : 0) | (c.dizzy > 0 ? 16 : 0) | ((c.safeT || 0) > G.now ? 32 : 0), c.score | 0, r1(c.itTime || 0), c.lights, c.gn | 0, Math.max(0, gi(c)), r1(c.gest?.dur || 0)]),
+        b: balls.map((b) => (b.on ? [r2(b.x), r2(b.z), r2(b.y), b.gold ? 1 : 0] : 0)),
+        k: tokens.map((t) => (t.on ? [r2(t.x), r2(t.z), t.type === 'horn' ? 1 : 2] : 0)),
+        o: (G.outOrder || []).map((c) => c.i),
+      });
+    }
+
+    // A bump the other driver made on their screen: checked against what we see, then scored here
+    function onGuestEvent(e) {
+      const rc = G.partner;
+      if (!Array.isArray(e) || e[0] !== 'x' || phase !== 'play' || !rc?.remote) return;
+      const o = cars[e[1] | 0];
+      if (!o || o === rc || !G.active.includes(o)) return;
+      if (Math.hypot(o.x - rc.x, o.z - rc.z) > 4.5) return; // nowhere near each other here
+      const key = pairKey(rc, o);
+      if (G.now - (coolX.get(key) ?? -9) < 0.45) return;
+      coolX.set(key, G.now);
+      const kind = KINDS[e[2]] || 'touch';
+      const power = Math.max(0, Math.min(12, +e[3] || 0));
+      const mineA = !!e[6];
+      if ((kind === 'bump' || kind === 'mega') && G.now - (seenHit.get(key) ?? -9) > 0.6) {
+        // the car they hit is knocked here, unless the two already bounced off each other here
+        const l = Math.hypot(o.x - rc.x, o.z - rc.z) || 1;
+        o.vx += ((o.x - rc.x) / l) * power * 1.1;
+        o.vz += ((o.z - rc.z) / l) * power * 1.1;
+        o.spin += (Math.random() - 0.5) * power * 0.6;
+        o.dizzy = Math.max(o.dizzy, 0.35 + Math.min(0.6, power * 0.08));
+      }
+      onEvent({ a: mineA ? rc : o, b: mineA ? o : rc, kind, power, x: +e[4] || 0, z: +e[5] || 0, reported: true });
+    }
+
+    // The other driver had to go: the computer drives their car
+    function partnerLeftHost() {
+      const c = G.partner;
+      net = false;
+      if (c) {
+        c.remote = false;
+        c.human = false;
+        c.ai.timer = 0;
+        c.ai.target = null;
+      }
+      G.humans = null;
+      checkGo(true);
+      if (phase === 'intro' && G.readyMe && !G.goAt) countdown();
+      toast(`${nameOf(ctx.partner)} had to go. The computer drives the ${partnerColor} car.`, 3600);
+    }
+
+    // ---------------------------------------------------------------- online: the joiner
+    let snapRi = -1;
+    function applySnap() {
+      const sm = link.sample();
+      if (!sm || !G.round) return;
+      let { a, b, k } = sm;
+      if (b.ri !== G.ri || !Array.isArray(b.c)) return; // the host is a round ahead or behind
+      if (a.ri !== G.ri || !Array.isArray(a.c)) (a = b), (k = 0);
+      const span = Math.max(0.03, (b.t - a.t) / 1000);
+      const L = (x, y) => x + (y - x) * k;
+      if (snapRi !== G.ri) {
+        snapRi = G.ri;
+        for (const c of cars) c.gseen = undefined;
+      }
+      cars.forEach((c, i) => {
+        const A = a.c[i];
+        const B = b.c[i];
+        if (!A || !B) return;
+        const bits = B[4];
+        c.alive = !!(bits & 2);
+        c.it = !!(bits & 4);
+        c.score = B[5];
+        c.itTime = B[6];
+        c.lights = B[7];
+        c.safeT = bits & 32 ? G.now + 0.3 : 0;
+        if (c.gseen !== undefined && B[8] !== c.gseen && B[9]) gesture(c, GEST[B[9]], B[10] || 1.2);
+        c.gseen = B[8];
+        if (c === G.me) return;
+        const nx = L(A[0], B[0]) / 100;
+        const nz = L(A[1], B[1]) / 100;
+        c.vx = (B[0] - A[0]) / 100 / span;
+        c.vz = (B[1] - A[1]) / 100 / span;
+        c.x = nx;
+        c.z = nz;
+        c.yaw = lerpA(A[2] / 100, B[2] / 100, k);
+        c.speed = L(A[3], B[3]);
+        c.boost = bits & 8 ? 0.2 : 0;
+        c.dizzy = bits & 16 ? 0.4 : 0;
+        c.mass = c.boost > 0 ? 1.8 : c.alive ? 1 : 1.3;
+        c.thr = c.speed / MAX;
+      });
+      balls.forEach((bl, i) => {
+        const A = a.b?.[i] || b.b?.[i];
+        const B = b.b?.[i];
+        const on = !!B;
+        if (on !== bl.on) bl.mesh.visible = on;
+        bl.on = on;
+        if (!on) return;
+        const px = bl.x;
+        const pz = bl.z;
+        const AA = A || B;
+        bl.x = L(AA[0], B[0]) / 100;
+        bl.z = L(AA[1], B[1]) / 100;
+        bl.y = Math.max(0, L(AA[2], B[2]) / 100);
+        bl.vx = (B[0] - AA[0]) / 100 / span;
+        bl.vz = (B[1] - AA[1]) / 100 / span;
+        bl.vy = 0;
+        if (!!B[3] !== bl.gold) {
+          bl.gold = !!B[3];
+          bl.mesh.material = bl.gold ? ballMats.gold : ballMats.plain;
+          bl.mesh.scale.setScalar(bl.gold ? 1.12 : 1);
+        }
+        bl.mesh.position.set(bl.x, BR + bl.y, bl.z);
+        const dx = bl.x - px;
+        const dz = bl.z - pz;
+        const d = Math.hypot(dx, dz);
+        if (d > 1e-4 && d < 2) {
+          v3.set(dz, 0, -dx).normalize();
+          q4.setFromAxisAngle(v3, d / BR);
+          bl.mesh.quaternion.premultiply(q4);
+        }
+      });
+      tokens.forEach((t, i) => {
+        const B = b.k?.[i];
+        const on = !!B;
+        if (on && (!t.on || t.x !== B[0] / 100)) {
+          t.t = 0;
+          t.type = B[2] === 1 ? 'horn' : 'boost';
+          t.sp.material.map = TOK[t.type];
+          t.sp.material.needsUpdate = true;
+          if (!t.on) fx.spark({ x: B[0] / 100, y: 0.8, z: B[1] / 100 }, 12, { color: ['#ffd166', '#ffffff'], speed: 2, up: 1.4, life: 0.6 });
+        }
+        t.on = on;
+        t.sp.visible = on;
+        if (on) {
+          t.x = B[0] / 100;
+          t.z = B[1] / 100;
+        }
+      });
+      G.time = b.tm ?? G.time;
+      if (Array.isArray(b.ts)) G.teamScore = b.ts.slice(0, 2);
+      S.floorFx.darkAt = (b.dk || 0) / 100;
+      if (Array.isArray(b.o)) G.outOrder = b.o.map((i) => cars[i]).filter(Boolean);
+    }
+
+    // Our own car, driven here; everything else as the host sends it
+    const kicks = [];
+    const lastHit = {}; // when our car last bounced off each car on our screen (ms)
+    function stepGuest(dt) {
+      const live = phase === 'play';
+      const me = G.me;
+      G.dt = dt;
+      if (live) {
+        G.elapsed += dt;
+        G.now += dt;
+      }
+      const ctl = !live ? { dx: 0, dz: 0, thr: 0 } : dbg.auto ? G.round.brain(me, G, dt) : readPlayer();
+      me.slow = S.floorFx.isDark(me.x, me.z) ? 0.5 : 1;
+      const prevYaw = me.yaw;
+      stepCar(me, ctl, dt, { turn: 3.7 });
+      me.steerRate = (((me.yaw - prevYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI) / Math.max(dt, 1e-3);
+      // a horn blast from the host
+      for (const k of kicks.splice(0)) {
+        me.dizzy = Math.max(me.dizzy, k[4] || 0);
+        // a bump we already bounced off on our own screen does not push us twice
+        if (k[5] >= 0 && performance.now() - (lastHit[k[5]] || -1e9) < 800) continue;
+        me.vx += k[1];
+        me.vz += k[2];
+        me.spin += k[3];
+        const l = Math.hypot(k[1], k[2]) || 1;
+        impact(me, k[1] / l, k[2] / l, l);
+        gesture(me, 'laugh', 0.8);
+      }
+      honkCd -= dt;
+      if (live && !dbg.auto && (input.pressed('action') || input.pressed('jump'))) {
+        if (!useItem(me) && honkCd <= 0) {
+          honkCd = 0.4;
+          sfx.beep(me.id === 'roji' ? 1.2 : 1);
+          pop('Meep meep!', me, '#ffffff');
+        }
+      }
+      // we bounce off the cars we see; the host keeps the score of every bump
+      for (const o of G.active) {
+        if (o === me || !o.root.visible) continue;
+        const proxy = { ...o };
+        const ev = carHit(me, proxy, G.now, cool);
+        const dx = me.x - o.x;
+        const dz = me.z - o.z;
+        const d = Math.hypot(dx, dz);
+        if (d < CR * 2 && d > 1e-4) {
+          me.x = o.x + (dx / d) * CR * 2;
+          me.z = o.z + (dz / d) * CR * 2;
+        }
+        if (ev) {
+          if (ev.a === proxy) ev.a = o;
+          if (ev.b === proxy) ev.b = o;
+          lastHit[o.i] = performance.now();
+          onEvent(ev);
+          // our own bump counts from our screen: the host scores it (and tag contacts, for passing it on)
+          const mine = ev.a === me && (ev.kind === 'bump' || ev.kind === 'mega');
+          if (live && (mine || (G.round?.id === 'tag' && ev.power >= 0.9 && ev.kind !== 'bump' && ev.kind !== 'mega'))) link.add(['x', o.i, KINDS.indexOf(ev.kind), r1(ev.power), r1(ev.x), r1(ev.z), ev.a === me ? 1 : 0]);
+        }
+      }
+      const hit = wallBounce(me, CR, 0.72);
+      if (hit > 1.5) {
+        S.rails.hit(me.x * 1.04, me.z * 1.04, hit / 4);
+        sfx.thump(hit / 4);
+        impact(me, me.x > 0 ? 1 : -1, 0, hit * 0.6);
+      }
+      for (const tk of tokens) {
+        if (!tk.on) continue;
+        tk.t += dt;
+        tk.sp.position.set(tk.x, 0.95 + Math.sin(tk.t * 3) * 0.12, tk.z);
+        tk.sp.scale.setScalar(Math.min(1, tk.t * 4) * 0.95);
+        fx.glow({ x: tk.x, y: 0.95, z: tk.z }, 1.9, tk.type === 'horn' ? '#ffd166' : '#ff9a3c', 0.55 + Math.sin(tk.t * 6) * 0.15);
+      }
+      carFx(dt);
+      link.share({ x: +me.x.toFixed(2), z: +me.z.toFixed(2), y: +me.yaw.toFixed(2), vx: +me.vx.toFixed(2), vz: +me.vz.toFixed(2), th: +me.thr.toFixed(2), sr: +(me.steerRate || 0).toFixed(1), bo: me.boost > 0 ? 1 : 0, dz: +Math.max(0, me.dizzy).toFixed(1) });
+    }
+
+    // What the host sends: words, bumps between other cars, horns, goals, power-ups
+    function onHostEvent(e) {
+      if (!Array.isArray(e)) return;
+      const [k] = e;
+      const car = (i) => cars[i | 0];
+      if (k === 'b') {
+        const a = car(e[1]);
+        const b = car(e[2]);
+        if (!a || !b || a === G.me || b === G.me) return; // our own bumps we felt already
+        onEvent({ a, b, kind: KINDS[e[3]] || 'touch', power: +e[4] || 1, x: +e[5] || 0, z: +e[6] || 0, net: true });
+      } else if (k === 'p') pop(String(e[1]).slice(0, 60), { x: +e[2] || 0, z: +e[3] || 0 }, String(e[4] || '#fff').slice(0, 9), !!e[5]);
+      else if (k === 'm') hud.message(String(e[1]).slice(0, 40), +e[2] || 1200);
+      else if (k === 't') toast(String(e[1]).slice(0, 200), +e[2] || 2600);
+      else if (k === 'h') ctx.fx.heartsAt(new THREE.Vector3(+e[1] || 0, 1.9, +e[2] || 0), 4);
+      else if (k === 'H' && car(e[1])) hornFx(car(e[1]));
+      else if (k === 'k') kicks.push(e.map(Number));
+      else if (k === 'i' && (e[1] === 'horn' || e[1] === 'boost') && G.me) {
+        setItem(e[1]);
+        sfx.pickup();
+        pop(e[1] === 'horn' ? 'A big horn!' : 'A boost!', G.me, '#ffd166', true);
+      } else if (k === 'o' && car(e[1])) {
+        const v = car(e[1]);
+        sfx.powerDown();
+        S.crowd.cheer(0.8);
+        K.sfx.cheer(ctx.sound, 0.035, 0.9);
+        fx.spark(tipOf(v), 24, { color: ['#c7e9ff', '#ffffff'], speed: 2, up: 0.4, life: 0.8 });
+      } else if (k === 'g') {
+        const g = S.goals.find((x) => x.side === Math.sign(+e[1] || 1));
+        if (g) goalFx(g, { x: +e[2] || 0, z: +e[3] || 0 });
+      }
+    }
+
+    // The host had to go: this device runs the arena from here, the computer drives their car
+    function takeOver() {
+      net = false;
+      for (const c of cars) {
+        c.remote = false;
+        if (c !== G.me) {
+          c.human = false;
+          if (c.ai) {
+            c.ai.timer = 0;
+            c.ai.target = null;
+          }
+        }
+      }
+      G.humans = null;
+      toast(`${nameOf(ctx.partner)} had to go. The computer drives the ${partnerColor} car.`, 3600);
+      if (!G.me || phase === 'menu') return openCards();
+      if (phase === 'intro' && G.readyMe) countdown();
+      else if (phase === 'post') after(2.5, () => (G.ri + 1 < plan.length ? beginRound(G.ri + 1) : finale()));
     }
 
     function stepFinal(dt) {
@@ -1263,10 +1811,20 @@ export default {
     return {
       update(dt0, t) {
         if (disposed) return;
+        const rdt = link.dt();
+        if (link.check()) (link.host ? partnerLeftHost : takeOver)();
+        if (G.goAt && phase === 'intro' && now() >= G.goAt) {
+          G.goAt = 0;
+          countdown();
+        }
+        if (net && link.host && G.readyMe && !G.goAt && phase === 'intro' && now() > G.readyBy) checkGo(true);
+        const guest = net && !link.host;
+        if (guest && phase !== 'final' && phase !== 'done') applySnap();
         const sp = dbg.speed || 1;
-        // the auto player and the speed-up are for tests: run several small steps
-        const steps = Math.min(16, Math.ceil(sp));
-        const dt = Math.min(0.05, dt0) * (sp / steps);
+        // the auto player and the speed-up are for tests: run several small steps. A night that started
+        // together keeps real time (in steps of at most 34 ms), whatever the frame rate.
+        const steps = played ? Math.max(1, Math.ceil(rdt / 0.034)) : Math.min(16, Math.ceil(sp));
+        const dt = played ? rdt / steps : Math.min(0.05, dt0) * (sp / steps);
         for (let s = 0; s < steps; s++) {
           for (let i = later.length - 1; i >= 0; i--) {
             later[i].t -= dt;
@@ -1277,7 +1835,7 @@ export default {
             }
           }
           if (phase === 'final' || phase === 'done') stepFinal(dt);
-          else if (G.round) stepPlay(dt, t);
+          else if (G.round) (guest ? stepGuest : stepPlay)(dt, t);
           for (const c of cars) {
             if (!c.root.visible) continue;
             updateCarVisual(c, dt, t);
@@ -1292,6 +1850,8 @@ export default {
           }
         }
         if (G.round) updateBoard(dt);
+        if (net && link.host && G.round && phase !== 'final' && phase !== 'done') shareHost();
+        link.flush();
         updateRings(t);
         S.update(dt, t);
         fx.update(dt, cars, t);
@@ -1300,6 +1860,7 @@ export default {
       },
       dispose() {
         disposed = true;
+        link.dispose();
         later.length = 0;
         clearTimeout(toastTimer);
         fx.dispose();

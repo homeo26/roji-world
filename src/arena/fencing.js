@@ -1,10 +1,14 @@
 // Fencing Duel: a 3D bout on the piste. Advance and retreat, lunge to touch, parry the
 // partner's attack when the blade flashes, then riposte. First to five touches.
+// Online (both in a room and both play): a real duel. Each device moves its own fencer and sends its
+// lunges and parries; the defender says whether its parry was up when the touch landed on its screen,
+// and the device that started the game (the host) decides touches, double touches and the score.
 import * as THREE from 'three';
 import { damp, dampAngle, clamp, easeInOut } from '../util.js';
 import * as K from './riding/kit.js';
 import { buildHall, PISTE_HALF } from './riding/hall.js';
 import { whites, dressFencer, POSES, lerpPose, applyPose, setWrist } from './riding/fencer.js';
+import { Link } from './duels/link.js';
 
 const GUARD = 1.75; // en garde lines at -GUARD and +GUARD
 const HALF = PISTE_HALF - 0.4;
@@ -22,6 +26,10 @@ const RIPOSTE_WIN = 0.8;
 const TOUCHES = 5;
 const POINT_DUR = 1.9;
 const READY_DUR = 1.1;
+// Online, a lunge winds up first (the blade flashes) so the other player can see it coming and parry
+const WIND = 0.3;
+const RIP_WIND = 0.12;
+const DOUBLE_MS = 120; // two touches this close together are a double touch
 
 const CSS = `${K.BASE_CSS}
 .rr-float { position: absolute; transform: translate(-50%, -100%); font-weight: 700; font-size: clamp(.95rem, 2.6vw, 1.35rem); color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.18), 0 6px 14px rgba(0,0,0,.25); white-space: nowrap; opacity: 0; }
@@ -146,19 +154,35 @@ export default {
     updateScore();
 
     // ---------------------------------------------------------------- state
-    let phase = 'intro'; // intro | ready | play | point | over
+    // ---------------------------------------------------------------- online
+    const link = new Link(ctx.online);
+    let net = false; // a real duel with the other player right now
+    let played = false; // this bout started as a real duel (it keeps real time to the end)
+    let phaseAt = 0; // online: the shared time the phase started (ms)
+    let goAt = 0;
+    let atkN = 0;
+    const now = () => link.now();
+    const recs = []; // host: every attack in flight { by, n, th (when it lands), st, rip }
+    const rem = { acts: [], cur: null, par: null, ovr: null }; // the other fencer, replayed from their device
+
+    let phase = link.inRoom ? 'wait' : 'intro'; // wait | sync | intro | ready | play | point | over
     let phaseT = 0;
     let clock = 0;
     let scorer = null;
     let finished = false;
     const ai = { want: 3, think: 0.4, cd: 1.6, plan: null };
-    const wins = ctx.load('wins', 0);
     const dbg = { fast: 1, me, them, get phase() { return phase; }, auto: false };
     window.__riding = dbg;
     const tmp = new THREE.Vector3();
 
-    function resetPositions() {
-      for (const f of [me, them]) {
+    function setPhase(p, at = now()) {
+      phase = p;
+      phaseT = 0;
+      phaseAt = at;
+    }
+
+    function resetPositions(at) {
+      for (const f of net ? [me] : [me, them]) {
         f.x = f === me ? -GUARD : GUARD;
         f.state = 'idle';
         f.t = 0;
@@ -170,12 +194,17 @@ export default {
         f.dodge = 0;
         f.stance = 'guard';
       }
+      if (net) {
+        // the other fencer goes back to its line on its own device
+        rem.cur = rem.par = rem.ovr = null;
+        Object.assign(them, { state: 'idle', t: 0, checked: true, riposte: 0, stance: 'guard', dodge: 0 });
+        recs.length = 0;
+      }
       ai.plan = null;
       ai.cd = 1.2 + Math.random() * 0.9;
       ai.think = 0.3;
       scorer = null;
-      phase = 'ready';
-      phaseT = 0;
+      setPhase('ready', at);
       hud.message('En garde!', 900);
       refArm = { side: 0, t: 0 };
       say(`First to ${TOUCHES} touches`);
@@ -191,7 +220,7 @@ export default {
       f.riposte = 0;
       f.move = 0;
       sound.ui('swoosh');
-      if (f === me) aiOnPlayerLunge();
+      if (f === me && !net) aiOnPlayerLunge();
     }
     function startParry(f) {
       f.state = 'parry';
@@ -209,9 +238,24 @@ export default {
       K.sfx.stomp(sound);
     }
     const canLunge = (f) => f.state === 'idle' || (f.state === 'parry' && f.riposte > 0);
+    // Our lunge: at once against the computer; online it winds up first and the other device hears of it
+    function myLunge(rip) {
+      if (!net) return startLunge(me, rip ? RIP_EXT : EXT, rip);
+      const w = rip ? RIP_WIND : WIND;
+      const e = rip ? RIP_EXT : EXT;
+      startWindup(me, w, e, rip);
+      const at = now();
+      const n = ++atkN;
+      link.send('atk', { n, at, w, e, r: rip ? 1 : 0 });
+      if (link.host) recs.push({ by: me, n, th: at + (w + e) * 1000, st: 'pend', rip });
+    }
+    function myParry() {
+      startParry(me);
+      if (net) link.send('par', { at: now() });
+    }
     function lungeInput() {
       if (phase !== 'play') return;
-      if (canLunge(me)) startLunge(me, me.riposte > 0 ? RIP_EXT : EXT, me.riposte > 0);
+      if (canLunge(me)) myLunge(me.riposte > 0);
       else {
         me.queue = 'lunge';
         me.queueT = 0.2;
@@ -219,7 +263,7 @@ export default {
     }
     function parryInput() {
       if (phase !== 'play') return;
-      if (me.state === 'idle' && me.parryCd <= 0) startParry(me);
+      if (me.state === 'idle' && me.parryCd <= 0) myParry();
       else if (me.state !== 'parry') {
         me.queue = 'parry';
         me.queueT = 0.15;
@@ -267,12 +311,14 @@ export default {
       K.sfx.clash(sound);
     }
 
-    function touchScored(att, def) {
-      att.score++;
-      def.state = 'hit';
-      def.t = 0;
-      phase = 'point';
-      phaseT = 0;
+    function touchScored(att, def, at, rip = att.isRiposte) {
+      if (!net) att.score++;
+      if (net && def === them) rem.ovr = { state: 'hit', from: now(), until: Infinity };
+      else {
+        def.state = 'hit';
+        def.t = 0;
+      }
+      setPhase('point', at);
       scorer = att;
       hall.light(att === me ? 0 : 1);
       att.gear.tip.getWorldPosition(tmp);
@@ -281,22 +327,182 @@ export default {
       hall.crowd.cheer(1);
       K.sfx.cheer(sound, 0.05, 1.2);
       updateScore();
-      float(att.isRiposte ? 'Riposte!' : 'Touch!', '#ffffff', att);
+      float(rip ? 'Riposte!' : 'Touch!', '#ffffff', att);
       pop(`${att.name} scores`, att.color, 1300);
-      say(`${att.name} scores${att.isRiposte ? ' with a riposte' : ''}`);
+      say(`${att.name} scores${rip ? ' with a riposte' : ''}`);
       refArm = { side: att === me ? -1 : 1, t: 0 };
       sound.ui(att === me ? 'good' : 'bad');
     }
 
-    function doubleTouch() {
-      phase = 'point';
-      phaseT = 0;
+    function doubleTouch(at) {
+      setPhase('point', at);
       scorer = null;
       hall.light('both');
       K.sfx.buzzer(sound, true);
       pop('Double touch', '#fff6c8', 1200);
       say('Both hit at once. No point.');
       refArm = { side: 0, t: 0 };
+    }
+
+    // ---------------------------------------------------------------- the real duel online
+    // The other fencer: its position from its own device (replayed about 100 ms behind) and its lunges
+    // and parries played back at the moment it made them, on the same delayed clock.
+    function remoteStep(dt) {
+      const rt = link.renderTime();
+      const sm = link.sample(rt);
+      if (sm) {
+        const x = sm.a.x + (sm.b.x - sm.a.x) * sm.k;
+        them.x = clamp(-x, -HALF, HALF);
+        them.move = phase === 'play' ? clamp(sm.a.m || 0, -1, 1) : 0;
+      }
+      while (rem.acts.length && rem.acts[0].at <= rt) {
+        const a = rem.acts.shift();
+        if (a.k === 'atk') {
+          rem.cur = a;
+          if (phase === 'play' && a.w >= RIP_WIND + 0.05) K.sfx.stomp(sound);
+        } else rem.par = a;
+      }
+      them.riposte = Math.max(0, them.riposte - dt);
+      them.sweep = Math.max(0, them.sweep - dt * 4);
+      if (them.move && them.state === 'idle') them.stepPh += dt * 2.6 * Math.sign(them.move);
+      let st = 'idle';
+      let t = 0;
+      const c = rem.cur;
+      if (rem.ovr && now() < rem.ovr.until) {
+        st = rem.ovr.state;
+        t = (now() - rem.ovr.from) / 1000;
+      } else if (c) {
+        const k = (rt - c.at) / 1000;
+        // a slow frame may jump over the whole lunge: it is judged once it has landed all the same
+        if (!c.judged && k >= c.w + c.e) judge(c);
+        if (k < c.w) {
+          st = 'windup';
+          t = k;
+          Object.assign(them, { wind: c.w, windExt: c.e, windRip: !!c.r });
+        } else if (k < c.w + c.e + HOLD + REC) {
+          if (them.state !== 'lunge') sound.ui('swoosh');
+          st = 'lunge';
+          t = k - c.w;
+          Object.assign(them, { ext: c.e, isRiposte: !!c.r });
+        } else rem.cur = null;
+      }
+      if (st === 'idle' && rem.par && rt - rem.par.at < PARRY_ON * 1000) {
+        st = 'parry';
+        t = (rt - rem.par.at) / 1000;
+      }
+      them.state = st;
+      them.t = t;
+    }
+
+    // Their lunge just landed on our screen: were we in reach, was our parry up?
+    function judge(c) {
+      c.judged = true;
+      if (phase !== 'play') return;
+      const r = Math.abs(me.x - them.x) <= REACH + 0.12;
+      const p = me.state === 'parry' && me.t <= PARRY_ON + 0.02;
+      if (link.host) decide(recs.find((x) => x.by === them && x.n === c.n), r, p);
+      else link.send('def', { n: c.n, r: r ? 1 : 0, p: p ? 1 : 0 });
+    }
+
+    // Host: the outcome of one attack, for both devices
+    function decide(rec, r, p) {
+      if (!rec || rec.st !== 'pend') return;
+      if (phase !== 'play') {
+        rec.st = 'void';
+        return;
+      }
+      const by = rec.by.id;
+      if (!r) {
+        rec.st = 'miss';
+        return verdict({ k: 'miss', by });
+      }
+      if (p) {
+        rec.st = 'parry';
+        return verdict({ k: 'parry', by });
+      }
+      const opp = recs.find((x) => x.by !== rec.by && x.st === 'pend' && Math.abs(x.th - rec.th) < DOUBLE_MS);
+      if (opp) {
+        opp.st = rec.st = 'dbl';
+        return verdict({ k: 'dbl', by, at: now() });
+      }
+      rec.st = 'touch';
+      rec.by.score++;
+      verdict({ k: 'touch', by, r: rec.rip ? 1 : 0, s: [scoreOf('roji'), scoreOf('homama')], at: now() });
+    }
+    const scoreOf = (id) => (me.id === id ? me.score : them.score);
+    function verdict(v) {
+      link.send('v', v);
+      apply(v);
+    }
+
+    function apply(v) {
+      const att = v.by === me.id ? me : them;
+      const def = other(att);
+      if (v.k === 'miss') {
+        float('Too far', '#fff6c8', att);
+        say(att === me ? 'Too far. Step in closer first.' : `${them.name} fell short. Counter now!`);
+      } else if (v.k === 'parry') {
+        if (att === me) {
+          me.state = 'parried';
+          me.t = 0;
+          me.queue = null;
+        } else rem.ovr = { state: 'parried', from: now(), until: now() + PARRIED * 1000 };
+        if (def === me) {
+          if (me.state !== 'parry') {
+            me.state = 'parry';
+            me.t = 0;
+          }
+          me.t = Math.min(me.t, PARRY_ON * 0.5);
+          me.riposte = RIPOSTE_WIN;
+          me.parryCd = 0;
+        } else them.riposte = RIPOSTE_WIN;
+        def.sweep = 1;
+        clash(att);
+        float('Parry!', '#ffe08a', def);
+        say(def === me ? 'Parry! Riposte now!' : `${them.name} parries!`);
+      } else if (v.k === 'dbl') {
+        if (phase === 'play') doubleTouch(v.at);
+      } else if (v.k === 'touch') {
+        const [r, h] = v.s || [];
+        if (Number.isFinite(r) && Number.isFinite(h)) {
+          me.score = me.id === 'roji' ? r : h;
+          them.score = me.id === 'roji' ? h : r;
+        }
+        touchScored(att, def, v.at, !!v.r);
+      }
+    }
+
+    // The other player starts the bout at a shared moment
+    function startAt(at) {
+      goAt = at;
+      setPhase('sync', at);
+    }
+
+    link.listen('go', (d) => !link.host && Number.isFinite(d?.at) && startAt(d.at));
+    link.listen('atk', (d) => {
+      if (!d || !Number.isFinite(d.at)) return;
+      const a = { k: 'atk', n: d.n | 0, at: d.at, w: clamp(+d.w || WIND, 0.05, 0.6), e: clamp(+d.e || EXT, 0.05, 0.3), r: d.r ? 1 : 0 };
+      rem.acts.push(a);
+      if (link.host) recs.push({ by: them, n: a.n, th: a.at + (a.w + a.e) * 1000, st: 'pend', rip: !!a.r });
+    });
+    link.listen('par', (d) => Number.isFinite(d?.at) && rem.acts.push({ k: 'par', at: d.at }));
+    link.listen('def', (d) => link.host && d && decide(recs.find((x) => x.by === me && x.n === (d.n | 0)), !!d.r, !!d.p));
+    link.listen('v', (d) => !link.host && d && typeof d.by === 'string' && apply(d));
+
+    function partnerLeft() {
+      net = false;
+      rem.cur = rem.par = rem.ovr = null;
+      rem.acts.length = 0;
+      Object.assign(them, { state: 'idle', t: 0, riposte: 0, checked: true, queue: null });
+      ai.plan = null;
+      ai.cd = 1.2;
+      if (phase === 'wait' || phase === 'sync') setPhase('intro');
+      say(`${them.name} had to go. The computer fences on.`);
+    }
+
+    // Host: an attack whose defender never answered (a frozen tab) is judged by what the host sees
+    function hostTimeouts() {
+      for (const r of recs) if (r.st === 'pend' && r.by === me && now() > r.th + 1600) decide(r, Math.abs(me.x - them.x) <= REACH + 0.12, false);
     }
 
     // ---------------------------------------------------------------- computer
@@ -380,7 +586,10 @@ export default {
         if (live && Math.abs(f.x - other(f).x) > REACH - 0.3) f.x += f.dir * 1.4 * dt;
         if (f.t >= f.wind) startLunge(f, f.windExt, f.windRip);
       } else if (f.state === 'lunge') {
-        if (live && !f.checked && f.t >= f.ext) resolve(f, other(f));
+        if (live && !f.checked && f.t >= f.ext) {
+          if (net) f.checked = true; // online the touch is judged on the defender's screen
+          else resolve(f, other(f));
+        }
         if (f.state === 'lunge' && f.t >= f.ext + HOLD + REC) {
           f.state = 'idle';
           f.t = 0;
@@ -399,16 +608,21 @@ export default {
       if (live && f === me && f.queue && f.state === 'idle') {
         const q = f.queue;
         f.queue = null;
-        if (q === 'lunge') startLunge(me, me.riposte > 0 ? RIP_EXT : EXT, me.riposte > 0);
-        else if (q === 'parry' && me.parryCd <= 0) startParry(me);
+        if (q === 'lunge') myLunge(me.riposte > 0);
+        else if (q === 'parry' && me.parryCd <= 0) myParry();
       }
       if (live && f === me && f.queue === 'lunge' && f.state === 'parry' && f.riposte > 0) {
         f.queue = null;
-        startLunge(me, RIP_EXT, true);
+        myLunge(true);
       }
     }
 
     function keepApart() {
+      if (net) {
+        // the other fencer is where its own device put it: only we step back
+        me.x = clamp(Math.min(me.x, them.x - MIN_GAP), -HALF, HALF);
+        return;
+      }
       me.x = clamp(me.x, -HALF, HALF);
       them.x = clamp(them.x, -HALF, HALF);
       const overlap = me.x - (them.x - MIN_GAP);
@@ -477,20 +691,18 @@ export default {
           }
           sound.ui('pop');
         }
-        if (cue('go', 2.9)) resetPositions();
+        if (cue('go', 2.9)) resetPositions(phaseAt + 2900);
       } else if (phase === 'ready' && phaseT >= READY_DUR) {
-        phase = 'play';
-        phaseT = 0;
+        setPhase('play', phaseAt + READY_DUR * 1000);
         hud.message('Allez!', 700);
         K.sfx.whistle(sound);
         refArm = null;
       } else if (phase === 'point' && phaseT >= POINT_DUR) {
-        if (me.score >= TOUCHES || them.score >= TOUCHES) {
-          phase = 'over';
-          phaseT = 0;
-        } else resetPositions();
+        if (me.score >= TOUCHES || them.score >= TOUCHES) setPhase('over', phaseAt + POINT_DUR * 1000);
+        else resetPositions(phaseAt + POINT_DUR * 1000);
       } else if (phase === 'over') {
         if (cue('masks', 0.05)) {
+          rem.cur = rem.par = rem.ovr = null;
           for (const f of [me, them]) {
             f.stance = 'stand';
             f.state = 'idle';
@@ -523,6 +735,7 @@ export default {
     function endDuel() {
       finished = true;
       const win = me.score >= TOUCHES;
+      const wins = ctx.load('wins', 0) || 0;
       let n = wins;
       if (win) {
         n = wins + 1;
@@ -535,13 +748,17 @@ export default {
         title: win ? `${me.name} wins the duel!` : `${them.name} wins the duel`,
         text: win
           ? `Final score ${me.score} to ${them.score}. Duels won: ${n}. ${them.name} sends a big heart.`
-          : `Final score ${me.score} to ${them.score}. Parry when ${them.name}'s blade flashes, then riposte.`,
+          : net
+            ? `Final score ${me.score} to ${them.score}. A real duel with ${them.name}. Parry when the blade flashes, then riposte.`
+            : `Final score ${me.score} to ${them.score}. Parry when ${them.name}'s blade flashes, then riposte.`,
       });
     }
 
     function step(dt) {
       clock += dt;
-      phaseT += dt;
+      if (net) phaseT = Math.max(0, (now() - phaseAt) / 1000);
+      else phaseT += dt;
+      if (phase === 'sync' && net && now() >= goAt) setPhase('intro', goAt);
       const live = phase === 'play';
       if (live) {
         const ax = input.axis();
@@ -550,13 +767,17 @@ export default {
         if (input.pressed('jump')) parryInput();
         if (dbg.auto) mv = autoPlayer();
         me.move = me.state === 'idle' ? mv : 0;
-        updateAI(dt);
+        if (!net) updateAI(dt);
       } else {
         me.move = 0;
-        them.move = 0;
+        if (!net) them.move = 0;
       }
       stepFencer(me, dt, live);
-      stepFencer(them, dt, live);
+      if (net) {
+        remoteStep(dt);
+        if (link.host) hostTimeouts();
+        link.share({ x: +me.x.toFixed(3), m: me.move });
+      } else stepFencer(them, dt, live);
       if (phase === 'over') {
         // Walk back to the en garde lines for the closing salute
         for (const f of [me, them]) {
@@ -627,8 +848,8 @@ export default {
       if (phase === 'over') dist = clamp((sep + 3.6) / 2 / tanH, 4.6, 9);
       const want = new THREE.Vector3(mid, 1.3, dist);
       const look = new THREE.Vector3(mid, wide ? 1.2 : 0.88, 0);
-      if (phase === 'intro') {
-        const k = easeInOut(clamp(phaseT / 2.8, 0, 1));
+      if (phase === 'intro' || phase === 'wait' || phase === 'sync') {
+        const k = phase === 'intro' ? easeInOut(clamp(phaseT / 2.8, 0, 1)) : 0;
         want.lerpVectors(new THREE.Vector3(0, 2.8, 9.5), want, k);
         look.lerpVectors(new THREE.Vector3(0, 1.1, -0.6), look, k);
       }
@@ -666,10 +887,42 @@ export default {
 
     // Fake a press for the dev harness tests
     dbg.press = (what) => (what === 'lunge' ? lungeInput() : parryInput());
+    // Online test hooks: the state of the real duel, and (host) award a touch as if it landed
+    dbg.net = () => ({ net, host: link.host, phase, score: [me.score, them.score], recs: recs.map((r) => r.st), lag: Math.round(link.lag), them: { x: +them.x.toFixed(2), state: them.state } });
+    dbg.give = (id) => {
+      if (!net || !link.host || phase !== 'play') return false;
+      const rec = { by: id === me.id ? me : them, n: -1, th: now(), st: 'pend' };
+      recs.push(rec);
+      decide(rec, true, false);
+      return true;
+    };
+
+    // ---------------------------------------------------------------- playing together
+    if (link.inRoom) {
+      say(link.host ? `Waiting for ${them.name}...` : `Getting ready with ${them.name}...`);
+      link
+        .begin({ title: `Waiting for ${them.name}`, text: `${them.name} is invited to a real duel on the piste.`, solo: 'Fence the computer', exit: () => ctx.end({ quit: true }) })
+        .then((yes) => {
+          if (link.disposed) return;
+          if (yes) {
+            net = played = true;
+            say(`A real duel with ${them.name}!`);
+            if (link.host) {
+              const at = now() + 900;
+              link.send('go', { at });
+              startAt(at);
+            }
+          } else if (phase === 'wait') setPhase('intro');
+        });
+    }
 
     return {
-      update(dt, t) {
-        const n = clamp(Math.round(dbg.fast) || 1, 1, 24);
+      update(dt0, t) {
+        // online both devices keep real time, so a slow frame rate does not put the duel out of step
+        const rdt = link.dt();
+        const dt = played ? rdt : dt0;
+        if (link.check()) partnerLeft();
+        const n = net ? 1 : clamp(Math.round(dbg.fast) || 1, 1, 24);
         for (let k = 0; k < n; k++) step(dt);
         poseAll(dt * n, t);
         hall.update(dt, t);
@@ -677,6 +930,7 @@ export default {
         updateHud(dt);
       },
       dispose() {
+        link.dispose();
         ui.remove();
         if (window.__riding === dbg) delete window.__riding;
       },
