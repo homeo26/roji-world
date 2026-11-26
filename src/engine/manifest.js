@@ -77,6 +77,7 @@ export const ARENAS = [
   { id: 'coaster', module: '../arena/coaster.js', place: 'park' },
   { id: 'parkgames', module: '../arena/parkgames.js', place: 'park' },
   { id: 'ghosttrain', module: '../arena/ghosttrain.js', place: 'park' },
+  { id: 'parade', module: '../arena/parade.js', place: 'park' },
   { id: 'example', module: '../arena/example.js', place: 'example', dev: true },
 ];
 
