@@ -92,7 +92,7 @@ export class UI {
     $('btn-journal').innerHTML = svgIcon('book', 20);
     $('btn-journal').addEventListener('click', () => this.toggleJournal());
     $('btn-swap').addEventListener('click', () => h.onSwap());
-    $('btn-online').innerHTML = svgIcon('together', 22);
+    this.setOnlineRoom(null);
     $('btn-online').addEventListener('click', () => h.onOnline());
     $('help-close').addEventListener('click', () => this.toggleHelp(false));
     $('btn-reset').addEventListener('click', () => {
@@ -339,6 +339,15 @@ export class UI {
     this.card.animate([{ marginLeft: '0' }, { marginLeft: '-8px' }, { marginLeft: '8px' }, { marginLeft: '-5px' }, { marginLeft: '0' }], { duration: 320 });
   }
 
+  // The Play together button: its words on wide screens, the room code while in a room
+  setOnlineRoom(code) {
+    const b = $('btn-online');
+    b.innerHTML = `${svgIcon('together', 22)}<span class="ol-btn-t">${code ? esc(code) : 'Play together'}</span>`;
+    b.classList.toggle('in-room', !!code);
+    b.setAttribute('aria-label', code ? `Room ${code}` : 'Play together');
+    b.title = code ? `Room ${code}: who is here, the code and the link` : 'Play together on two devices';
+  }
+
   hideCard() {
     if (this.card.classList.contains('hidden')) return;
     this.current = null;
@@ -576,7 +585,7 @@ export class UI {
     el.innerHTML = `<div class="modal-card" style="--c:${stop.color}">
       <div class="sheet-head"><h3>${svgIcon('note', 22)} ${esc(stop.week ? 'Weekend ' + stop.week + ': ' : '')}${esc(stop.title)}</h3><button class="round small" data-n="close" aria-label="Close">${svgIcon('close', 16)}</button></div>
       <textarea id="note-text" rows="7" placeholder="Write a memory, a plan, or what to bring...">${esc(n?.text || '')}</textarea>
-      <div class="note-foot"><span id="note-saved">${n ? 'Saved ' + new Date(n.updated).toLocaleString() : 'Notes save on this device'}</span><button class="btn primary" data-n="close">Done</button></div>
+      <div class="note-foot"><span id="note-saved">${n ? 'Saved ' + new Date(n.updated).toLocaleString() : document.body.classList.contains('ol-in-room') ? 'Notes save in your room' : 'Notes save on this device'}</span><button class="btn primary" data-n="close">Done</button></div>
     </div>`;
     el.classList.remove('hidden');
     const ta = $('note-text');

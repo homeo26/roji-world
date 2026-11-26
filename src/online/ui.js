@@ -2,11 +2,14 @@ import { svgIcon } from '../icons.js';
 import { avatar } from '../games/avatar.js';
 import { CODE_CHARS } from './codes.js';
 
-// The Play together window (make a room or join one), the status chip while in a room and the small
-// invitation cards ("Homama wants to hold your hand"). The window lives in #online (index.html) so the
-// game treats it like its other panels; the chip and the cards are added here.
+// The Play together window (continue in our room, make a room or join one; in a room: the code, who is in
+// it, keeping the seat with Google, freeing a seat, deleting the room), the status chip while in a room and
+// the small invitation cards ("Homama wants to hold your hand"). The window lives in #online (index.html)
+// so the game treats it like its other panels; the chip and the cards are added here.
 
 const $ = (id) => document.getElementById(id);
+// The Google "G" for the sign-in button
+const GOOGLE_G = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 let cssReady = null;
@@ -23,7 +26,7 @@ export function loadCss() {
 }
 
 export class OnlineUI {
-  // h: { looks, playerId(), onCreate(who), onJoin(code), onLeave(), onCopy(text) }
+  // h: { looks, playerId(), onCreate(who), onJoin(code), onContinue(), onLeave(), onChip(), onDelete(), onFree(), onGoogle(), onSolo(), onForget() }
   constructor(h) {
     this.h = h;
     this.el = $('online');
@@ -76,7 +79,8 @@ export class OnlineUI {
     this.el.classList.add('hidden');
   }
 
-  // view: 'start' | 'busy' | 'room'; data: { code, link, role, other, here, busy }
+  // view: 'start' | 'busy' | 'room' | 'confirm'. start: { saved, loaded, google, code, msg, failed };
+  // room: { code, link, seat, other, otherState, here, google, msg }; confirm: { act, title, text, yes }
   show(view, data = {}) {
     this.view = view;
     this.data = data;
@@ -94,30 +98,58 @@ export class OnlineUI {
     const { looks } = this.h;
     const d = this.data || {};
     const head = (title) => `<div class="sheet-head"><h3>${svgIcon('together', 22)} ${esc(title)}</h3><button class="round small" data-o="close" aria-label="Close">${svgIcon('close', 16)}</button></div>`;
+    const herHis = (id) => (looks[id]?.gender === 'boy' ? 'his' : 'her');
+    const googleBtn = (label) => `<button class="btn ol-google" data-o="google">${GOOGLE_G}<span>${esc(label)}</span></button>`;
     let body = '';
     if (this.view === 'busy') {
       body = `${head('Play together')}<div class="ol-busy"><span class="ol-spin"></span>${esc(d.busy || 'One moment')}</div><p class="ol-msg"></p>`;
+    } else if (this.view === 'confirm') {
+      body = `${head(d.title)}<p class="ol-lead ol-confirm">${d.text}</p>
+        <div class="ol-foot"><button class="btn ghost" data-o="back">${esc(d.no || 'Keep it')}</button><button class="btn primary ol-danger" data-o="do-${d.act}">${esc(d.yes)}</button></div>`;
     } else if (this.view === 'room') {
-      const other = looks[d.other];
+      const me = d.seat;
+      const other = d.other;
       const share = navigator.share ? `<button class="btn" data-o="share">${svgIcon('share', 18)} Share</button>` : '';
-      const status = d.here ? `<i class="ol-dot live"></i> ${esc(other.name)} is here. Have fun!` : d.role === 'host' ? `<i class="ol-dot wait"></i> Waiting for ${esc(other.name)} to join` : `<i class="ol-dot wait"></i> Waiting for ${esc(other.name)}`;
-      body = `${head(d.role === 'host' ? 'Your room' : `${other.name}'s room`)}
-        ${d.role === 'host' ? `<p class="ol-lead">Send this code or link to ${esc(other.name)}. Keep this page open while you play.</p>` : ''}
-        <div class="ol-room">
-          <div class="ol-code-big" aria-label="Room code">${[...d.code].map((c) => `<b>${c}</b>`).join('')}</div>
-          ${d.role === 'host' ? `<div class="ol-link"><input id="ol-link" readonly value="${esc(d.link)}" aria-label="Link to the room" /><button class="btn primary" data-o="copy">${svgIcon('copy', 18)} Copy</button>${share}</div>` : ''}
+      const st = { here: ['live', 'Here now'], away: ['wait', 'Away for a moment'], out: ['off', 'Not here right now'], free: ['wait', 'Free seat: send the code'] }[d.otherState] || ['off', ''];
+      const seat = (id, dot, text, extra = '') => `<div class="ol-seat${d.otherState === 'free' && id === other ? ' free' : ''}"><span class="ol-av">${avatar(looks[id], 34)}</span><span class="ol-seat-t"><b>${esc(looks[id].name)}</b><span><i class="ol-dot ${dot}"></i>${esc(text)}</span></span>${extra}</div>`;
+      const free = d.otherState !== 'free' ? `<button class="ol-mini" data-o="ask-free">${esc(looks[other].name)} has a new phone? Free ${herHis(other)} seat</button>` : '';
+      const keep = d.google ? `<p class="ol-kept">${svgIcon('check', 18, 2.8)} Your seat is kept with your Google account.</p>` : googleBtn('Keep my seat on any device: sign in with Google');
+      body = `${head(`Room ${d.code}`)}
+        <div class="ol-roomgrid">
+          <div class="ol-room">
+            <div class="ol-code-big" aria-label="Room code">${[...d.code].map((c) => `<b>${c}</b>`).join('')}</div>
+            <div class="ol-link"><input id="ol-link" readonly value="${esc(d.link)}" aria-label="Link to the room" /><button class="btn primary" data-o="copy">${svgIcon('copy', 18)} Copy</button>${share}</div>
+            <p class="ol-note">The room stays saved. Come back with this code any time and carry on.</p>
+          </div>
+          <div class="ol-side">
+            <div class="ol-seats" aria-label="Who is in the room">${seat(me, 'live', 'You')}${seat(other, st[0], st[1], free)}</div>
+            ${keep}
+          </div>
         </div>
-        <p class="ol-status">${status}</p>
-        <div class="ol-foot"><button class="btn ghost" data-o="leave">Leave the room</button><button class="btn primary" data-o="close">${d.here ? 'Play' : 'Back to the island'}</button></div>
+        <div class="ol-foot"><button class="btn ghost ol-del" data-o="ask-delete">Delete this room</button><span class="ol-gap"></span><button class="btn ghost" data-o="leave">Leave the room</button><button class="btn primary" data-o="close">${d.here ? 'Play' : 'Back to the island'}</button></div>
         <p class="ol-msg"></p>`;
     } else {
       const pickBtn = (id) => `<button class="ol-pick ${this.pick === id ? 'on' : ''}" data-o="pick:${id}" role="radio" aria-checked="${this.pick === id}">${avatar(looks[id], 46)}<span>${esc(looks[id].name)}</span></button>`;
+      const room = d.loaded || d.saved?.code;
+      const seatId = room && d.saved?.code === room ? d.saved.seat : null;
+      let ours = '';
+      if (room) {
+        const lost = d.failed === 'full';
+        const solo = d.loaded ? `<button class="btn ghost" data-o="solo">Play on my own</button>` : `<button class="ol-mini" data-o="forget">Forget this room</button>`;
+        ours = `<section class="ol-ours">
+          <button class="btn primary big ol-continue" data-o="continue">${svgIcon('together', 22)} <span>Continue in our room <b>${esc(room)}</b></span></button>
+          <div class="ol-ours-row">${seatId ? `<span class="ol-av">${avatar(looks[seatId], 26)}</span><span>You play ${esc(looks[seatId].name)} there. What you two did is saved in the room.</span>` : '<span>What you two did is saved in the room.</span>'}${solo}</div>
+          ${lost ? `<div class="ol-ours-row">${d.google ? '' : googleBtn('My seat is with Google: sign in')}<button class="ol-mini" data-o="forget">Forget this room</button></div>` : ''}
+        </section>`;
+      }
       body = `${head('Play together')}
-        <p class="ol-lead">Two phones or laptops, one island: one of you plays Roji and the other plays Homama.</p>
+        ${ours || '<p class="ol-lead">Two phones or laptops, one island: one of you plays Roji and the other plays Homama. A room keeps your progress, so you can come back to it any time.</p>'}
+        ${ours ? '<p class="ol-or">Or start another room</p>' : ''}
         <div class="ol-two">
           <section class="ol-box"><h4>Make a room</h4><div class="ol-picks" role="radiogroup" aria-label="Who do you play">${pickBtn('roji')}${pickBtn('homama')}</div><button class="btn primary" data-o="create">${svgIcon('together', 18)} Make a room</button></section>
           <section class="ol-box"><h4>Join a room</h4><label class="ol-label" for="ol-code">The code you got</label><input id="ol-code" class="ol-code" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="6" placeholder="ABC234" value="${esc(d.code || '')}" /><button class="btn primary" data-o="join" style="--c:#21a99a">${svgIcon('door', 18)} Join</button></section>
         </div>
+        ${!d.google && !(room && d.failed === 'full') ? `<p class="ol-small">Your seat is on another phone? <button class="ol-mini" data-o="google">Sign in with Google</button> first, then join.</p>` : ''}
         <p class="ol-msg"></p>`;
     }
     this.el.innerHTML = `<div class="modal-card ol-card">${body}</div>`;
@@ -129,15 +161,32 @@ export class OnlineUI {
     const b = e.target.closest('[data-o]');
     if (!b) return;
     const [act, arg] = b.dataset.o.split(':');
+    const d = this.data || {};
+    const looks = this.h.looks;
     if (act === 'close') this.close();
     else if (act === 'pick') {
       this.pick = arg;
       this.render();
     } else if (act === 'create') this.h.onCreate(this.pick);
     else if (act === 'join') this.h.onJoin($('ol-code').value);
+    else if (act === 'continue') this.h.onContinue();
     else if (act === 'leave') this.h.onLeave();
     else if (act === 'copy') this.copy();
-    else if (act === 'share') navigator.share?.({ title: 'Roji World', text: `Come and play Roji World with me! Room ${this.data.code}`, url: this.data.link }).catch(() => {});
+    else if (act === 'google') this.h.onGoogle();
+    else if (act === 'solo') this.h.onSolo();
+    else if (act === 'forget') this.h.onForget();
+    else if (act === 'ask-delete') {
+      this.back = d;
+      this.show('confirm', { act: 'delete', title: `Delete room ${d.code}?`, text: `Everything you two saved in room <b>${esc(d.code)}</b> goes with it, for both of you, and the code stops working. This cannot be undone.`, yes: 'Delete the room' });
+    } else if (act === 'ask-free') {
+      const n = esc(looks[d.other].name);
+      const her = looks[d.other].gender === 'boy' ? 'his' : 'her';
+      this.back = d;
+      this.show('confirm', { act: 'free', title: `Free ${looks[d.other].name}'s seat?`, text: `Do this when ${n} has a new phone or lost ${her} seat. ${n}'s old phone will not get back in; on the new phone ${n} joins again with the code <b>${esc(d.code)}</b> and finds everything you saved.`, yes: 'Free the seat', no: 'Cancel' });
+    } else if (act === 'back') this.show('room', { ...this.back, msg: '' });
+    else if (act === 'do-delete') this.h.onDelete();
+    else if (act === 'do-free') this.h.onFree();
+    else if (act === 'share') navigator.share?.({ title: 'Roji World', text: `Come and play Roji World with me! Room ${d.code}`, url: d.link }).catch(() => {});
   }
 
   async copy() {

@@ -2,19 +2,23 @@ import * as THREE from 'three';
 import { OnlineUI, loadCss } from './ui.js';
 import { Remote, cleanState, cleanLook, lookString, POSES } from './remote.js';
 import { CODE_RE } from './codes.js';
+import { savedRoom, rememberRoom, forgetRoom, activeRoom, useSolo, setGo } from './profile.js';
 import { chooseHook } from '../engine/choose.js';
 import { stepWalker, stepVertical, tryJump, faceTo, airOf, RADIUS } from '../engine/movement.js';
 import { damp, clamp } from '../util.js';
 
-// Play together: two people on two devices, each moving their own kid in the same island.
-// src/main.js loads this module when the player opens Play together (or a ?room=CODE link) and calls:
+// Play together: two people on two devices, each moving their own kid in the same island, in a room that
+// lasts. src/main.js loads this module when the player opens Play together (or a ?room=CODE link) and calls:
 //   frame(dt, t)  after the kids moved, before they are drawn (the other kid follows its states)
 //   late()        just before drawing (send our kid's state)
 //   background()  while a minigame owns the screen (keep the room alive)
 // and asks it about the partner: live() (a person moves the other kid), leading()/following() (hands),
 // carTaken()/carLabel() (the other player is driving), pressed(hotspot), hands(), arena(id, on).
-// Shared moments are events: hands-ask/yes/no/off, act/act-join/act-no/act-end (an activity for two),
-// game (a minigame started). Stamps, gifts and notes stay on each device.
+// The room has two seats (Roji and Homama) that stay with their players; its progress is saved in the room
+// (src/online/save.js). Going into a room or out of it reloads the page, so every place starts again from
+// the right progress (src/online/profile.js keeps the two apart). Shared moments are events:
+// hands-ask/yes/no/off, act/act-join/act-no/act-end (an activity for two), game (a minigame started),
+// seat-freed and room-deleted.
 
 // How the invitations name the buildings ("Roji went into the cinema")
 const PLACE_NAMES = {
@@ -36,6 +40,7 @@ const PLACE_NAMES = {
 const SEND_MOVING = 1000 / 12;
 const SEND_STILL = 1000;
 const HOLD_GAP = 0.64;
+const LOOKS_KEY = 'roji-weekends-looks-v1';
 const otherId = (id) => (id === 'roji' ? 'homama' : 'roji');
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -43,6 +48,7 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const leftOf = (yaw, d) => new THREE.Vector3(Math.cos(yaw) * d, 0, -Math.sin(yaw) * d);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const timeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error(`${what} timed out`), { code: 'timeout' })), ms))]);
 async function waitFor(cond, ms) {
   const end = performance.now() + ms;
   while (!cond()) {
@@ -50,6 +56,24 @@ async function waitFor(cond, ms) {
     await sleep(100);
   }
   return true;
+}
+// This page's address with (or without) the room
+function urlFor(code) {
+  const url = new URL(location.href);
+  if (code) url.searchParams.set('room', code);
+  else url.searchParams.delete('room');
+  return url.href;
+}
+// What Google sign-in said, for people
+function googleMessage(e) {
+  const c = e?.code || '';
+  if (c === 'auth/operation-not-allowed' || c === 'auth/admin-restricted-operation') return 'Signing in with Google is not switched on for Roji World yet. Homam can turn it on in the Firebase console; until then your seat stays with this device.';
+  if (c === 'auth/popup-blocked') return 'The browser stopped the Google window from opening. Allow pop-ups for this page, then try again.';
+  if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request' || c === 'auth/user-cancelled') return 'The Google window closed before you signed in. Try again when you are ready.';
+  if (c === 'auth/unauthorized-domain') return 'Signing in with Google does not work on this web address yet.';
+  if (c === 'auth/network-request-failed' || c === 'timeout') return 'We could not reach Google. Check the internet and try again.';
+  console.warn('google sign-in:', c || e?.message);
+  return 'Signing in with Google did not work this time. Please try again.';
 }
 
 export function createOnline(h) {
@@ -64,13 +88,21 @@ class Online {
       playerId: () => h.playerId(),
       onCreate: (who) => this.create(who),
       onJoin: (code) => this.join(code),
+      onContinue: () => this.join(activeRoom() || savedRoom()?.code),
       onLeave: () => this.leave(),
       onChip: () => this.openDialog(),
+      onDelete: () => this.deleteRoom(),
+      onFree: () => this.freeSeat(),
+      onGoogle: () => this.google(),
+      onSolo: () => this.playSolo(),
+      onForget: () => this.forget(),
     });
     this.net = null;
-    this.room = null; // { code, role }
+    this.room = null; // { code, seat }
+    this.save = null;
     this.remote = null;
     this.otherUid = null;
+    this.otherHere = false; // the other player is connected to the room
     this.isLive = false;
     this.sent = null;
     this.lastSend = 0;
@@ -134,13 +166,16 @@ class Online {
   }
 
   // ---------------------------------------------------------------- the window
-  async open({ join = null } = {}) {
+  // join: a room code to go into; show: 'room' opens the room window once in; msg: what just happened
+  async open({ join = null, show = null, msg = null } = {}) {
     await loadCss();
     this.getNet().catch(() => {}); // start downloading while the window is up
     if (join && !this.room) {
-      this.ui.show('start', { code: join });
-      this.ui.open();
-      this.join(join);
+      if (show) {
+        this.ui.show('busy', { busy: `Opening room ${join}` });
+        this.ui.open();
+      }
+      await this.join(join, { show, msg });
       return;
     }
     this.openDialog();
@@ -148,12 +183,22 @@ class Online {
 
   openDialog() {
     if (this.room) this.ui.show('room', this.roomView());
-    else this.ui.show('start', {});
+    else this.ui.show('start', this.startView());
     this.ui.open();
   }
 
-  roomView() {
-    return { code: this.room.code, role: this.room.role, link: this.link(), other: this.remoteId(), here: this.isLive };
+  startView(extra = {}) {
+    return { saved: savedRoom(), loaded: activeRoom(), google: !!this.net?.google(), ...extra };
+  }
+
+  roomView(extra = {}) {
+    const rid = this.remoteId();
+    const other = !this.otherUid ? 'free' : this.isLive && this.remote?.fresh ? 'here' : this.otherHere ? 'away' : 'out';
+    return { code: this.room.code, link: this.link(), seat: this.room.seat, other: rid, otherState: other, here: this.isLive, google: !!this.net?.google(), ...extra };
+  }
+
+  refreshRoomView() {
+    if (this.ui.isOpen && this.ui.view === 'room' && this.room) this.ui.show('room', this.roomView(this.ui.data?.keepMsg ? { msg: this.ui.data.msg, msgKind: this.ui.data.msgKind, keepMsg: true } : {}));
   }
 
   link() {
@@ -161,7 +206,10 @@ class Online {
   }
 
   getNet() {
-    this.netP ||= import('./net.js').then((m) => (this.net = new m.Net()));
+    this.netP ||= Promise.all([import('./net.js'), import('./save.js')]).then(([n, s]) => {
+      this.saveMod = s;
+      return (this.net = new n.Net());
+    });
     this.netP.catch(() => (this.netP = null));
     return this.netP;
   }
@@ -169,137 +217,289 @@ class Online {
   fail(e, view = {}) {
     const code = e?.code || '';
     let msg = 'Something went wrong. Please try again in a moment.';
-    if (code === 'closed') msg = 'That room is not open: check the code, or ask for a new one. A room has space for two players.';
+    if (code === 'full') msg = 'We could not get a seat in that room. Check the code. If it is your room and your seat is on another phone: sign in with Google if you kept your seat with it, or ask the other player to free your seat.';
     else if (code === 'nocode') msg = 'No free room right now. Please try again.';
-    else if (code === 'timeout' || /network|offline|fetch|import|module|failed/i.test(`${code} ${e?.message}`)) msg = 'We could not reach the online playground. Check the internet and try again. You can keep playing here on your own.';
-    if (code !== 'closed' && code !== 'nocode') console.warn('online play:', code || e?.message);
-    this.ui.show('start', { ...view, msg, msgKind: 'bad' });
+    else if (code === 'storage') msg = 'This device has no room left to keep the room’s progress. Free some space and try again.';
+    else if (code === 'timeout' || /network|offline|fetch|import|module|failed|disconnect/i.test(`${code} ${e?.message}`)) msg = 'We could not reach the online playground. Check the internet and try again. You can keep playing here on your own.';
+    if (!['full', 'nocode', 'storage'].includes(code)) console.warn('online play:', code || e?.message);
+    this.ui.show('start', this.startView({ ...view, msg, msgKind: 'bad', failed: code }));
   }
 
+  // A new room: a fresh journey for the two of you
   async create(who) {
     if (this.busy || this.room) return;
     this.busy = true;
     this.ui.show('busy', { busy: 'Making a room' });
     try {
       const net = await this.getNet();
-      this.h.becomePlayer(who);
-      const code = await net.create();
-      this.enterRoom(code, 'host');
-      this.ui.show('room', this.roomView());
+      const code = await net.create(who);
+      rememberRoom(code, who);
+      await this.reloadInto(code, who, { show: 'room', msg: 'new' });
     } catch (e) {
-      this.fail(e);
-    } finally {
       this.busy = false;
+      this.fail(e);
     }
   }
 
-  async join(raw) {
+  // Into a room: our seat if we have one, else the free one
+  async join(raw, { show = null, msg = null } = {}) {
     const code = String(raw || '')
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '');
     if (!CODE_RE.test(code)) {
-      this.ui.show('start', { code, msg: 'A room code has 6 letters and numbers, like ABC234.', msgKind: 'bad' });
+      this.ui.show('start', this.startView({ code, msg: 'A room code has 6 letters and numbers, like ABC234.', msgKind: 'bad' }));
       return;
     }
     if (this.busy || this.room) return;
     this.busy = true;
-    this.ui.show('busy', { busy: `Joining room ${code}` });
+    if (!show) this.ui.show('busy', { busy: `Joining room ${code}` });
     try {
       const net = await this.getNet();
-      const r = await net.join(code);
-      if (r.role === 'guest') {
-        // The guest plays whoever the host does not, and starts beside the host
-        if (r.hostState?.who === this.h.playerId()) this.h.becomePlayer(otherId(r.hostState.who));
-        this.arriving = true;
-        const url = new URL(location.href);
-        url.searchParams.set('room', code);
-        history.replaceState(null, '', url);
+      const saved = savedRoom();
+      const r = await net.join(code, saved?.code === code ? saved.seat : this.h.playerId());
+      rememberRoom(code, r.seat);
+      if (activeRoom() !== code) {
+        // The page starts again with the room's progress
+        await this.reloadInto(code, r.seat, { show, msg: r.otherState ? 'together' : 'in' });
+        return;
       }
-      this.enterRoom(code, r.role);
-      this.ui.close();
-      this.toast(`You are in the room. Finding ${this.name()}...`, 2600);
+      this.h.becomePlayer(r.seat);
+      this.h.savePlayer(r.seat);
+      await this.startSave(code);
+      this.enterRoom(code, r.seat, r);
+      const name = esc(this.name());
+      if (show === 'room') this.ui.show('room', this.roomView(msg === 'new' ? { msg: `Your room is ready and saved. Send the code to ${name}.`, msgKind: 'good', keepMsg: true } : {}));
+      else this.ui.close();
+      if (r.otherState) this.toast(`You are in room ${code}. Finding ${name}...`, 2600);
+      else if (msg !== 'new') this.toast(`You are in room <b>${code}</b>. ${name} is not here right now: ${name} walks with you, and everything you do is saved in the room.`, 4600);
     } catch (e) {
-      this.fail(e, { code });
+      await this.net?.leave().catch(() => {});
+      if (e?.code === 'full' && (activeRoom() === code || savedRoom()?.code === code)) {
+        // Our own room refused us: deleted, or the seat went to another device
+        this.ui.show('start', this.startView({ msg: `We could not get back into room ${code}: it was deleted, or your seat went to another phone. If you kept your seat with Google, sign in with Google and continue. Otherwise ask the other player to free your seat, or forget this room.`, msgKind: 'bad', failed: 'full' }));
+      } else if (activeRoom() === code) {
+        // The room's progress stays loaded: what happens here goes to the room next time
+        this.ui.show('start', this.startView({ msg: `We could not reach room ${code}. You can keep playing: what you do now is kept for the room and goes to it next time you are online.`, msgKind: 'bad', failed: 'offline' }));
+        this.toast(`We could not reach room ${code}. Keep playing: it is kept for next time.`, 4200);
+      } else this.fail(e, { code });
+      if (!this.ui.isOpen) this.ui.open();
     } finally {
       this.busy = false;
     }
   }
 
-  // The guest plays whoever the host does not
-  takeOther(hostWho) {
-    if (this.room?.role !== 'guest' || (hostWho !== 'roji' && hostWho !== 'homama')) return;
-    if (hostWho === this.h.playerId()) {
-      this.h.becomePlayer(otherId(hostWho));
-      this.sent = null;
+  // The device's own progress goes aside and the page starts again inside the room
+  async reloadInto(code, seat, go) {
+    this.ui.show('busy', { busy: `Opening room ${code}` });
+    const server = await timeout(this.net.readSave(code), 15000, 'save');
+    this.saveMod.enterProfile(code, server);
+    this.h.savePlayer(seat);
+    setGo({ join: code, ...go });
+    await this.net.leave();
+    this.h.reloadPage(urlFor(code));
+  }
+
+  // Out of the room: the page starts again with the device's own progress
+  outTo(go, keep) {
+    useSolo(keep);
+    setGo(go);
+    this.h.reloadPage(urlFor(null));
+  }
+
+  async startSave(code) {
+    this.save = new this.saveMod.RoomSave(this.net.db, code, {
+      reload: (keys) => this.h.reloadProgress(keys),
+      onError: (e) => this.saveError(e),
+    });
+    try {
+      await this.save.start();
+    } catch (e) {
+      this.save = null;
+      throw e;
     }
   }
 
-  enterRoom(code, role) {
-    this.room = { code, role };
-    this.savedLooks = { roji: { ...this.h.looks.roji }, homama: { ...this.h.looks.homama } };
+  // A refusal means the room went or our seat did: the room's own listener says which (onClosed)
+  saveError(e) {
+    if (!this.deleting && !/permission/i.test(`${e?.code} ${e?.message}`)) console.warn('room save:', e?.code || e?.message);
+  }
+
+  enterRoom(code, seat, r) {
+    this.room = { code, seat };
+    this.otherUid = r.other || null;
+    this.otherHere = !!r.otherState;
+    this.arriving = !!r.otherState; // the other player is here already: start beside them
     this.sent = null;
     this.lastSeen = null;
+    this.closedWhy = null;
     this.h.activities.hook = this.actHook;
     this.net.watch({
+      onSeats: () => this.refreshRoomView(),
       onOther: (uid) => this.onOther(uid),
       onState: (v) => this.onState(v),
       onEvent: (ev) => this.onEvent(ev),
-      onClosed: () => this.onClosed(),
-      onConnection: () => this.updateChip(),
+      onClosed: (why) => this.onClosed(why),
+      onConnection: (on) => {
+        if (on) this.sent = null; // the server dropped our state while we were away: send all of it
+        this.updateChip();
+      },
+      onUser: () => {
+        this.sent = null;
+        this.refreshRoomView();
+      },
     });
+    history.replaceState(null, '', urlFor(code)); // a reload comes back into the room
+    this.h.setOnlineButton(code);
     this.updateChip();
   }
 
   exitRoom() {
     this.room = null;
     this.otherUid = null;
+    this.otherHere = false;
     this.arriving = false;
     this.h.activities.hook = null;
     this.joining = this.out = this.joined = null;
     this.ui.chip(false);
     this.ui.clearInvite();
-    const url = new URL(location.href);
-    if (url.searchParams.has('room')) {
-      url.searchParams.delete('room');
-      history.replaceState(null, '', url);
+    this.h.setOnlineButton(null);
+    history.replaceState(null, '', urlFor(null));
+  }
+
+  // Leave for now: the room, the seats and the saved progress stay
+  async leave() {
+    if (!this.room) return this.ui.close();
+    const code = this.room.code;
+    this.goSolo(null);
+    this.exitRoom();
+    this.ui.show('busy', { busy: 'Saving and leaving the room' });
+    this.ui.open();
+    const keep = await this.save?.stop(true);
+    this.save = null;
+    await this.net.leave();
+    this.outTo({ msg: 'left', code }, keep);
+  }
+
+  // Not in the room, but its progress is loaded (we could not reach it): play on our own instead
+  playSolo() {
+    if (this.room || !activeRoom()) return;
+    this.outTo({ msg: 'solo', code: activeRoom() }, null);
+  }
+
+  // A room we cannot get back into
+  forget() {
+    const r = savedRoom() || (activeRoom() && { code: activeRoom() });
+    if (!r) return;
+    const loaded = activeRoom() === r.code;
+    if (loaded) useSolo(new Set());
+    forgetRoom(r.code);
+    if (loaded) return this.outTo({ msg: 'forgot', code: r.code }, new Set());
+    this.ui.show('start', this.startView({ msg: `Room ${r.code} is forgotten on this device.`, msgKind: 'good' }));
+  }
+
+  // The room is gone, or our seat went to another device
+  async onClosed(why) {
+    if (!this.room) return;
+    const code = this.room.code;
+    const name = this.name();
+    const reason = this.closedWhy || why;
+    this.goSolo(null);
+    this.exitRoom();
+    await this.save?.stop(false);
+    this.save = null;
+    this.net.leave();
+    useSolo(new Set());
+    forgetRoom(code);
+    this.outTo({ msg: reason === 'deleted' ? 'deleted' : 'lost', code, name }, new Set());
+  }
+
+  // Free the other seat (their phone is lost): they come back with the code
+  async freeSeat() {
+    if (!this.room || !this.otherUid) return;
+    const kid = this.remoteId();
+    const name = esc(this.name(kid));
+    this.ui.show('busy', { busy: `Freeing ${name}'s seat` });
+    try {
+      await timeout(this.net.sendEvent('seat-freed', { seat: kid }), 6000, 'free');
+      await this.net.freeSeat(kid);
+      this.goSolo(null);
+      this.otherUid = null;
+      this.otherHere = false;
+      this.ui.show('room', this.roomView({ msg: `${name}'s seat is free. ${name} can join again on the new phone with the code ${this.room.code}.`, msgKind: 'good', keepMsg: true }));
+    } catch (e) {
+      console.warn('online free seat:', e?.code || e?.message);
+      this.ui.show('room', this.roomView({ msg: 'We could not free the seat. Check the internet and try again.', msgKind: 'bad' }));
     }
   }
 
-  async leave() {
-    if (!this.room) return this.ui.close();
-    const was = this.room.role;
+  // Delete the room and everything saved in it
+  async deleteRoom() {
+    if (!this.room) return;
+    const code = this.room.code;
+    this.ui.show('busy', { busy: `Deleting room ${code}` });
+    try {
+      await timeout(this.net.sendEvent('room-deleted'), 6000, 'delete');
+      this.deleting = true;
+      await this.net.deleteRoom();
+    } catch (e) {
+      this.deleting = false;
+      console.warn('online delete:', e?.code || e?.message);
+      this.ui.show('room', this.roomView({ msg: 'We could not delete the room. Check the internet and try again.', msgKind: 'bad' }));
+      return;
+    }
     this.goSolo(null);
     this.exitRoom();
-    this.ui.close();
-    await this.net.leave();
-    this.toast(was === 'host' ? 'Room closed. Back to playing on your own.' : 'You left the room. Back to playing on your own.', 3000);
+    await this.save?.stop(false);
+    this.save = null;
+    useSolo(new Set());
+    forgetRoom(code);
+    this.outTo({ msg: 'gone', code }, new Set());
   }
 
-  onClosed() {
-    if (!this.room) return;
-    const name = this.name();
-    this.goSolo(null);
-    this.exitRoom();
-    this.net.leave();
-    this.toast(`${name} closed the room. You can keep playing here.`, 4200);
-    if (this.ui.isOpen) this.ui.show('start', { msg: `${name} closed the room.`, msgKind: 'bad' });
+  // Keep the seat on any device: link this player to their Google account
+  async google() {
+    const where = this.room ? 'room' : 'start';
+    const back = (extra) => this.ui.show(where, where === 'room' ? this.roomView({ ...extra, keepMsg: true }) : this.startView(extra));
+    this.ui.msg('Opening the Google window...', 'good');
+    try {
+      const net = await this.getNet();
+      const r = await net.linkGoogle();
+      back({ msg: r === 'linked' ? 'Your seat is kept with your Google account. On a new phone: open Play together, sign in with Google, then continue in the room.' : 'You are signed in with your Google account.', msgKind: 'good' });
+    } catch (e) {
+      back({ msg: googleMessage(e), msgKind: /operation-not-allowed|admin-restricted|popup-closed|cancelled/.test(e?.code || '') ? 'info' : 'bad' });
+    }
   }
 
   onOther(uid) {
     const prev = this.otherUid;
     this.otherUid = uid;
     if (prev && !uid) {
-      const name = this.name();
-      this.goSolo(`${name} left the room. ${name} walks with you again.`);
+      this.otherHere = false;
+      this.goSolo(null);
     }
-    if (this.ui.isOpen && this.ui.view === 'room') this.ui.show('room', this.roomView());
+    this.refreshRoomView();
     this.updateChip();
   }
 
   // ---------------------------------------------------------------- the other player's states
   onState(v) {
-    if (!this.room || !v) return;
-    if (this.room.role === 'guest') this.takeOther(v.who);
+    if (!this.room) return;
+    if (!v) {
+      // The other player left or lost the connection: the computer partner walks again
+      const was = this.otherHere;
+      this.otherHere = false;
+      if (this.isLive) {
+        const name = this.name();
+        this.goSolo(`${name} left the room. ${name} walks with you again.`);
+      }
+      if (was) this.refreshRoomView();
+      this.updateChip();
+      return;
+    }
+    if (!this.otherHere) {
+      this.otherHere = true;
+      this.refreshRoomView();
+    }
     const rid = this.remoteId();
     const s = cleanState(v, rid);
     if (!s) return;
@@ -327,7 +527,7 @@ class Online {
     document.body.dataset.olRemote = this.remoteId(); // the wardrobe shows only our own kid
     this.lastSeen = null;
     this.ui.clearInvite();
-    if (this.ui.isOpen && this.ui.view === 'room') this.ui.show('room', this.roomView());
+    this.refreshRoomView();
     this.toast(`<b>${esc(this.name())}</b> is here! You each move your own kid now.`, 3600);
     this.updateChip();
   }
@@ -351,11 +551,7 @@ class Online {
     if (h.game.partnerBusy === 'online') h.game.partnerBusy = null;
     delete document.body.dataset.olRemote;
     if (h.scooting()) h.stopScooting(); // the partner's scooter went with the other player
-    if (this.savedLooks?.[rid]) {
-      h.looks[rid] = { ...this.savedLooks[rid] };
-      h.actors[rid].kid.setLook(h.looks[rid]);
-      h.refreshLooks(true);
-    }
+    h.reloadProgress([LOOKS_KEY]); // the other kid wears what the room saved
     // The partner comes back to the player's side
     const P = h.actors[h.playerId()];
     const C = h.actors[rid];
@@ -368,10 +564,11 @@ class Online {
     C.kid.root.visible = true;
     this.ui.clearInvite();
     if (msg) this.toast(msg, 3600);
+    this.refreshRoomView();
     this.updateChip();
   }
 
-  // The guest's first look at the host: go to the same place and stand beside them
+  // The first look at the other player when they were here already: go to the same place, beside them
   async arrive(s) {
     this.arriving = false;
     const ok = await this.goToSpace(s.space);
@@ -454,6 +651,12 @@ class Online {
         break;
       case 'game':
         if (typeof d.title === 'string' && d.on) this.toast(`${esc(name)} is playing <b>${esc(d.title.slice(0, 40))}</b>`, 2600);
+        break;
+      case 'room-deleted':
+        this.closedWhy = 'deleted'; // the room goes in a moment
+        break;
+      case 'seat-freed':
+        if (d.seat === this.room.seat) this.closedWhy = 'freed';
         break;
     }
   }
@@ -862,8 +1065,8 @@ class Online {
     const wasDriving = prev.mount === 'car' && prev.pose === 'drive';
     const m = h.mount();
     if (driving && !wasDriving) {
-      if (m?.type === 'car' && !m.ride && this.room.role === 'guest') {
-        h.dismount(); // both took the wheel at once: the host drives
+      if (m?.type === 'car' && !m.ride && this.room.seat === 'homama') {
+        h.dismount(); // both took the wheel at once: Roji drives
         this.toast(`${name} got to the wheel first.`, 2200);
       }
       if (mine === 'town' && s.space === 'town' && !h.mount()) this.ui.invite({ key: 'car', who: this.remote.id, html: `<b>${name}</b> is driving. Ride along?`, yes: 'Ride along', ms: 30000, onYes: () => this.carTaken() && h.rideAlong() });
@@ -951,15 +1154,16 @@ class Online {
     if (!this.room) return this.ui.chip(false);
     const name = this.name();
     const rid = this.remoteId();
+    const code = this.room.code;
     if (!this.net?.connected) return this.ui.chip(true, 'wait', 'Connecting...', null);
-    if (!this.otherUid) return this.ui.chip(true, 'wait', this.room.role === 'host' ? `Room ${this.room.code}: waiting for ${name}` : 'Waiting...', null);
-    if (!this.isLive) return this.ui.chip(true, 'wait', `${name} is joining...`, rid);
+    if (!this.otherUid) return this.ui.chip(true, 'wait', `Room ${code}: waiting for ${name}`, null);
+    if (!this.isLive) return this.otherHere ? this.ui.chip(true, 'wait', `${name} is joining...`, rid) : this.ui.chip(true, 'off', `Room ${code}: ${name} is not here`, rid);
     if (!this.remote?.fresh) return this.ui.chip(true, 'off', `${name} is away`, rid);
     this.ui.chip(true, 'live', `Playing with ${name}`, rid);
   }
 
   // Tests only
   debug() {
-    return { room: this.room, live: this.isLive, other: this.otherUid, hold: this.holdRole, lastDrop: this.lastDrop || null, sinceRecv: this.remote ? Math.round(performance.now() - this.remote.lastRecv) : null, joined: this.joined, out: this.out?.id || null, remote: this.remote?.cur || null, mode: this.remote?.mode, local: this.remote?.local || null, connected: !!this.net?.connected, delay: this.remote?.delay };
+    return { room: this.room, live: this.isLive, other: this.otherUid, otherHere: this.otherHere, hold: this.holdRole, lastDrop: this.lastDrop || null, sinceRecv: this.remote ? Math.round(performance.now() - this.remote.lastRecv) : null, joined: this.joined, out: this.out?.id || null, remote: this.remote?.cur || null, mode: this.remote?.mode, local: this.remote?.local || null, connected: !!this.net?.connected, delay: this.remote?.delay, uid: this.net?.uid || null, google: !!this.net?.google(), save: this.save ? { ...this.save.stats, dirty: this.save.dirty.size, inflight: this.save.inflight.size, localOnly: [...this.save.localOnly] } : null };
   }
 }
