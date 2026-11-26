@@ -1,6 +1,9 @@
 // Ski Race: race your partner down a snowy mountain through slalom gates, over bumps and ramps.
 // Stick or arrows steer, hold up or the Tuck button to go faster, Space jumps and a second Space
 // flips. Clean landings give a boost; pines and snowmen knock you over; missed gates add 2 seconds.
+// Played together online, the other skier is the other player, skiing on their own device: the same
+// course, the same start on the shared clock, and the two times decide who was faster.
+import { raceLink, round } from './races/together.js';
 import { vcMat, part, merge, instances, pineGeo, rockGeo, snowmanGeo, SNOWMAN_STYLES, beanie, scarf, skis, pole, snowfall } from '../places/ski/kit.js';
 
 const L = 860; // finish line, metres down the course
@@ -454,6 +457,69 @@ export default {
     const C = makeRacer(them, 2.2, true);
     const racers = [P, C];
 
+    // ---------------------------------------------------------- playing together online
+    // x, y, z, alpha, v, turn, flags (1 air, 2 tuck), flip timer, crash timer
+    const link = raceLink(ctx, { lead: 4200, kinds: 'lllallnpl' });
+    const { r2, r3 } = round;
+    let spectate = false;
+    const goTogether = () => {
+      // The one who opened the race starts on the left, the one who joined on the right
+      const mine = link.host ? -2.2 : 2.2;
+      for (const [rc, lane] of [[P, mine], [C, -mine]]) {
+        rc.lane = lane;
+        rc.stopSide = lane > 0 ? 1 : -1;
+        rc.x = cx(-3) + lane;
+        rc.y = groundY(rc.x, rc.z);
+      }
+      C.remote = true;
+      link.onLeave(() => {
+        C.remote = false; // the computer skis on for them
+        C.gate = gates.findIndex((gt) => gt.s > -C.z);
+        if (C.gate < 0) C.gate = gates.length;
+        if (C.finish === null) msg(`${look[them].name} left the race`, 1600);
+      });
+    };
+    const rs = [];
+    let theirF = null;
+    let theirFAt = 0;
+    const followRemote = () => {
+      const a = link.sample(link.them, rs);
+      if (!a) return;
+      C.x = a[0];
+      C.y = a[1];
+      C.z = a[2];
+      C.turn = a[5];
+      C.alpha = a[3];
+      C.v = a[4];
+      C.air = !!(a[6] & 1);
+      C.tuck = !!(a[6] & 2);
+      C.flipT = a[7];
+      C.crashT = a[8];
+      const st = link.last;
+      if (Array.isArray(st?.g)) {
+        C.passed = st.g[0] | 0;
+        C.missed = st.g[1] | 0;
+      }
+      if (st && Number.isFinite(st.f) && theirF === null) {
+        theirF = st.f;
+        theirFAt = link.now();
+      }
+      // Finished on their screen: here as they cross the line (we see them a moment later)
+      if (theirF !== null && C.finish === null && (-C.z >= L - 0.3 || link.now() - theirFAt > 700)) C.finish = theirF;
+      const carve = Math.abs(C.turn) * C.v;
+      if (!C.air && C.v > 3 && (carve > 3 || Math.random() < 0.25)) {
+        const px = -Math.cos(C.alpha) * Math.sign(C.turn || 1);
+        emit(C.x, C.y, C.z, Math.sin(C.alpha) * C.v * 0.3 + px * 2.5, 1.2 + carve * 0.08, -Math.cos(C.alpha) * C.v * 0.3, carve > 6 ? 2 : 1, 1.1);
+      }
+    };
+    const shareMe = () => {
+      if (!link.inRoom) return;
+      // After the race both stand at the bottom here, so only the result travels
+      const st = { g: [P.passed, P.missed], f: P.finish };
+      if (!finished) st.me = [r2(P.x), r2(P.y), r2(P.z), r3(P.alpha), r2(P.v), r2(P.turn), (P.air ? 1 : 0) | (P.tuck ? 2 : 0), r3(P.flipT), r2(P.crashT)];
+      link.share(st);
+    };
+
     // ---------------------------------------------------------- sound: ski hiss
     let hiss = null;
     if (sound.ctx && sound.noise && !sound.muted) {
@@ -702,7 +768,7 @@ export default {
       }
       // Finish
       if (rc.finish === null && -rc.z >= L) {
-        rc.finish = raceT + rc.missed * 2;
+        rc.finish = link.together ? r2(raceT + rc.missed * 2) : raceT + rc.missed * 2;
         if (!rc.ai) {
           msg('Finish!', 1400);
           sound.ui('win');
@@ -718,10 +784,11 @@ export default {
     };
 
     // Kid pose and rig placement for one racer.
+    let leftOne = P;
     const pose = (rc, dt, t) => {
       if (finished) {
         rc.rig.position.set(rc.x, rc.y, rc.z);
-        rc.rig.rotation.set(0, rc === P ? 0.25 : -0.25, 0, 'YXZ');
+        rc.rig.rotation.set(0, rc === leftOne ? 0.25 : -0.25, 0, 'YXZ');
         rc.flipper.rotation.set(0, 0, 0);
         rc.kid.update(dt, t, 0, 0, 0);
         return;
@@ -745,7 +812,7 @@ export default {
     let camYaw = 0;
     let fov = 50;
     const placeCam = (dt, snap = false) => {
-      const focus = P;
+      const focus = spectate ? C : P;
       if (finished) {
         const mx = (P.x + C.x) / 2;
         const want = tmp.set(mx + 0.8, P.y + 1.9, P.z + 5.2);
@@ -790,7 +857,7 @@ export default {
       const pk = clamp(-P.z / L, 0, 1);
       const ck = clamp(-C.z / L, 0, 1);
       hud.score(
-        `<span style="display:inline-flex;align-items:center;gap:12px">${fmt(raceT + P.missed * 2)}` +
+        `<span style="display:inline-flex;align-items:center;gap:12px">${fmt(link.together && P.finish !== null ? P.finish : raceT + P.missed * 2)} ` +
           `<span style="font-weight:600;font-size:.8em;color:#7a6470">Gates ${P.passed}/${gates.length}</span>` +
           `<span style="position:relative;display:inline-block;width:92px;height:6px;border-radius:3px;background:#e6dce3">${dot(ck, colorOf(them))}${dot(pk, colorOf(me))}</span></span>`,
       );
@@ -801,8 +868,10 @@ export default {
     const results = () => {
       if (disposed) return;
       const pt = P.finish;
-      const ct = C.finish ?? raceT + Math.max(0, (L + C.z) / Math.max(6, C.v)) + C.missed * 2;
+      let ct = C.finish ?? raceT + Math.max(0, (L + C.z) / Math.max(6, C.v)) + C.missed * 2;
+      if (link.together) ct = r2(ct);
       const win = pt <= ct;
+      const tie = link.together && pt === ct;
       const behind = pt - ct;
       const medal = win ? 'Gold' : behind < 3 ? 'Silver' : 'Bronze';
       const prevBest = ctx.load(bestKey, null);
@@ -819,7 +888,7 @@ export default {
         win: medal === 'Bronze' ? false : true,
         time: pt,
         title: `${medal} medal!`,
-        text: `${course.name}: ${win ? `${myName} wins the race!` : `${theirName} wins this time.`}<br>${lines.join('<br>')}<br>Next: ${COURSES[(courseN + 1) % COURSES.length].name}`,
+        text: `${course.name}: ${tie ? 'A dead heat!' : win ? `${myName} wins the race!` : `${theirName} wins this time.`}<br>${lines.join('<br>')}<br>Next: ${COURSES[(courseN + 1) % COURSES.length].name}`,
       });
     };
 
@@ -835,7 +904,7 @@ export default {
 
     // ---------------------------------------------------------- update
     const tick = (dt, t) => {
-      if (running) raceT += dt;
+      if (running) raceT = link.together ? Math.max(0, link.elapsed()) : raceT + dt;
       const ax = input.axis();
       const pc = auto
         ? driver(P)
@@ -847,14 +916,21 @@ export default {
           };
       if (running) {
         step(P, dt, P.finish !== null ? { steer: 0, tuck: false, brake: 0, jump: false } : pc);
-        step(C, dt, C.finish !== null ? { steer: 0, tuck: false, brake: 0, jump: false } : driver(C));
+        if (!C.remote) step(C, dt, C.finish !== null ? { steer: 0, tuck: false, brake: 0, jump: false } : driver(C));
       }
       if (P.finish !== null && doneT < 0) {
         doneT = 0;
       }
       if (doneT >= 0 && !finished) {
         doneT += dt;
-        if ((C.finish !== null && doneT > 2.2) || doneT > 7) {
+        // Together: wait at the bottom for the other player (and watch them come down)
+        const waitFor = C.remote && C.finish === null ? 90 : 7;
+        if (C.remote && C.finish === null && doneT > 2.6 && !spectate) {
+          spectate = true;
+          msg(`Go, ${look[them].name}!`, 1400);
+        }
+        if ((C.finish !== null && doneT > 2.2) || doneT > waitFor) {
+          spectate = false;
           finished = true;
           running = false;
           const winnerIsMe = P.finish <= (C.finish ?? Infinity);
@@ -867,8 +943,9 @@ export default {
           // Stand side by side facing back up the hill, toward the camera
           const mx = (P.x + C.x) / 2;
           const mz = Math.max(P.z, C.z);
-          P.x = mx - 0.65;
-          C.x = mx + 0.65;
+          leftOne = P.lane <= C.lane ? P : C;
+          leftOne.x = mx - 0.65;
+          (leftOne === P ? C : P).x = mx + 0.65;
           P.z = C.z = mz;
           for (const rc of racers) rc.y = groundY(rc.x, rc.z);
           const winner = winnerIsMe ? P : C;
@@ -886,7 +963,10 @@ export default {
     };
 
     const update = (dt, t) => {
+      link.update();
+      if (C.remote && !finished && running) followRemote();
       tick(dt, t);
+      shareMe();
       for (const rc of racers) pose(rc, dt, t);
       // Gate flags wiggle when passed
       let fi = 0;
@@ -935,17 +1015,22 @@ export default {
     };
 
     // Dev hooks for headless checks (only in the dev harness)
-    if (window.__dev) {
+    if (window.__dev || window.__roji) {
       window.__skirace = {
         P,
         C,
         gates,
+        link,
+        get finished() {
+          return finished;
+        },
         get raceT() {
           return raceT;
         },
         auto: (on = true) => (auto = on),
         warp(s) {
           for (const rc of racers) {
+            if (rc.remote) continue;
             rc.z = -s;
             rc.x = cx(s) + rc.lane;
             rc.y = groundY(rc.x, rc.z);
@@ -968,7 +1053,15 @@ export default {
     msg(course.name, 900);
     setTimeout(async () => {
       if (disposed) return;
-      await hud.countdown(3);
+      // In a room: wait for the other player, then both count down to the same moment
+      const mode = await link.begin();
+      if (disposed) return;
+      if (mode === 'together') {
+        goTogether();
+        for (const rc of racers) pose(rc, 0.016, 0);
+        placeCam(0.016, true);
+        await link.countdown();
+      } else await hud.countdown(3);
       if (disposed) return;
       running = true;
       for (const rc of racers) rc.v = 5;
@@ -978,6 +1071,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        link.dispose();
         if (hiss) {
           try {
             hiss.src.stop();
