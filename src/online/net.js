@@ -3,7 +3,8 @@
 // and one seat (seats/roji or seats/homama holds the player's user id); anyone signed in who knows the code
 // can take a free seat; only the two seat holders read the room; each writes only its own kid at p/<uid>
 // (removed when that player leaves or disconnects); shared moments are events at ev/<id>; the room's saved
-// progress is at save/<key> (src/online/save.js). A seat holder can free the other seat, hand their own seat
+// progress is at save/<key> (src/online/save.js); while a player is in a minigame with the other, that
+// game's live progress is at g/<uid> (src/online/together.js), removed like p/<uid>. A seat holder can free the other seat, hand their own seat
 // to their Google account, or delete the room. Nothing is deleted when a player leaves.
 import { initializeApp, deleteApp } from '../../vendor/firebase/firebase-app.js';
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence, signInAnonymously, GoogleAuthProvider, linkWithPopup, signInWithCredential, updateCurrentUser, browserPopupRedirectResolver } from '../../vendor/firebase/firebase-auth.js';
@@ -48,7 +49,11 @@ export class Net {
       this.db = getDatabase(this.app, FIREBASE.databaseURL);
       onValue(ref(this.db, '.info/connected'), (s) => {
         this.connected = !!s.val();
-        if (this.connected && this.code) onDisconnect(this.r(`p/${this.uid}`)).remove().catch(() => {}); // a new connection forgets the old one's
+        if (this.connected && this.code) {
+          // a new connection forgets the old one's
+          onDisconnect(this.r(`p/${this.uid}`)).remove().catch(() => {});
+          onDisconnect(this.r(`g/${this.uid}`)).remove().catch(() => {});
+        }
         this.h.onConnection?.(this.connected);
       });
       onValue(ref(this.db, '.info/serverTimeOffset'), (s) => (this.offset = s.val() || 0));
@@ -153,6 +158,7 @@ export class Net {
   async enter() {
     this.joinedAt = this.serverNow();
     await timeout(onDisconnect(this.r(`p/${this.uid}`)).remove(), 12000, 'join');
+    onDisconnect(this.r(`g/${this.uid}`)).remove().catch(() => {});
     // Clear old events so the room does not grow
     get(query(this.r('ev'), orderByChild('t'), endAt(this.serverNow() - EVENTS_KEPT)))
       .then((s) => {
@@ -202,8 +208,10 @@ export class Net {
   watchOther(uid) {
     if (uid === this.other) return;
     this.otherSub?.();
+    this.otherGameSub?.();
     this.other = uid;
     this.otherSub = uid ? onValue(this.r(`p/${uid}`), (s) => this.h.onState?.(s.val()), () => {}) : null;
+    this.otherGameSub = uid ? onValue(this.r(`g/${uid}`), (s) => this.h.onGame?.(s.val()), () => {}) : null;
     this.h.onOther?.(uid);
   }
 
@@ -218,6 +226,8 @@ export class Net {
     this.subs = [];
     this.otherSub?.();
     this.otherSub = null;
+    this.otherGameSub?.();
+    this.otherGameSub = null;
     this.other = null;
   }
 
@@ -231,6 +241,13 @@ export class Net {
   sendState(patch) {
     if (!this.code) return;
     update(this.r(`p/${this.uid}`), patch).catch(() => {});
+  }
+
+  // Our live progress in the minigame we play with the other player (g/<uid>); null clears it
+  sendGame(patch) {
+    if (!this.code) return Promise.resolve();
+    const r = this.r(`g/${this.uid}`);
+    return (patch ? update(r, { ...patch, t: Date.now() }) : remove(r)).catch(() => {});
   }
 
   sendEvent(type, data = null) {
@@ -248,10 +265,11 @@ export class Net {
       return;
     }
     const me = this.r(`p/${this.uid}`);
+    const g = this.r(`g/${this.uid}`);
     this.stop();
     try {
-      await timeout(remove(me), 6000, 'leave');
-      await timeout(onDisconnect(me).cancel(), 4000, 'leave');
+      await timeout(Promise.all([remove(me), remove(g)]), 6000, 'leave');
+      await timeout(Promise.all([onDisconnect(me).cancel(), onDisconnect(g).cancel()]), 4000, 'leave');
     } catch {
       /* offline: the onDisconnect clean-up runs when the server notices */
     }
@@ -262,7 +280,7 @@ export class Net {
   async freeSeat(kid) {
     const uid = this.seats?.[kid];
     const u = { [`seats/${kid}`]: null };
-    if (uid) u[`p/${uid}`] = null;
+    if (uid) u[`p/${uid}`] = u[`g/${uid}`] = null;
     await timeout(update(this.r(), u), 12000, 'free');
   }
 
@@ -270,6 +288,7 @@ export class Net {
   async deleteRoom() {
     const room = this.r();
     const me = this.r(`p/${this.uid}`);
+    const g = this.r(`g/${this.uid}`);
     this.quiet = true; // our own listeners stop because the room is gone
     try {
       await timeout(remove(room), 12000, 'delete');
@@ -278,6 +297,7 @@ export class Net {
     }
     this.stop();
     onDisconnect(me).cancel().catch(() => {});
+    onDisconnect(g).cancel().catch(() => {});
     goOffline(this.db);
   }
 
@@ -313,10 +333,11 @@ export class Net {
         // meanwhile: the old user loses the right to read the room the moment the seat moves.
         this.unwatch();
         this.handover = user.uid;
-        await timeout(update(this.r(), { [`seats/${this.seat}`]: user.uid, [`p/${old}`]: null }), 12000, 'google');
-        onDisconnect(this.r(`p/${old}`))
-          .cancel()
-          .catch(() => {});
+        await timeout(update(this.r(), { [`seats/${this.seat}`]: user.uid, [`p/${old}`]: null, [`g/${old}`]: null }), 12000, 'google');
+        for (const k of ['p', 'g'])
+          onDisconnect(this.r(`${k}/${old}`))
+            .cancel()
+            .catch(() => {});
       }
       await updateCurrentUser(this.auth, user);
       this.uid = this.auth.currentUser.uid;
@@ -324,6 +345,7 @@ export class Net {
         // The connection takes the new user's token in a moment: read until the room answers
         for (let i = 0; i < 20 && !(await this.readSeats().catch(() => null)); i++) await new Promise((r) => setTimeout(r, 300));
         await onDisconnect(this.r(`p/${this.uid}`)).remove();
+        onDisconnect(this.r(`g/${this.uid}`)).remove().catch(() => {});
         this.joinedAt = this.serverNow();
         this.watch(h);
       }

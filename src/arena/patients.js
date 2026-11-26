@@ -620,8 +620,8 @@ export default {
         () =>
           ctx.finish(
             all
-              ? { win: true, title: stars === 3 ? 'Wonderful shift!' : stars === 2 ? 'Great shift!' : 'Shift complete!', text: `${starsHtml(stars)}<br>Five patients feel better. ${wrong}<br>${partnerLine}`, helped: healed }
-              : { win: false, title: 'Time for a break', text: `${starsHtml(stars)}<br>You helped ${helped} of ${SHIFT} patients. The rest can come back after a cup of tea.`, helped: healed },
+              ? { win: true, stars, title: stars === 3 ? 'Wonderful shift!' : stars === 2 ? 'Great shift!' : 'Shift complete!', text: `${starsHtml(stars)}<br>Five patients feel better. ${wrong}<br>${partnerLine}`, helped: healed }
+              : { win: false, stars, title: 'Time for a break', text: `${starsHtml(stars)}<br>You helped ${helped} of ${SHIFT} patients. The rest can come back after a cup of tea.`, helped: healed },
           ),
         700,
       );

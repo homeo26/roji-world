@@ -817,6 +817,7 @@ export default {
       ];
       ctx.finish({
         win: medal === 'Bronze' ? false : true,
+        time: pt,
         title: `${medal} medal!`,
         text: `${course.name}: ${win ? `${myName} wins the race!` : `${theirName} wins this time.`}<br>${lines.join('<br>')}<br>Next: ${COURSES[(courseN + 1) % COURSES.length].name}`,
       });

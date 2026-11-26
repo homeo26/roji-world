@@ -387,6 +387,7 @@ export default {
       const bestText = isBest ? ' New best score!' : ` Best: ${best}.`;
       ctx.finish({
         win,
+        score,
         title: win ? 'Bucket full!' : 'Not quite full',
         text: `${show.name}: ` + (win ? `${score} points. ${meName} and ${partnerName} have popcorn for the whole movie.${comboText}${bestText}` : `${score} of ${GOAL} points. One more try before the movie?${comboText}${bestText}`) + `<br>Next show: ${SHOWS[(showN + 1) % SHOWS.length].name}`,
       });

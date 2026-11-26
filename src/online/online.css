@@ -554,3 +554,328 @@ body[data-ol-remote='roji'] .w-tab[data-w='tab:roji'],
 body[data-ol-remote='homama'] .w-tab[data-w='tab:homama'] {
   display: none;
 }
+
+/* Minigames together (src/online/together.js): the other player's live progress at the top of a game,
+   both results in the result card, a cheer, watching a game tied to one kid, and invitations over a game */
+.ol-gstrip {
+  position: fixed;
+  left: 50%;
+  top: calc(max(10px, env(safe-area-inset-top)) + 54px);
+  transform: translateX(-50%);
+  z-index: 52; /* over the arena and the 2D game shell, under question cards */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 4px 5px 4px 5px;
+  border-radius: 999px;
+  background: rgba(255, 250, 244, 0.95);
+  box-shadow: 0 6px 18px rgba(60, 30, 40, 0.16);
+  font: 600 0.9rem var(--font);
+  color: var(--ink);
+}
+.ol-gstrip [hidden] {
+  display: none !important;
+}
+.ol-gstrip.hidden,
+body.arena-result .ol-gstrip,
+body.choosing .ol-gstrip {
+  display: none;
+}
+.ol-gstrip[data-state='done'] {
+  background: #fff4d6;
+}
+.ol-gstrip .ol-av {
+  display: grid;
+  flex: none;
+}
+.ol-gstrip .ol-av .avatar {
+  width: 30px;
+  height: 30px;
+}
+.ol-gs-t {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 6px;
+  white-space: nowrap;
+}
+.ol-gs-x {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.ol-gs-b {
+  font-weight: 700;
+  color: var(--rose, #ef5b6f);
+}
+.ol-gs-cheer {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ffe1e6;
+  color: #ef5b6f;
+  cursor: pointer;
+}
+.ol-gs-again {
+  flex: none;
+  min-height: 36px;
+  padding: 0.35em 0.9em;
+  font-size: 0.85rem;
+}
+.ol-gs-cheer svg,
+.ol-w-cheer svg,
+.ol-cheer i svg {
+  fill: currentColor;
+}
+.ol-same {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: #c2476a;
+}
+
+/* Both results in the game's result card */
+.ol-vs {
+  margin: -6px 0 14px;
+}
+.ol-vs-b {
+  margin-bottom: 8px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #ef5b6f;
+}
+.ol-vs-b.both,
+.ol-vs-b.tie {
+  color: #1f9a8c;
+}
+.ol-vs-b.wait {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #7a6470;
+}
+.ol-vs-b:empty {
+  display: none;
+}
+.ol-vs-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ol-vs-p {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 16px;
+  background: #f6ece4;
+  line-height: 1.2;
+}
+.ol-vs-p.win {
+  background: #fff1c2;
+  box-shadow: inset 0 0 0 2px #ffd166;
+}
+.ol-vs-p .ol-av .avatar {
+  width: 34px;
+  height: 34px;
+}
+.ol-vs-p b {
+  font-size: 0.95rem;
+}
+.ol-vs-p > span:last-child {
+  font-size: 0.88rem;
+  color: #6a5662;
+}
+
+/* A cheer from the other player */
+.ol-cheer {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  z-index: 76;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px 7px 7px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(52, 40, 70, 0.28);
+  font: 700 1.05rem var(--font);
+  color: #ef5b6f;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ol-cheer.hidden {
+  display: none;
+}
+.ol-cheer .ol-av .avatar {
+  width: 34px;
+  height: 34px;
+}
+.ol-cheer i {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  color: #ff8fb1;
+  animation: ol-float 1.6s ease-out forwards;
+  opacity: 0;
+}
+.ol-cheer i:nth-of-type(1) { margin-left: -70px; animation-delay: 0.05s; }
+.ol-cheer i:nth-of-type(2) { margin-left: -30px; animation-delay: 0.25s; color: #ef5b6f; }
+.ol-cheer i:nth-of-type(3) { margin-left: 10px; animation-delay: 0.12s; }
+.ol-cheer i:nth-of-type(4) { margin-left: 50px; animation-delay: 0.35s; color: #ffd166; }
+.ol-cheer i:nth-of-type(5) { margin-left: 85px; animation-delay: 0.2s; }
+.ol-cheer i:nth-of-type(6) { margin-left: -100px; animation-delay: 0.4s; color: #ffd166; }
+@keyframes ol-float {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-70px) scale(1.15); opacity: 0; }
+}
+
+/* Watching the other player's game (one tied to their kid) while walking the island */
+.ol-watch {
+  position: fixed;
+  left: 50%;
+  top: calc(max(14px, env(safe-area-inset-top)) + 70px);
+  transform: translateX(-50%);
+  z-index: 33;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 28px);
+  padding: 8px 8px 8px 10px;
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: 0 14px 40px rgba(52, 40, 70, 0.28);
+}
+.ol-watch.hidden,
+body.arena-on .ol-watch,
+body:not(.playing) .ol-watch {
+  display: none;
+}
+.ol-watch .ol-av .avatar {
+  width: 40px;
+  height: 40px;
+}
+.ol-w-t {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+}
+.ol-w-t b {
+  font-size: 0.95rem;
+}
+.ol-w-x {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+.ol-w-cheer {
+  flex: none;
+  min-height: 42px;
+}
+.ol-w-cheer small {
+  margin-left: 2px;
+  opacity: 0.85;
+}
+.ol-w-x2 {
+  flex: none;
+}
+
+/* A game invitation shows over a game too (the other player started one, or wants a rematch) */
+.ol-invite.in-game {
+  z-index: 75;
+}
+body.arena-on .ol-invite.in-game:not(.hidden) {
+  display: flex;
+  top: calc(max(10px, env(safe-area-inset-top)) + 56px);
+}
+
+@media (max-height: 520px) {
+  .ol-gstrip {
+    top: calc(max(8px, env(safe-area-inset-top)) + 50px);
+    font-size: 0.8rem;
+    gap: 6px;
+    max-width: calc(100vw - 260px);
+  }
+  .ol-gstrip .ol-av .avatar {
+    width: 24px;
+    height: 24px;
+  }
+  .ol-gs-t {
+    gap: 6px;
+  }
+  .ol-gs-cheer {
+    width: 40px;
+    height: 40px;
+  }
+  /* Both finished: the banner says enough; over a game's own result screen, up in the top row */
+  .ol-gstrip.both .ol-gs-x {
+    display: none;
+  }
+  .ol-gstrip.own {
+    top: max(8px, env(safe-area-inset-top));
+  }
+  .ol-vs {
+    margin: -4px 0 10px;
+  }
+  .ol-vs-b {
+    margin-bottom: 6px;
+    font-size: 1rem;
+  }
+  .ol-vs-p {
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+    column-gap: 6px;
+    padding: 5px 8px;
+    text-align: left;
+  }
+  .ol-vs-p .ol-av {
+    grid-row: span 2;
+  }
+  .ol-vs-p .ol-av .avatar {
+    width: 26px;
+    height: 26px;
+  }
+  .ol-vs-p b {
+    font-size: 0.82rem;
+  }
+  .ol-vs-p > span:last-child {
+    font-size: 0.78rem;
+  }
+  .ol-watch {
+    top: calc(max(8px, env(safe-area-inset-top)) + 140px);
+    left: max(10px, env(safe-area-inset-left));
+    transform: none;
+    max-width: min(470px, calc(100vw - 20px));
+    padding: 6px 6px 6px 8px;
+    gap: 8px;
+  }
+  .ol-watch .ol-av .avatar {
+    width: 32px;
+    height: 32px;
+  }
+  .ol-w-t b {
+    font-size: 0.84rem;
+  }
+  .ol-w-x {
+    font-size: 0.78rem;
+  }
+  .ol-cheer {
+    top: 24%;
+    font-size: 0.92rem;
+  }
+}

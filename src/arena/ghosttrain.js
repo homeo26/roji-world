@@ -812,6 +812,8 @@ export default {
       });
       ctx.finish({
         win: true,
+        score: st.candy,
+        stars,
         title: stars === 3 ? 'Three stars!' : stars === 2 ? 'Two stars!' : 'One star!',
         text: `${st.candy} candy${isBest && best.rides > 1 ? ' (a new best!)' : ''}. ${st.caught} of ${st.spawned} ghosts, best combo ${st.bestCombo}${st.dodged ? `, ${st.dodged} spider${st.dodged > 1 ? 's' : ''} dodged` : ''}. Best ${rec.score}.<br>${line}`,
       });

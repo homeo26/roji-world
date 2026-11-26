@@ -530,6 +530,8 @@ export default {
       }
       ctx.finish({
         win,
+        score: me.score,
+        opp: them.score,
         title: win ? `${me.name} wins the duel!` : `${them.name} wins the duel`,
         text: win
           ? `Final score ${me.score} to ${them.score}. Duels won: ${n}. ${them.name} sends a big heart.`

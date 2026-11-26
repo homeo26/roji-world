@@ -573,6 +573,8 @@ export default {
       fan.pos.set(f0[0], heightAt(f0[0], f0[1]), f0[1]);
       fan.target.copy(fan.pos);
       ui.setList(L.test ? 'Test with Abu Sanad' : `Lesson ${i + 1}: ${L.title}`, tasks.map((t) => t.label));
+      ctx.online.next(); // online: the other player watches this lesson
+      ctx.online.progress(L.test ? 'Driving test' : `Lesson ${i + 1}: ${L.title}`);
       refreshStars();
       ui.mode('drive');
       hud.buttons({ action: 'Brake', jump: 'Honk', extra: [L.reverse ? { id: 'gear', label: 'Reverse' } : null, L.lights ? { id: 'lights', label: 'Lights' } : null].filter(Boolean) });
@@ -667,6 +669,7 @@ export default {
         nextIsTest: li + 1 === N - 1,
         firstLicence,
       };
+      ctx.online.finished({ win: pass, stars, title: lastResult.title });
       sfx.chime();
       fx.heartsAt(car.root.position.clone().setY(car.root.position.y + 2.4), 5);
       say(L.test ? (pass ? 'That is the end of the test. Pull up... and let me add up my marks.' : 'That is the end of the test. Let me add up my marks.') : stars === 3 ? 'Lesson complete! Smooth as butter.' : `Lesson complete. Well done, ${NAME}!`);

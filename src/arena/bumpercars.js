@@ -808,6 +808,7 @@ export default {
         const title = whole ? (total >= 13 ? 'Bumper champions!' : total >= 9 ? 'What a night!' : total >= 5 ? 'So much fun!' : 'Bonk, bonk!') : results[0].stars === 3 ? 'Three stars!' : results[0].stars ? 'Well bumped!' : 'Bonk, bonk!';
         ctx.finish({
           win: total >= Math.ceil(of / 3),
+          stars: total,
           title,
           text: `<b>${total} of ${of} stars</b>${whole ? ` tonight (best ${best} of 15)` : ` (best ${best} of 3)`}.<br><span style="font-size:.9em">${rows}</span><br>${line}`,
         });

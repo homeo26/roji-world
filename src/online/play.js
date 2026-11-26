@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OnlineUI, loadCss } from './ui.js';
 import { Remote, cleanState, cleanLook, lookString, POSES } from './remote.js';
 import { CODE_RE } from './codes.js';
+import { Together } from './together.js';
 import { savedRoom, rememberRoom, forgetRoom, activeRoom, useSolo, setGo } from './profile.js';
 import { chooseHook } from '../engine/choose.js';
 import { stepWalker, stepVertical, tryJump, faceTo, airOf, RADIUS } from '../engine/movement.js';
@@ -17,8 +18,8 @@ import { damp, clamp } from '../util.js';
 // The room has two seats (Roji and Homama) that stay with their players; its progress is saved in the room
 // (src/online/save.js). Going into a room or out of it reloads the page, so every place starts again from
 // the right progress (src/online/profile.js keeps the two apart). Shared moments are events:
-// hands-ask/yes/no/off, act/act-join/act-no/act-end (an activity for two), game (a minigame started),
-// seat-freed and room-deleted.
+// hands-ask/yes/no/off, act/act-join/act-no/act-end (an activity for two), seat-freed and room-deleted;
+// minigames played together are src/online/together.js (g- events and g/<uid>).
 
 // How the invitations name the buildings ("Roji went into the cinema")
 const PLACE_NAMES = {
@@ -118,6 +119,9 @@ class Online {
     this.joined = null;
     this.lastHot = null;
     this.tmp = new THREE.Vector3();
+    // Minigames played together: the arena and the 2D shell ask it for a session when a game opens
+    this.games = new Together(this);
+    h.arena.together = this.games;
     this.actHook = { start: (spec) => this.onActStart(spec), end: (c, silent, replacing) => this.onActEnd(c, silent, replacing) };
     // Answer the place's questions the way the other player did, while joining their activity
     chooseHook.picked = (spec, v) => {
@@ -338,6 +342,7 @@ class Online {
       onOther: (uid) => this.onOther(uid),
       onState: (v) => this.onState(v),
       onEvent: (ev) => this.onEvent(ev),
+      onGame: (v) => this.games.onGame(v),
       onClosed: (why) => this.onClosed(why),
       onConnection: (on) => {
         if (on) this.sent = null; // the server dropped our state while we were away: send all of it
@@ -360,6 +365,7 @@ class Online {
     this.arriving = false;
     this.h.activities.hook = null;
     this.joining = this.out = this.joined = null;
+    this.games.leaveRoom();
     this.ui.chip(false);
     this.ui.clearInvite();
     this.h.setOnlineButton(null);
@@ -544,6 +550,7 @@ class Online {
     if (h.mount()?.ride) h.dismount();
     if (h.activities.active && h.activities.current?._ol) h.activities.end(true);
     this.joining = this.out = this.joined = null;
+    this.games.partnerGone();
     const rid = this.remote?.id || this.remoteId();
     this.remote?.release();
     this.remote = null;
@@ -614,6 +621,7 @@ class Online {
   // ---------------------------------------------------------------- events
   onEvent(ev) {
     if (!this.room) return;
+    if (ev.type.startsWith('g-')) return this.games.onEvent(ev);
     const d = ev.data || {};
     const name = this.name();
     switch (ev.type) {
@@ -1005,12 +1013,6 @@ class Online {
     }
   }
 
-  // ---------------------------------------------------------------- minigames
-  arena(id, on) {
-    if (!this.isLive) return;
-    if (on) this.net.sendEvent('game', { id: String(id).slice(0, 24), title: this.h.gameTitle(id), on: true });
-  }
-
   // ---------------------------------------------------------------- every frame
   frame(dt, t) {
     if (!this.room) return;
@@ -1026,6 +1028,7 @@ class Online {
       this.watchRemote();
     }
     this.checkHands(dt);
+    this.games.frame();
     if ((this.chipT = (this.chipT || 0) + dt) > 0.5) {
       this.chipT = 0;
       this.updateChip();
@@ -1164,6 +1167,6 @@ class Online {
 
   // Tests only
   debug() {
-    return { room: this.room, live: this.isLive, other: this.otherUid, otherHere: this.otherHere, hold: this.holdRole, lastDrop: this.lastDrop || null, sinceRecv: this.remote ? Math.round(performance.now() - this.remote.lastRecv) : null, joined: this.joined, out: this.out?.id || null, remote: this.remote?.cur || null, mode: this.remote?.mode, local: this.remote?.local || null, connected: !!this.net?.connected, delay: this.remote?.delay, uid: this.net?.uid || null, google: !!this.net?.google(), save: this.save ? { ...this.save.stats, dirty: this.save.dirty.size, inflight: this.save.inflight.size, localOnly: [...this.save.localOnly] } : null };
+    return { room: this.room, live: this.isLive, other: this.otherUid, otherHere: this.otherHere, hold: this.holdRole, lastDrop: this.lastDrop || null, sinceRecv: this.remote ? Math.round(performance.now() - this.remote.lastRecv) : null, joined: this.joined, out: this.out?.id || null, remote: this.remote?.cur || null, mode: this.remote?.mode, local: this.remote?.local || null, connected: !!this.net?.connected, delay: this.remote?.delay, uid: this.net?.uid || null, google: !!this.net?.google(), save: this.save ? { ...this.save.stats, dirty: this.save.dirty.size, inflight: this.save.inflight.size, localOnly: [...this.save.localOnly] } : null, game: this.games.debug() };
   }
 }

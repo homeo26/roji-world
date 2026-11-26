@@ -15,7 +15,7 @@ import { Input } from './input.js';
 import { UI, Minimap } from './ui.js';
 import { loadLooks, saveLooks } from './looks.js';
 import { avatar } from './games/avatar.js';
-import { openGame } from './games/shell.js';
+import { openGame, isGameOpen, closeOpenGame } from './games/shell.js';
 import { GAMES, gamesAt } from './games/registry.js';
 import { damp, dampAngle, clamp, canvasTexture, easeInOut, Tweens, bakeStatic } from './util.js';
 import * as UTIL from './util.js';
@@ -735,6 +735,7 @@ function playGame(id) {
     me: looks[playerId],
     partner: looks[otherId(playerId)],
     sound,
+    together: online?.games || null, // in an online room: played together with the other player
     onClose: (result) => {
       gameOpen = false;
       input.enabled = true;
@@ -754,7 +755,6 @@ async function playArena(id, opts = {}) {
   currentStation = null;
   sound.setMusicLevel(0.25);
   game.life.emit('arena', id);
-  online?.arena(id, true);
   const result = await arena.open(id, { me: playerId, ...opts });
   gameOpen = false;
   game.life.emit('arena-end', id, result);
@@ -900,6 +900,11 @@ function onlineHooks() {
     reloadPage: (url) => location.replace(url),
     setOnlineButton: (code) => ui.setOnlineRoom(code),
     arenaActive: () => arena.active || gameOpen,
+    // Minigames played together (src/online/together.js)
+    arena,
+    openGame: (id, opts) => (arena.has(id) ? playArena(id, opts) : playGame(id)),
+    gameOpen: () => isGameOpen(),
+    closeGame2d: () => closeOpenGame(),
     gameTitle: (id) => (arena.has(id) ? arena.meta(id)?.title : GAMES.find((g) => g.id === id)?.title) || 'a game',
   };
 }

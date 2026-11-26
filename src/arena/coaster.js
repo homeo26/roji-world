@@ -450,6 +450,8 @@ function setupRide(ctx, ti, prog, flow) {
       if (flow.disposed) return;
       ctx.finish({
         win: stars > 0,
+        score: st.score,
+        stars,
         title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a ride!',
         text: `${photo}${st.got} of ${picks.length} caught, ${st.score} points${newBest ? ' (a new best!)' : ''}. Best ${rec.best}.<br>${line}${nextOpen}`,
       });

@@ -17,6 +17,8 @@
 //   finish({ win, title, text })  show the result screen (win: true, false or null for a draw)
 //   save(key, value) / load(key, fallback)  per-game storage
 //   isTouch          true on touch screens
+// Played together in an online room (ctx.together, src/online/together.js), the other player is invited
+// to the same game, the score and the result are shared, and the result card shows both.
 import { gameById } from './registry.js';
 import { avatar } from './avatar.js';
 
@@ -48,7 +50,7 @@ function ensureStyles() {
   document.head.appendChild(s);
 }
 
-// ctx: { me, partner, sound, onClose }
+// ctx: { me, partner, sound, onClose, together }
 export async function openGame(id, ctx) {
   if (open) return;
   const entry = gameById(id);
@@ -85,6 +87,15 @@ export async function openGame(id, ctx) {
   let resolveDone;
   const done = new Promise((r) => (resolveDone = r));
   let last = null;
+  const begin = () => {
+    try {
+      return ctx.together?.begin(id, {}, '2d') || null;
+    } catch (e) {
+      console.warn('online game:', e?.message);
+      return null;
+    }
+  };
+  let sess = begin();
 
   const api = {
     me: ctx.me,
@@ -92,7 +103,10 @@ export async function openGame(id, ctx) {
     avatar,
     isTouch: matchMedia('(pointer: coarse)').matches,
     sfx: (name) => ctx.sound?.ui?.(name),
-    setScore: (text) => (scoreEl.textContent = text ?? ''),
+    setScore: (text) => {
+      scoreEl.textContent = text ?? '';
+      sess?.badge(scoreEl.textContent);
+    },
     save: (k, v) => localStorage.setItem(`roji-game-${id}-${k}`, JSON.stringify(v)),
     load: (k, fallback = null) => {
       try {
@@ -110,6 +124,10 @@ export async function openGame(id, ctx) {
         <div class="gshell-faces">${avatar(ctx.me, 64)}${avatar(ctx.partner, 64)}</div>
         <h3>${t}</h3><p>${text}</p>
         <div class="row"><button class="btn primary" data-r="again">Play again</button><button class="btn" data-r="close">Back to town</button></div></div>`;
+      if (sess) {
+        sess.finished(last);
+        sess.cardShown(result.querySelector('.gshell-card'));
+      }
       result.classList.remove('hidden');
       result.querySelector('[data-r="again"]').focus();
     },
@@ -120,6 +138,7 @@ export async function openGame(id, ctx) {
     scoreEl.textContent = '';
     stage.innerHTML = '';
     if (mod) cleanup = mod.start(stage, api) || null;
+    sess?.started();
   };
   const close = () => {
     try {
@@ -130,6 +149,8 @@ export async function openGame(id, ctx) {
     el.remove();
     window.removeEventListener('keydown', onKey, true);
     open = null;
+    sess?.close(last || { quit: true });
+    sess = null;
     ctx.onClose?.(last);
     resolveDone(last);
   };
@@ -150,12 +171,15 @@ export async function openGame(id, ctx) {
       } catch (err) {
         console.warn(err);
       }
+      sess = sess ? sess.again() : begin();
       run();
     } else close();
   });
-  open = { id, close };
+  open = { id, close, quit: () => close() };
   run();
   return done;
 }
 
 export const isGameOpen = () => !!open;
+// Close the open 2D game (the other player's game was joined instead)
+export const closeOpenGame = () => open?.close();

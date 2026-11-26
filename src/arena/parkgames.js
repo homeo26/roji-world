@@ -154,7 +154,7 @@ export default {
       if (tier < 0) {
         phase = 'over';
         partner.emote('hug');
-        setTimeout(() => !disposed && ctx.finish({ win: false, title: 'So close!', text: `${s} points. ${t1} wins a prize at this booth.<br>${Name(other)} says it was a lovely try anyway.` }), 900);
+        setTimeout(() => !disposed && ctx.finish({ win: false, score: s, title: 'So close!', text: `${s} points. ${t1} wins a prize at this booth.<br>${Name(other)} says it was a lovely try anyway.` }), 900);
         return;
       }
       const list = TIER_LIST[tier];
@@ -191,6 +191,7 @@ export default {
           : `${giver} wins ${taker} ${nm}.${c.tier === 1 ? ` ${taker} gives ${me === 'homama' ? 'him' : 'her'} a big hug for it.` : ''}`;
       ctx.finish({
         win: true,
+        score: c.s,
         title: c.tier === 2 ? 'Giant teddy!' : c.tier === 1 ? 'A big prize!' : 'A prize!',
         text: `${c.s} points at ${booth.name}. ${line}${c.levelUp ? `<br>${booth.name} is harder now: level ${level + 1}.` : ''}<br>It is on the prize shelf.`,
       });

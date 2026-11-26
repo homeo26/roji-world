@@ -222,11 +222,12 @@ export class OnlineUI {
   }
 
   // ---------------------------------------------------------------- invitations
-  // { key, who, html, yes, no, ms, onYes, onNo }: one card at a time, the newest wins
+  // { key, who, html, yes, no, ms, onYes, onNo, game }: one card at a time, the newest wins
   invite(o) {
     if (this.inv) this.inv.onGone?.();
     clearTimeout(this.invTimer);
     this.inv = o;
+    this.inviteEl.classList.toggle('in-game', !!o.game); // a game invitation shows over a game too
     this.inviteEl.innerHTML = `${o.who ? `<span class="ol-av">${avatar(this.h.looks[o.who], 38)}</span>` : ''}<p>${o.html}</p><div class="ol-i-btns"><button class="btn primary" data-i="yes">${esc(o.yes || 'Yes')} <kbd>Y</kbd></button><button class="btn ghost" data-i="no">${esc(o.no || 'Not now')}</button></div>`;
     this.inviteEl.classList.remove('hidden');
     this.inviteEl.animate([{ translate: '0 -14px', opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.2,1.3,.4,1)' });
