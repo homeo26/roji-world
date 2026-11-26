@@ -170,8 +170,20 @@ export function buildBumper(ctx, k, atlas, at) {
     debug: st,
     root,
     dynamic,
+    bulbs: lights,
     colliders: [{ type: 'box', x: at.x, z: at.z, hw: HW + 0.35, hd: HD + 0.35 }],
-    hotspots: [{ x: at.x, z: at.z + HD + 0.95, r: 1.5, label: 'Drive the bumper cars', icon: 'park-car', act: () => start() }],
+    hotspots: [
+      // The bumper cars game, once it is there; until then the short ride
+      {
+        x: at.x,
+        z: at.z + HD + 0.95,
+        r: 1.5,
+        label: (a) => (a.hasArena('bumpercars') ? 'Bump the cars' : 'Drive the bumper cars'),
+        icon: 'park-car',
+        act: (a) => (a.hasArena('bumpercars') ? a.playArena('bumpercars', { me: a.playerId }) : start()),
+      },
+      { x: at.x + 3.0, z: at.z + HD + 0.95, r: 1.2, label: 'Take a quick ride', icon: 'park-car', when: (a) => a.hasArena('bumpercars'), act: () => start() },
+    ],
     update(dt, t) {
       const R = st.ride;
       if (R) {

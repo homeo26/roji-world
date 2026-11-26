@@ -108,6 +108,43 @@ export const sfx = {
     const t = s.ctx.currentTime;
     [1568, 1976, 2349, 3136].forEach((f, i) => s.tone(f, t + i * 0.07, 0.6, { type: 'sine', gain: 0.025 }));
   },
+  // A log boat landing in the splash pool: a wash of filtered noise and a low plop; k: 0..1 by distance
+  splash(s, k = 1) {
+    if (!s?.ctx || s.muted || k < 0.05) return;
+    const ctx = s.ctx;
+    const t = ctx.currentTime;
+    if (s.noise && s.sfx) {
+      const src = ctx.createBufferSource();
+      src.buffer = s.noise;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(3200, t);
+      f.frequency.exponentialRampToValueAtTime(420, t + 0.9);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.2 * k, t + 0.025);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+      src.connect(f).connect(g).connect(s.sfx);
+      src.start(t);
+      src.stop(t + 1.15);
+    }
+    s.tone(190, t, 0.32, { type: 'sine', gain: 0.09 * k, slideTo: 62 });
+  },
+  // A friendly ghost: a wobbly rising "boo" and a giggle
+  boo(s, k = 1) {
+    if (!s?.ctx || k < 0.05) return;
+    const t = s.ctx.currentTime;
+    s.tone(330, t, 0.5, { type: 'sine', gain: 0.05 * k, slideTo: 520 });
+    s.tone(336, t + 0.03, 0.5, { type: 'triangle', gain: 0.025 * k, slideTo: 530 });
+    for (let i = 0; i < 4; i++) s.tone(1040 * (1 + (i % 2) * 0.12), t + 0.6 + i * 0.08, 0.07, { type: 'sine', gain: 0.02 * k });
+  },
+  // A soft creak of the ghost train's flap doors
+  creak(s, k = 1) {
+    if (!s?.ctx || k < 0.05) return;
+    const t = s.ctx.currentTime;
+    s.tone(210, t, 0.35, { type: 'sawtooth', gain: 0.008 * k, slideTo: 150 });
+  },
   // Firework whistle and boom; k: 0..1 by distance
   whistle(s, k = 1) {
     if (!s?.ctx || k < 0.05) return;

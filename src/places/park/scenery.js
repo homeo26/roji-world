@@ -497,6 +497,9 @@ function drawParkMap(c, w, h) {
   spot(0.8, 0.25, '#ef5b6f', 'Comet');
   spot(0.8, 0.52, '#c7a6ff', 'Bumper cars');
   spot(0.8, 0.77, '#6fb8ff', 'Sky swings');
+  spot(0.64, 0.34, '#9b7be0', 'Ghost Train');
+  spot(0.94, 0.36, '#3fbfb4', 'Flume');
+  spot(0.07, 0.62, '#ff7fa3', 'Parade');
   c.fillStyle = '#ef5b6f';
   heartPath(c, w * 0.5, h * 0.92, 22);
   c.fill();
