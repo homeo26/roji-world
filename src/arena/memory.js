@@ -1,10 +1,13 @@
 // Memory Match: picture cards on a picnic table in the Play Park. Flip two at a time and find
 // every pair. Just me, with the computer partner, or two players taking turns on one device.
+// In an online room "Play together" plays it for real on the two devices: the host deals the deck, both
+// tables show the same cards, and every flip travels to the other copy.
 import * as THREE from 'three';
 import { damp, dampAngle, clamp, easeOutBack, easeOutCubic } from '../util.js';
 import * as K from './board2/kit.js';
 import { buildPark } from './board2/park.js';
 import { PICS, CARD_W, CARD_D, CARD_T, cardAtlas, cardGeometry, disposeCards } from './board2/cards.js';
+import { together } from './board/online.js';
 
 const GAP = 0.08;
 const AI_RECALL = 0.65; // chance the computer remembers a card it saw
@@ -44,7 +47,13 @@ export default {
     let alive = true;
 
     // ---------------------------------------------------------------- layout
-    const wide = window.innerWidth / Math.max(1, window.innerHeight) >= 1.45;
+    const duo = together(ctx);
+    let wide = window.innerWidth / Math.max(1, window.innerHeight) >= 1.45;
+    // In a room both tables have the starter's size, so a deck dealt there fits here
+    if (duo.can) {
+      if (ctx.online.isHost) ctx.online.setting('wide', wide);
+      else if (typeof ctx.online.setting('wide') === 'boolean') wide = ctx.online.setting('wide');
+    }
     const pairs = wide ? 9 : 8;
     const cols = wide ? 6 : 4;
     const rows = (pairs * 2) / cols;
@@ -123,6 +132,7 @@ export default {
 
     // ---------------------------------------------------------------- kids
     let mode = ctx.load('mode', 'cpu');
+    if (mode === 'online') mode = 'cpu';
     const ids = [ctx.me, ctx.partner];
     const COLORS = K.playerColors(looks, ids);
     const P = ids.map((id, i) => {
@@ -156,7 +166,21 @@ export default {
     const sayEl = ui.$('.b2-say');
     const floats = K.floaters(ui.el, 4);
     const dot = (p) => `<i style="background:${p.color}"></i>`;
-    const say = (html) => (sayEl.innerHTML = html);
+    // A line can be held for a moment (news from the other device), the next one waits for it
+    let holdUntil = 0;
+    let held = null;
+    let holdTimer = 0;
+    const say = (html) => {
+      if (performance.now() < holdUntil) held = html;
+      else sayEl.innerHTML = html;
+    };
+    const sayHold = (html, ms) => {
+      sayEl.innerHTML = html;
+      holdUntil = performance.now() + ms;
+      held = null;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => held !== null && alive && (sayEl.innerHTML = held), ms);
+    };
     hud.buttons({ action: null, jump: null, stick: false });
     let phase = 'intro'; // intro | deal | play | over
     let turn = 0;
@@ -170,6 +194,9 @@ export default {
     const bestKey = `best-${pairs * 2}`;
     let best = ctx.load(bestKey, null);
     const isCpuTurn = () => mode === 'cpu' && turn === 1;
+    const isRemoteTurn = () => mode === 'online' && turn === 1; // flips on the other device
+    let flips = 0; // cards turned so far, both players (played together, every flip carries it)
+    const clockT = { first: null, last: null }; // played together: the shared time of the first and last flip
     const u = (p) => (phase === 'play' && mode !== 'solo' && turn === p.i ? 'text-decoration:underline;text-underline-offset:4px;' : '');
     function showScore() {
       if (mode === 'solo') hud.score(`Moves ${moves} &nbsp; ${fmt(elapsed)}`);
@@ -180,6 +207,7 @@ export default {
       const p = P[turn];
       if (mode === 'solo') say(`${dot(p)}${found ? `${found} of ${pairs} pairs found` : 'Flip two cards. Same picture? Keep them!'}`);
       else if (isCpuTurn()) say(`${dot(p)}${p.name} is thinking...`);
+      else if (isRemoteTurn()) say(`${dot(p)}${p.name}'s turn`);
       else say(`${dot(p)}${p.name}'s turn. ${touch() ? 'Tap two cards' : 'Pick two cards'}`);
     }
 
@@ -211,8 +239,15 @@ export default {
       p.lean = 1;
     }
 
-    async function flip(i) {
-      if (lock || phase !== 'play' || isOpen(i)) return;
+    async function flip(i, at = null) {
+      if (lock || phase !== 'play' || !cards[i] || isOpen(i)) return;
+      if (mode === 'online') {
+        const tNow = Number.isFinite(at) ? at : duo.now();
+        if (turn === 0) duo.send('flip', { i, n: flips, t: tNow });
+        clockT.first ??= tNow;
+        clockT.last = tNow;
+      }
+      flips++;
       started = true;
       const p = P[turn];
       lookAt(p, i);
@@ -323,7 +358,10 @@ export default {
     }
 
     function end() {
+      // Played together, the time runs from the first flip to the last on the shared clock, so both say the same
+      if (mode === 'online' && clockT.first != null) elapsed = (clockT.last - clockT.first) / 1000;
       phase = 'over';
+      duo.end();
       lock = true;
       cursorOn = false;
       hud.hint('');
@@ -359,7 +397,7 @@ export default {
         }
         const text = `${P[0].name} ${s0} ${s0 === 1 ? 'pair' : 'pairs'}, ${P[1].name} ${s1} ${s1 === 1 ? 'pair' : 'pairs'}. ${moves} moves in ${fmt(elapsed)}.`;
         if (!winner) ctx.finish({ win: null, title: "It's a tie", text });
-        else ctx.finish({ win: mode === 'cpu' ? winner.i === 0 : true, title: `${winner.name} wins!`, text });
+        else ctx.finish({ win: mode === 'duo' ? true : winner.i === 0, title: `${duo.winner(winner.name, winner.i === 1)} wins!`, text });
       }, 1500);
     }
 
@@ -371,6 +409,7 @@ export default {
         title: 'Memory Match',
         text: `Flip two cards. Same picture? Keep them. ${pairs} pairs to find.${best ? ` Best solo: ${best.moves} moves.` : ''}`,
         options: [
+          ...(duo.can ? [duo.option()] : []),
           { id: 'solo', label: 'Just me', sub: `${pa} cheers you on` },
           { id: 'cpu', label: `Play with ${pa}`, sub: 'The computer picks for them' },
           { id: 'duo', label: 'Two players', sub: 'Take turns on this device' },
@@ -378,13 +417,34 @@ export default {
       });
       if (!alive) return;
       mode = pick || mode;
-      ctx.save('mode', mode);
-      placeKids();
-      fitCamera(true);
-      phase = 'deal';
+      if (mode !== 'online') ctx.save('mode', mode);
       const games = ctx.load('games', 0);
       ctx.save('games', games + 1);
       turn = mode === 'solo' ? 0 : games % 2;
+      if (mode === 'online') {
+        say(`${dot(P[1])}Waiting for ${P[1].name}...`);
+        const r = await duo.link('online', {
+          hello: { n: cards.length },
+          // The host deals: who goes first and the deck, as picture numbers in table order
+          start: (hi) => (hi.n === cards.length ? { f: P[turn].id, deck: cards.map((c) => c.pic) } : { no: true }),
+        });
+        if (!alive) return;
+        const deck = r.ok && Array.isArray(r.go.deck) && r.go.deck.length === cards.length && r.go.deck.every((v) => PICS[v]) ? r.go.deck : null;
+        if (deck) {
+          turn = r.go.f === ctx.me ? 0 : 1;
+          deck.forEach((pic, i) => {
+            cards[i].pic = pic;
+            cards[i].card.geometry = cardGeometry(pic);
+          });
+          say('');
+        } else {
+          mode = 'cpu';
+          sayHold(duo.why(r), 3600);
+        }
+      } else duo.link(mode);
+      placeKids();
+      fitCamera(true);
+      phase = 'deal';
       // Deal from the pile in the middle, one card after another
       const n = cards.length;
       const from = cards.map((c) => c.holder.position.clone());
@@ -493,12 +553,14 @@ export default {
         return phase;
       },
       status: () => ({ phase, mode, moves, found, scores: P.map((p) => p.score), turn }),
+      // Both devices see the same: whose turn, the pairs by kid, which cards are found, the deck
+      state: () => ({ phase: phase === 'play' && !lock ? 'play' : phase === 'play' ? 'busy' : phase, mode, who: P[turn].id, key: `${P.map((p) => `${p.id[0]}${p.score}`).sort().join(',')}|${cards.map((c) => (c.state === 'done' ? 1 : 0)).join('')}`, deck: cards.map((c) => c.pic).join(','), flips, first, open: cards.filter((c) => c.state === 'up').map((c) => c.i) }),
     };
     window.__memory = dbg;
 
     // Test helper: a player who remembers every card they have seen
     function autoPlay() {
-      if (phase !== 'play' || lock || isCpuTurn() || dbg.busy) return;
+      if (phase !== 'play' || lock || isCpuTurn() || isRemoteTurn() || dbg.busy) return;
       const closed = cards.filter((c) => c.state === 'down');
       const seen = closed.filter((c) => dbg.seen.has(c.i));
       const unseen = closed.filter((c) => !dbg.seen.has(c.i));
@@ -515,10 +577,55 @@ export default {
       });
     }
 
+    // ---------------------------------------------------------------- played together
+    const inbox = []; // their flips: { i: card, n: cards turned before it }
+    duo.on('flip', (d) => inbox.push(d));
+    function pump() {
+      while (inbox.length && mode === 'online' && phase === 'play' && !lock && isRemoteTurn()) {
+        const d = inbox[0];
+        if (d?.n > flips) return; // ours have not all landed here yet
+        if (cards.some((c) => c.anim && c.anim.t < 0.4)) return; // two flips that came together still turn one after the other
+        inbox.shift();
+        if (!d || d.n !== flips || !cards[d.i] || isOpen(d.i)) {
+          console.warn('Memory Match: a flip that does not fit the table', d, flips);
+          continue;
+        }
+        cur = d.i;
+        cursorOn = true;
+        flip(d.i, d.t);
+        return;
+      }
+    }
+    duo.onGone(() => {
+      if (mode !== 'online' || phase === 'over') return;
+      mode = 'cpu';
+      inbox.length = 0;
+      sayHold(`${dot(P[1])}${P[1].name} left, so the computer plays for ${duo.him}`, 3600);
+      if (phase === 'play' && turn === 1 && !lock) cpuMove();
+    });
+    let shared = '';
+    function syncCursor() {
+      if (mode !== 'online') return;
+      duo.tick();
+      pump();
+      if (phase !== 'play') return;
+      if (turn === 0 && cursorOn && `${cur}|${flips}` !== shared) {
+        shared = `${cur}|${flips}`;
+        duo.share({ c: cur, n: flips });
+      }
+      // Their highlight moves here as they aim
+      const ps = isRemoteTurn() && !lock ? duo.state() : null;
+      if (ps && ps.n === flips && cards[ps.c] && ps.c !== cur) {
+        cur = ps.c;
+        cursorOn = true;
+        if (!isOpen(cur)) lookAt(P[1], cur); // their kid leans toward the card they aim at
+      }
+    }
+
     function handleInput() {
       if (phase !== 'play') return;
       if (dbg.auto) return autoPlay();
-      const human = !isCpuTurn();
+      const human = !isCpuTurn() && !isRemoteTurn();
       const mv = [
         [['arrowleft', 'a'], -1, 0],
         [['arrowright', 'd'], 1, 0],
@@ -612,7 +719,7 @@ export default {
       cursor.position.z = damp(cursor.position.z, target.z, 18, dt);
       cursor.position.y = TOP + 0.004;
       const show = cursorOn && phase === 'play';
-      cursorMat.color.set(isCpuTurn() ? P[1].color : '#ffd166');
+      cursorMat.color.set(isCpuTurn() || isRemoteTurn() ? P[1].color : '#ffd166');
       cursorMat.opacity = damp(cursorMat.opacity, show ? 0.75 + Math.sin(t * 6) * 0.2 : 0, 12, dt);
       cursor.scale.setScalar(1 + Math.sin(t * 6) * 0.025);
     }
@@ -666,6 +773,7 @@ export default {
         if (phase === 'play' && started) elapsed += dt;
         if (Math.floor(elapsed * 2) !== Math.floor((elapsed - dt) * 2)) showScore();
         handleInput();
+        syncCursor();
         clock.update(dt);
         stepCards(dt, t);
         stepKids(dt, t);
@@ -681,6 +789,8 @@ export default {
       },
       dispose() {
         alive = false;
+        duo.dispose();
+        clearTimeout(holdTimer);
         clock.clear();
         ui.remove();
         hud.hint('');
