@@ -369,7 +369,9 @@ export function createUI({ sound }) {
     const keys =
       mode === 'duo'
         ? `${chef}: WASD, E to pick up and put down, Space to chop or wash, Left Shift to dash.<br>${partner}: arrows, Enter, Right Shift to chop or wash, Right Ctrl to dash.`
-        : `WASD or arrows to walk, E to pick up and put down, hold Space to chop or wash, Shift to dash, Tab to swap chefs.`;
+        : mode === 'online'
+          ? `WASD or arrows to walk, E to pick up and put down, hold Space to chop or wash, Shift to dash.`
+          : `WASD or arrows to walk, E to pick up and put down, hold Space to chop or wash, Shift to dash, Tab to swap chefs.`;
     const el = card({
       small: `Kitchen ${i + 1} of ${LEVELS.length} &middot; ${lv.place}`,
       title: lv.name,
@@ -377,7 +379,7 @@ export function createUI({ sound }) {
       body: `<div class="ck2-twist">${lv.twist}</div>
         <div class="ck2-recipes">${rcs}</div>
         <div class="ck2-goal">${goals}</div>
-        <div class="ck2-small">${Math.floor(lv.time / 60)}:${String(lv.time % 60).padStart(2, '0')} on the clock${best ? ` &middot; your best: ${best}` : ''}${mode === 'duo' ? ' &middot; two players' : ` &middot; ${partner} helps you`}</div>
+        <div class="ck2-small">${Math.floor(lv.time / 60)}:${String(lv.time % 60).padStart(2, '0')} on the clock${best ? ` &middot; your best: ${best}` : ''}${mode === 'duo' ? ' &middot; two players' : mode === 'online' ? ` &middot; ${partner} cooks with you` : ` &middot; ${partner} helps you`}</div>
         <div class="ck2-row"><button class="ck2-btn go" data-a="go">Start cooking</button><button class="ck2-btn" data-a="back">Kitchens</button></div>
         <div class="ck2-keys">${keys}</div>`,
     });
@@ -396,6 +398,7 @@ export function createUI({ sound }) {
       body: `<div class="ck2-stars ck2-big">${stars}</div>
         <div class="ck2-final">${coin}${r.score}</div>
         ${r.isBest ? '<div class="ck2-new">New best score!</div>' : `<div class="ck2-small">Best: ${r.best}</div>`}
+        ${r.split ? `<div class="ck2-small">${r.split}</div>` : ''}
         <div class="ck2-stats"><span>${r.served} served</span><span>${r.tips} in tips</span><span>Best streak x${r.streak}</span>${r.missed ? `<span>${r.missed} missed</span>` : ''}</div>
         ${r.unlocked ? `<div class="ck2-new">New kitchen open: ${r.unlocked}</div>` : r.stars < 3 ? `<div class="ck2-small">${r.toNext}</div>` : ''}
         <div class="ck2-row">${r.canNext ? '<button class="ck2-btn go" data-a="next">Next kitchen</button>' : ''}<button class="ck2-btn${r.canNext ? '' : ' go'}" data-a="again">Play again</button><button class="ck2-btn" data-a="map">Kitchens</button><button class="ck2-btn" data-a="exit">Back to town</button></div>`,

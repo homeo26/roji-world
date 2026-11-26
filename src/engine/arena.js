@@ -75,6 +75,7 @@ body.arena-result #arena .a-btns, body.arena-result #stick, body.arena-result #j
 body.arena-result #arena { z-index: 48; }
 body.arena-result #arena .a-top { z-index: 51; } /* the X stays tappable over the result card */
 @media (max-height: 520px) and (orientation: landscape) {
+  #arena .a-card { max-height: calc(100vh - 20px); overflow-y: auto; } /* two results side by side fit on short screens */
   #arena .a-result { place-items: center end; padding-right: max(16px, env(safe-area-inset-right)); background: linear-gradient(90deg, rgba(40,24,40,0) 35%, rgba(40,24,40,.32)); }
   #arena .a-card { width: min(320px, 40vw); padding: 14px 18px; border-radius: 22px; }
   #arena .a-card h2 { font-size: 1.3rem; margin-bottom: 4px; }
