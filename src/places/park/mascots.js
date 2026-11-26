@@ -9,7 +9,7 @@ import { Tune, TUNES, sfx } from './music.js';
 
 // From the stage along the west lane, down the avenue to the castle plaza, back up and once round the
 // carousel, then home along the west lane
-const PATH = [
+export const PATH = [
   [-10.8, 6.9],
   [-7.5, 7.5],
   [-4.2, 7.6],

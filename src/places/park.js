@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { kit, makeAtlas, colorBake } from './school/kit.js';
 import { buildScenery } from './park/scenery.js';
 import { buildCastle, CASTLE } from './park/castle.js';
-import { darkness } from './park/parts.js';
+import { darkness, bakeMaterial, makePalette } from './park/parts.js';
 import { buildCarousel } from './park/carousel.js';
 import { buildWheel } from './park/wheel.js';
 import { buildTeacups } from './park/teacups.js';
@@ -10,7 +10,10 @@ import { buildSwings } from './park/swings.js';
 import { buildBumper } from './park/bumper.js';
 import { buildComet } from './park/comet.js';
 import { buildStalls } from './park/stalls.js';
-import { buildMascots } from './park/mascots.js';
+import { buildMascots, PATH as PARADE_ROUTE } from './park/mascots.js';
+import { buildFlume } from './park/flume.js';
+import { buildGhostHouse } from './park/ghosthouse.js';
+import { buildParadeStage } from './park/paradestage.js';
 import { Fireworks } from './park/fireworks.js';
 import { sfx } from './park/music.js';
 
@@ -19,6 +22,8 @@ import { sfx } from './park/music.js';
 // the Comet rollercoaster with its own little train, a carousel, the big wheel, teacups, sky swings,
 // bumper cars, a games alley, a cotton candy and churros cart, a balloon seller, and the park's
 // mascots Mimi (a pink bunny) and Bobo (a blue bear), who parade round the park now and then.
+// Along the east fence the Splash Falls log flume, inside the Comet's loop the Ghost Train, and next
+// to Mimi and Bobo's stage the Parade Stage with the parade route marked in gold stars.
 
 const PI = Math.PI;
 
@@ -63,7 +68,6 @@ export const SPOTS = {
     [-15.3, -22.0, 1.25],
     [15.3, -22.0, 1.25],
     [-15.4, -16.0, 1.0],
-    [15.4, -18.2, 1.1],
     [-15.6, 9.8, 0.9],
     [15.6, 13.0, 0.85],
     [-8.6, 25.6, 0.8],
@@ -87,7 +91,7 @@ export default {
     tag: 'Theme park',
     icon: 'park-castle',
     color: '#b9a6ff',
-    text: 'A fairytale park with a castle, the Comet rollercoaster, a carousel, the big wheel, teacups, sky swings, bumper cars, a games alley and fireworks after dark.',
+    text: 'A fairytale park with a castle, the Comet rollercoaster, a log flume, a ghost train, a carousel, the big wheel, teacups, sky swings, bumper cars, a games alley, a parade and fireworks after dark.',
   },
   icons: {
     'park-castle': 'M4 21V11l2-2 2 2v3h2V8l2-3 2 3v6h2v-3l2-2 2 2v10z M10 21v-3a2 2 0 0 1 4 0v3 M12 5V2.5l2.5 1L12 4.5',
@@ -103,6 +107,9 @@ export default {
     'park-firework': 'M12 12m-1 0a1 1 0 1 0 2 0 1 1 0 1 0-2 0 M12 3v4 M12 17v4 M3 12h4 M17 12h4 M5.6 5.6l2.8 2.8 M15.6 15.6l2.8 2.8 M5.6 18.4l2.8-2.8 M15.6 8.4l2.8-2.8',
     'park-camera': 'M3 8h4l2-2.5h6L17 8h4v11H3z M12 13.5m-3.5 0a3.5 3.5 0 1 0 7 0 3.5 3.5 0 1 0-7 0',
     'park-lock': 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3 M12 14.5v2.5',
+    'park-flume': 'M4 13.5h16l-2 3H6z M8 13.5V11 M16 13.5V11 M3 20c1.5 0 1.5-1.2 3-1.2s1.5 1.2 3 1.2 1.5-1.2 3-1.2 1.5 1.2 3 1.2 1.5-1.2 3-1.2 1.5 1.2 3 1.2 M5 8.5C8 7.5 9 3.5 12 3.5s5 3 7 5',
+    'park-ghost': 'M6 20V10a6 6 0 0 1 12 0v10l-2-1.5L14 20l-2-1.5L10 20l-2-1.5z M10 10h.01 M14 10h.01 M10.5 13.5c.9.7 2.1.7 3 0',
+    'park-parade': 'M5 21V4 M5 4h11l-2.5 3.5L16 11H5 M17.5 14l1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z',
   },
 
   build(ctx) {
@@ -138,11 +145,64 @@ export default {
     debug.wheel = use(buildWheel(ctx, k, atlas, SPOTS.wheel, { moment, fireworks: () => fireworks?.show(true) })).debug;
     debug.teacups = use(buildTeacups(ctx, k, SPOTS.teacups)).debug;
     debug.swings = use(buildSwings(ctx, k, atlas, SPOTS.swings)).debug;
-    debug.bumper = use(buildBumper(ctx, k, atlas, SPOTS.bumper)).debug;
+    const bumper = use(buildBumper(ctx, k, atlas, SPOTS.bumper));
+    debug.bumper = bumper.debug;
     debug.comet = use(buildComet(ctx, k, atlas)).debug;
     const stalls = use(buildStalls(ctx, k, atlas, SPOTS));
     const mascots = use(buildMascots(ctx, k, atlas, SPOTS));
     debug.mascots = mascots.debug;
+    // The newer rides paint their signs on the park's atlas, share one palette material for everything
+    // lit (windows, lanterns, the roof ghost, the route stars) and one set of bulbs
+    const pal = makePalette({
+      ghost: ['#ffffff', '#e3ecff', 0.16],
+      warm: ['#ffe7b0', '#ffc96b', 0.45],
+      pink: ['#ffc2d6', '#ff7fa3', 0.45],
+      star: ['#f4c24f', '#ffb347', 0.25],
+      ink: ['#3b2b3f'],
+      white: ['#ffffff'],
+      blush: ['#ffb3c8', '#ffb3c8', 0.08],
+      mouth: ['#5a2a44'],
+      tongue: ['#ff7fa3'],
+    });
+    const shared = { atlas, pal, lights: [] };
+    const flumePart = use(buildFlume(ctx, k, shared));
+    debug.flume = flumePart.debug;
+    const ghostPart = use(buildGhostHouse(ctx, k, shared));
+    debug.ghost = ghostPart.debug;
+    const paradeStage = use(buildParadeStage(ctx, k, shared, PARADE_ROUTE));
+    debug.paradeStage = paradeStage.debug;
+    {
+      // the bulbs that never move (gate, avenue, castle, bumper cars) join them: one draw call for all
+      g.updateMatrixWorld(true);
+      const inv = g.matrixWorld.clone().invert();
+      const mm = new THREE.Matrix4();
+      const cc = new THREE.Color();
+      for (const b of [...scenery.bulbs, castle.bulbs, bumper.bulbs]) {
+        if (!b?.isInstancedMesh) continue;
+        const rel = new THREE.Matrix4().multiplyMatrices(inv, b.matrixWorld);
+        const r = b.geometry.parameters.radius;
+        for (let i = 0; i < b.count; i++) {
+          b.getMatrixAt(i, mm);
+          mm.premultiply(rel);
+          b.getColorAt(i, cc);
+          shared.lights.push({ p: new THREE.Vector3().setFromMatrixPosition(mm), c: '#' + cc.getHexString(), r });
+        }
+        b.removeFromParent();
+      }
+      const L = shared.lights;
+      const lm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshBasicMaterial({ color: '#ffffff' }), L.length);
+      lm.castShadow = lm.receiveShadow = false;
+      const m4 = new THREE.Matrix4();
+      const qi = new THREE.Quaternion();
+      const sc = new THREE.Vector3();
+      const c = new THREE.Color();
+      L.forEach((b, i) => {
+        lm.setMatrixAt(i, m4.compose(b.p, qi, sc.setScalar(b.r)));
+        lm.setColorAt(i, c.set(b.c));
+      });
+      g.add(lm);
+      dynamic.push(lm);
+    }
 
     // Fireworks over the castle after dark
     const listener = () => {
@@ -229,7 +289,7 @@ export default {
         act: (a) =>
           a.choose({
             title: 'Welcome to Roji Land',
-            text: 'The <b>Comet</b> rollercoaster and the <b>bumper cars</b> are on the right, with the <b>sky swings</b> by the gate. The <b>teacups</b>, the <b>games alley</b> and the <b>big wheel</b> are on the left. The <b>carousel</b> is in the middle, and the <b>castle</b> is at the end of the avenue. Mimi and Bobo parade every few minutes, and after dark there are fireworks over the castle.',
+            text: 'The <b>Comet</b> rollercoaster and the <b>bumper cars</b> are on the right, with the <b>sky swings</b> by the gate, the <b>Splash Falls</b> log flume along the fence and the <b>Ghost Train</b> inside the Comet\u2019s loop. The <b>teacups</b>, the <b>games alley</b>, the <b>Parade Stage</b> and the <b>big wheel</b> are on the left. The <b>carousel</b> is in the middle, and the <b>castle</b> is at the end of the avenue. Mimi and Bobo parade every few minutes along the gold stars, and after dark there are fireworks over the castle.',
             options: [{ id: 'ok', label: 'Let us go' }],
           }),
       },
@@ -268,8 +328,19 @@ export default {
       },
     );
 
-    // Merge every plain-coloured static mesh into a few vertex-coloured meshes (dynamic parts stay)
+    // Merge every plain-coloured static mesh into a few vertex-coloured meshes (dynamic parts stay),
+    // then the new rides' signs and lit windows into one mesh each
     colorBake(g, dynamic);
+    for (const m of [atlas.material, pal.material]) bakeMaterial(g, m, dynamic);
+    // Any other textured material shared by several still meshes (the cobbled paths) becomes one mesh too
+    const texMats = new Map();
+    const still = new Set();
+    for (const d of dynamic) d.traverse((o) => still.add(o));
+    g.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || still.has(o) || !o.material?.map || o.material.transparent) return;
+      texMats.set(o.material, (texMats.get(o.material) || 0) + 1);
+    });
+    for (const [m, n] of texMats) if (n > 1) bakeMaterial(g, m, dynamic);
 
     const people = [new THREE.Vector3(), new THREE.Vector3()];
     let movers = null;
@@ -311,6 +382,9 @@ export default {
         }
         show.wasDark = dark > 0.6;
         fireworks.update(dt);
+        // the Parade Stage's cannons pop when the parade sets off
+        if (mascots.parading && !show.parading) paradeStage.pop();
+        show.parading = mascots.parading;
         // Mimi, Bobo and the float push people aside: their colliders move with them
         moveColliders();
       },

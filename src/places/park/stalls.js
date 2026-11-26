@@ -17,6 +17,9 @@ export const PEOPLE = {
   games: LOOK('Huda', 'girl', { top: '#7fd8bf', bottom: '#3f4a7a', hairstyle: 'long', hair: '#141010', skin: '#c98f68' }),
 };
 
+// The Comet's little garden with the gold star, in front of the ghost train
+const GARDEN = { x: 8.6, z: -5.5 };
+
 const BOOTHS = [
   { name: 'Ring Toss', color: '#ef5b6f', stripe: '#fff4e3' },
   { name: 'Hook a Duck', color: '#6fb8ff', stripe: '#fff4e3' },
@@ -518,7 +521,7 @@ export function buildStalls(ctx, k, atlas, S) {
 
   // ------------------------------------------------ the coaster's garden: flowers and a gold star
   const gd = new THREE.Group();
-  gd.position.set(8.6, 0, -9.0);
+  gd.position.set(GARDEN.x, 0, GARDEN.z);
   root.add(gd);
   gd.add(k.at(k.cyl(1.5, 1.6, 0.25, P.stone, 24), 0, 0.125, 0));
   gd.add(k.at(k.cyl(1.35, 1.35, 0.05, '#7a5236', 24), 0, 0.27, 0));
@@ -531,8 +534,8 @@ export function buildStalls(ctx, k, atlas, S) {
   star.position.y = 1.85;
   gd.add(star);
   dynamic.push(star);
-  colliders.push({ type: 'circle', x: 8.6, z: -9.0, r: 1.6, h: 0.28 });
-  colliders.push({ type: 'circle', x: 8.6, z: -9.0, r: 0.2 });
+  colliders.push({ type: 'circle', x: GARDEN.x, z: GARDEN.z, r: 1.6, h: 0.28 });
+  colliders.push({ type: 'circle', x: GARDEN.x, z: GARDEN.z, r: 0.2 });
 
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();

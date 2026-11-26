@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { kit, makeAtlas, colorBake, heartPath, fitText, glowTexture, C } from '../school/kit.js';
-import { canvasTexture, roundRect, FONT, umat } from '../../util.js';
+import { canvasTexture, roundRect, FONT, umat, mesh } from '../../util.js';
 
 // Building blocks for Roji Land: merge a little model into one vertex-coloured geometry (so many copies
 // of it become one InstancedMesh), glowing bulbs, garlands of lights and the park's colours.
@@ -171,6 +171,123 @@ export function placeActor(a, wp, yaw, rot = null) {
   a.pos.set(wp.x, 0, wp.z);
   a.y = wp.y;
   a.yaw = yaw;
+}
+
+// Merge every static mesh under `group` that uses `material` into one mesh (signs on one atlas, lit
+// windows). keep: moving parts to leave alone. Returns the merged mesh, or null.
+export function bakeMaterial(group, material, keep = []) {
+  group.updateMatrixWorld(true);
+  const skip = new Set();
+  for (const d of keep) d.traverse((o) => skip.add(o));
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const rel = new THREE.Matrix4();
+  const list = [];
+  const victims = [];
+  let cast = false;
+  group.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || skip.has(o) || o.material !== material || o.children.length) return;
+    for (let p = o; p && p !== group; p = p.parent) if (!p.visible) return;
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal' && n !== 'uv') g.deleteAttribute(n);
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    if (!g.attributes.normal) g.computeVertexNormals();
+    g.clearGroups();
+    g.morphAttributes = {};
+    rel.multiplyMatrices(inv, o.matrixWorld);
+    g.applyMatrix4(rel);
+    list.push(g);
+    victims.push(o);
+    cast = cast || o.castShadow;
+  });
+  if (list.length < 2) return null;
+  for (const o of victims) o.removeFromParent();
+  const merged = mesh(mergeGeometries(list, false), material, { cast, receive: true });
+  group.add(merged);
+  return merged;
+}
+
+// One tiny palette texture for the things that glow after dark: each swatch has a colour and a glow
+// ([colour, glowColour, strength]) and a mesh picks its swatch by uv, so all of them share one
+// material (and one draw call once merged). paint(geo, name) returns a copy of geo on that swatch.
+export function makePalette(swatches, { rough = 0.55 } = {}) {
+  const names = Object.keys(swatches);
+  const n = names.length;
+  const draw = (pick) => canvasTexture(n * 4, 4, (c) => names.forEach((k, i) => ((c.fillStyle = pick(swatches[k])), c.fillRect(i * 4, 0, 4, 4))));
+  const map = draw(([c]) => c);
+  const emap = draw(([, g, s]) => (g ? '#' + new THREE.Color(g).multiplyScalar(s).getHexString() : '#000000'));
+  for (const t of [map, emap]) {
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+  }
+  const material = new THREE.MeshStandardMaterial({ color: '#ffffff', map, emissive: '#ffffff', emissiveMap: emap, emissiveIntensity: 1, roughness: rough });
+  const uvOf = (name) => [(names.indexOf(name) * 4 + 2) / (n * 4), 0.5];
+  const paint = (geo, name) => {
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    const [u, v] = uvOf(name);
+    const a = new Float32Array(g.attributes.position.count * 2);
+    for (let i = 0; i < a.length; i += 2) {
+      a[i] = u;
+      a[i + 1] = v;
+    }
+    g.setAttribute('uv', new THREE.BufferAttribute(a, 2));
+    return g;
+  };
+  // Merge the meshes under `group` into one palette geometry; each mesh names its swatch in userData.swatch
+  const merge = (group) => {
+    group.updateMatrixWorld(true);
+    const inv = group.matrixWorld.clone().invert();
+    const list = [];
+    group.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = paint(o.geometry, o.userData.swatch || names[0]);
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+      g.clearGroups();
+      g.applyMatrix4(rel.multiplyMatrices(inv, o.matrixWorld));
+      list.push(g);
+    });
+    return mergeGeometries(list, false);
+  };
+  return { material, uvOf, paint, merge };
+}
+
+// A path made of straight pieces through `points` (closed when the last point is the first).
+// tags[i] names the piece that starts at point i ('lift', 'drop' ...).
+export class Polyline {
+  constructor(points, tags = []) {
+    this.p = points;
+    this.tags = tags;
+    this.cum = [0];
+    for (let i = 1; i < points.length; i++) this.cum.push(this.cum[i - 1] + points[i].distanceTo(points[i - 1]));
+    this.length = this.cum[this.cum.length - 1];
+  }
+
+  wrap(d) {
+    return ((d % this.length) + this.length) % this.length;
+  }
+
+  index(d) {
+    let lo = 0;
+    let hi = this.cum.length - 2;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.cum[mid] <= d) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  // Position at distance d (wrapped); returns the tag of that piece
+  at(d, pos) {
+    d = this.wrap(d);
+    const i = this.index(d);
+    const len = this.cum[i + 1] - this.cum[i] || 1;
+    pos.lerpVectors(this.p[i], this.p[i + 1], (d - this.cum[i]) / len);
+    return this.tags[i];
+  }
+
+  tag(d) {
+    return this.tags[this.index(this.wrap(d))];
+  }
 }
 
 // Little line icons painted on the canvas atlas

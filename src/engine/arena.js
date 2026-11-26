@@ -45,6 +45,7 @@ body.touch #arena .a-btns { display: flex; }
 #arena .a-card button.primary { background: #ef5b6f; color: #fff; }
 body.arena-result #arena .a-btns, body.arena-result #stick, body.arena-result #joy { display: none !important; }
 body.arena-result #arena { z-index: 48; }
+body.arena-result #arena .a-top { z-index: 51; } /* the X stays tappable over the result card */
 @media (max-height: 520px) and (orientation: landscape) {
   #arena .a-result { place-items: center end; padding-right: max(16px, env(safe-area-inset-right)); background: linear-gradient(90deg, rgba(40,24,40,0) 35%, rgba(40,24,40,.32)); }
   #arena .a-card { width: min(320px, 40vw); padding: 14px 18px; border-radius: 22px; }
