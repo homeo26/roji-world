@@ -101,7 +101,7 @@
             const btn = $('start');
             btn.disabled = false;
             btn.classList.remove('is-loading');
-            btn.textContent = 'Start the journey';
+            btn.textContent = B.label || 'Start the journey';
             document.body.classList.add('boot-done');
           }, 260);
         };
@@ -244,6 +244,7 @@
           <span class="start-label">Loading <b id="load-pct">0%</b></span>
         </button>
         <div id="load-note" class="load-note">Downloading the island</div>
+        <button id="intro-room" class="intro-room" hidden></button>
         <div class="intro-hints">
           <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
           <span><kbd>E</kbd> do things</span>

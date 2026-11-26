@@ -1,3 +1,4 @@
+import { bootProfile, savedRoom, takeGo, useSolo } from './online/profile.js';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -33,6 +34,10 @@ import { makeActor, stepWalker, stepVertical, tryJump, faceTo, syncKid, airOf, R
 const STORE = 'roji-weekends-stamps-v1';
 const PLAYER_KEY = 'roji-weekends-player';
 const params = new URLSearchParams(location.search);
+// A saved room (src/online/profile.js): its progress stays loaded if the game was closed inside it, or
+// when opening its link; go is set when the page just reloaded into or out of a room.
+const roomLoaded = bootProfile(params.get('room'));
+const go = takeGo();
 
 // The loading screen (index.html): each step says how much of the building is done (0..1) and what comes
 // next, then lets the page repaint the bar before the next chunk of work.
@@ -890,9 +895,44 @@ function onlineHooks() {
       ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
       if (save) saveLooks(looks);
     },
+    reloadProgress,
+    savePlayer: (id) => localStorage.setItem(PLAYER_KEY, id),
+    reloadPage: (url) => location.replace(url),
+    setOnlineButton: (code) => ui.setOnlineRoom(code),
     arenaActive: () => arena.active || gameOpen,
     gameTitle: (id) => (arena.has(id) ? arena.meta(id)?.title : GAMES.find((g) => g.id === id)?.title) || 'a game',
   };
+}
+
+// The progress in localStorage changed under the game (the other player's changes arrived in the room):
+// read again what the town keeps in memory. keys: the changed keys, or null for all.
+function reloadProgress(keys = null) {
+  const has = (k) => !keys || keys.includes(k);
+  if (has(STORE)) {
+    try {
+      stamps = new Set(JSON.parse(localStorage.getItem(STORE) || '[]'));
+    } catch {
+      stamps = new Set();
+    }
+    stations.forEach((s) => s.refresh(stamps.has(s.stop.id)));
+    refreshTrail();
+    ui.updateJourney(stations, stamps, null);
+    if (currentStation && !spaces.inside) {
+      ui.refreshCard();
+      showStationCard(currentStation);
+    }
+  }
+  if (has('roji-weekends-looks-v1')) {
+    const L = loadLooks();
+    for (const id of ['roji', 'homama']) {
+      if (remoteLive() && id === online.remoteId()) continue; // the other player's kid wears what they send
+      if (JSON.stringify(L[id]) === JSON.stringify(looks[id])) continue;
+      looks[id] = L[id];
+      actors[id].kid.setLook(L[id]);
+    }
+    ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
+  }
+  if (!keys || keys.some((k) => k === STORE || k === 'roji-weekends-notes-v1')) ui.renderJournal();
 }
 
 let onlineLoad = null;
@@ -1433,11 +1473,53 @@ async function toggleFullscreen() {
 }
 document.addEventListener('fullscreenchange', () => document.body.classList.toggle('is-full', !!document.fullscreenElement));
 
+// The saved room on the start screen: continue in it (its progress is loaded already, or the page loads
+// it), or play on our own when it is loaded
+const savedAtStart = savedRoom();
+const introRoom = document.getElementById('intro-room');
+let joinAtStart = go?.join || params.get('room') || roomLoaded || null;
+if (savedAtStart && !go) {
+  introRoom.innerHTML = roomLoaded ? 'Play on my own instead' : `Continue in our room <b>${savedAtStart.code}</b>`;
+  introRoom.classList.toggle('alt', !!roomLoaded);
+  introRoom.hidden = false;
+  if (roomLoaded) boot.label = `Continue in our room ${roomLoaded}`;
+  introRoom.addEventListener('click', () => {
+    if (roomLoaded) {
+      useSolo();
+      const url = new URL(location.href);
+      url.searchParams.delete('room');
+      location.replace(url.href);
+      return;
+    }
+    joinAtStart = savedAtStart.code;
+    start();
+  });
+}
+// After a reload into or out of a room the game starts at once; the first touch turns the sound on
+// (and full screen on phones), which a page may only do after a tap
+function afterReload() {
+  const wake = () => {
+    sound.start();
+    if (ui.touch) goFullscreen();
+  };
+  window.addEventListener('pointerdown', wake, { once: true, capture: true });
+  window.addEventListener('keydown', wake, { once: true, capture: true });
+}
+const GO_MSG = {
+  left: (g) => `You left room <b>${g.code}</b>. It stays saved: open Play together to carry on.`,
+  solo: () => 'Playing on your own. Your room stays saved for later.',
+  forgot: (g) => `Room ${g.code} is forgotten on this device.`,
+  gone: (g) => `Room ${g.code} is deleted. Back to your own journey on this device.`,
+  deleted: (g) => `${g.name || 'The other player'} deleted room ${g.code}. Back to your own journey on this device.`,
+  lost: (g) => `Room ${g.code} is not open to you any more: it was deleted, or your seat went to another phone. Back to your own journey.`,
+};
+
 function start() {
   if (started) return;
   started = true;
   sound.start();
-  if (params.get('room')) setTimeout(() => openOnline({ join: params.get('room') }), 400); // a Play together link
+  if (joinAtStart) setTimeout(() => openOnline({ join: joinAtStart, show: go?.show, msg: go?.msg }), 400); // our room, or a Play together link
+  const goText = !joinAtStart && GO_MSG[go?.msg]?.(go); // what just happened to the room, after a reload out of it
   if (ui.touch) goFullscreen();
   introEl.classList.add('gone');
   document.body.classList.add('playing');
@@ -1446,7 +1528,8 @@ function start() {
   setTimeout(() => {
     P().kid.wave();
     setTimeout(() => C().kid.wave(), 300);
-    toast(`${greeting()}, ${looks[playerId].name}! Follow the path to <b>Weekend 1</b>. Press H to hold hands.`, 4400);
+    if (goText) toast(goText, 5600);
+    else if (!go) toast(`${greeting()}, ${looks[playerId].name}! Follow the path to <b>Weekend 1</b>. Press H to hold hands.`, 4400);
   }, 2000);
 }
 document.getElementById('start').addEventListener('click', start);
@@ -1990,7 +2073,8 @@ window.addEventListener('resize', () => {
 if (renderer.domElement.width !== Math.floor(window.innerWidth * renderer.getPixelRatio())) window.dispatchEvent(new Event('resize'));
 document.body.classList.add('ready');
 boot.done();
-if (params.has('play')) {
+if (params.has('play') || go) {
+  if (go && !params.has('play')) afterReload();
   start();
   introBlend = 1;
   tweens.list.length = 0;

@@ -100,6 +100,9 @@
 .ol-msg.good {
   color: #1d8c6b;
 }
+.ol-msg.info {
+  color: var(--ink-soft);
+}
 .ol-busy {
   display: flex;
   align-items: center;
@@ -160,14 +163,6 @@
 .ol-link .btn {
   min-height: 44px;
 }
-.ol-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 12px 0 4px;
-  font-weight: 600;
-}
 .ol-foot {
   display: flex;
   justify-content: space-between;
@@ -176,6 +171,170 @@
 }
 .ol-foot .btn {
   min-height: 44px;
+}
+
+/* Our saved room, first in the window */
+.ol-ours {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+.ol-continue {
+  justify-content: center;
+  min-height: 54px;
+  font-size: 1.1rem;
+}
+.ol-continue b {
+  letter-spacing: 0.12em;
+}
+.ol-ours-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+.ol-ours-row > span:not(.ol-av) {
+  flex: 1;
+  min-width: 12em;
+}
+.ol-ours-row .avatar {
+  width: 26px;
+  height: 26px;
+}
+.ol-or {
+  margin: 10px 0 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: center;
+}
+.ol-small {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+/* A small text button (free a seat, forget the room, sign in) */
+.ol-mini {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--paper-2);
+  font: 600 0.82rem var(--font);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.ol-small .ol-mini {
+  min-height: 32px;
+  color: var(--rose);
+}
+body.touch .ol-small .ol-mini {
+  min-height: 40px;
+}
+
+/* The room window: the code on one side, who is in it on the other */
+.ol-roomgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.ol-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+.ol-side {
+  display: grid;
+  gap: 10px;
+}
+.ol-seats {
+  display: grid;
+  gap: 8px;
+}
+.ol-seat {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(52, 40, 70, 0.08);
+}
+.ol-seat.free .ol-av {
+  opacity: 0.45;
+}
+.ol-seat .avatar {
+  width: 34px;
+  height: 34px;
+}
+.ol-seat-t {
+  flex: 1;
+  display: grid;
+  line-height: 1.2;
+}
+.ol-seat-t span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.ol-seat-t .ol-dot {
+  width: 9px;
+  height: 9px;
+}
+.ol-seat .ol-mini {
+  min-height: 36px;
+  padding: 4px 12px;
+  line-height: 1.2;
+  text-align: left;
+}
+body.touch .ol-seat .ol-mini {
+  min-height: 40px;
+}
+.ol-google {
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  background: #fff;
+  color: var(--ink);
+  border: 2px solid var(--line);
+  box-shadow: none;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  text-align: left;
+}
+.ol-google svg {
+  flex: none;
+}
+.ol-kept {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.88rem;
+  color: #1d8c6b;
+}
+.ol-foot .ol-gap {
+  flex: 1;
+}
+.ol-del {
+  color: #c2414f;
+  border-color: color-mix(in srgb, #c2414f 30%, var(--line));
+}
+.ol-danger {
+  --c: #c2414f;
+  background: #c2414f;
+}
+.ol-confirm {
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 6px 0 14px;
 }
 
 /* The dot: connected, connecting (pulses) or away */
@@ -339,8 +498,29 @@ body.touch .ol-i-btns kbd {
     height: 44px;
     font-size: 1.5rem;
   }
-  .ol-status {
-    margin: 8px 0 2px;
+  .ol-continue {
+    min-height: 46px;
+    font-size: 1rem;
+  }
+  .ol-or {
+    margin: 6px 0 6px;
+  }
+  .ol-roomgrid {
+    gap: 10px;
+  }
+  .ol-seat {
+    padding: 5px 8px;
+  }
+  .ol-seat .avatar {
+    width: 28px;
+    height: 28px;
+  }
+  .ol-google {
+    min-height: 42px;
+    font-size: 0.82rem;
+  }
+  .ol-room {
+    gap: 8px;
   }
   .ol-chip {
     top: calc(max(8px, env(safe-area-inset-top)) + 90px);
@@ -363,7 +543,8 @@ body.touch .ol-i-btns kbd {
   }
 }
 @media (max-width: 520px) {
-  .ol-two {
+  .ol-two,
+  .ol-roomgrid {
     grid-template-columns: 1fr;
   }
 }

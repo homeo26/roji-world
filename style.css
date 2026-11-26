@@ -196,6 +196,23 @@ body.playing #hud {
   display: flex;
   gap: 8px;
 }
+/* Play together: a pink pill with its words (the room code while in a room); an icon on small screens */
+#btn-online {
+  width: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px 0 12px;
+  border-radius: 999px;
+  background: var(--rose);
+  color: #fff;
+  font: 600 0.95rem var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+#btn-online.in-room .ol-btn-t {
+  letter-spacing: 0.12em;
+}
 
 #journey {
   list-style: none;
@@ -616,7 +633,31 @@ body.night-time #minimap {
   color: var(--ink-soft);
 }
 body.boot-done .load-note,
-body:not(.boot-done) .intro-hints {
+body:not(.boot-done) .intro-hints,
+body:not(.boot-done) .intro-room {
+  display: none;
+}
+/* Our saved room on the start screen (src/main.js) */
+.intro-room {
+  display: block;
+  margin: 12px auto 0;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 2px solid color-mix(in srgb, var(--rose) 45%, #fff);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--rose);
+  font: 600 0.98rem var(--font);
+  cursor: pointer;
+}
+.intro-room b {
+  letter-spacing: 0.1em;
+}
+.intro-room.alt {
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+.intro-room[hidden] {
   display: none;
 }
 body:not(.boot-done) .pick {
@@ -2445,5 +2486,29 @@ body.touch #journey .chip::after {
   .bk-close {
     top: -10px;
     right: -10px;
+  }
+}
+
+/* Play together on small screens: the pink icon only */
+@media (max-width: 760px), (max-height: 520px) {
+  #btn-online {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  #btn-online .ol-btn-t {
+    display: none;
+  }
+}
+@media (max-height: 520px) {
+  #btn-online {
+    width: 38px;
+  }
+  .intro-room {
+    margin-top: 8px;
+    font-size: 0.9rem;
+  }
+  .intro-room:not([hidden]) ~ .intro-hints {
+    display: none;
   }
 }
