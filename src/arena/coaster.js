@@ -4,12 +4,15 @@ import { TRACKS, START } from './coaster/tracks.js';
 import { buildWorld } from './coaster/scenery.js';
 import { Fireworks } from '../places/park/fireworks.js';
 import { kit, colorBake, heartGeo, starGeo, heartPath, roundRect, fitText, mergeGeometries } from '../places/school/kit.js';
+import { hostPlan, guestPlan, waitCard, waitForPartner, countTo, History, Follow, halves, nameOf, settleFinal } from './coop/kit.js';
 
 // The Comet: ride Roji Land's rollercoaster in 3D with Roji and Homama in the front car. Lean left
 // and right (and put your hands up) to catch the stars and hearts along the track: a chain lift, a
 // big drop with a ride photo, loops, tunnels and camel humps. Three rides, each longer and trickier:
 // Morning Meadow, Sunset Castle (the stars sway) and Starlight Night (shooting stars, lanterns and
 // fireworks). Stars for each ride, best scores, and the next ride opens with a star on the last.
+// Played together online, both ride the same car: one leans, the other catches each one with hands up
+// as it reaches the car. The starter's copy runs the train and decides the catches.
 
 const VALUE = { star: 1, heart: 3, gold: 5 };
 const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
@@ -64,34 +67,85 @@ export default {
     const open = (i) => i === 0 || (prog[TRACKS[i - 1].id]?.stars || 0) >= 1;
     const starsText = (n) => (n === 1 ? '1 star' : `${n} stars`);
     hud.buttons({ action: null, jump: null, stick: false });
-    const flow = { disposed: false, ride: null, preview: makePreview(ctx) };
-    hud
-      .choose({
+    const flow = { disposed: false, ride: null, preview: makePreview(ctx), plan: null, card: null };
+    const on = ctx.online;
+    const gone = () => flow.disposed;
+    const pickRide = async () => {
+      const pick = await hud.choose({
         title: 'The Comet',
         text: 'Roji and Homama take the front car. Which ride?',
         options: TRACKS.map((t, i) => {
           const p = prog[t.id];
           return { id: t.id, label: open(i) ? t.name : `${t.name} (locked)`, sub: open(i) ? (p ? `${starsText(p.stars)} of 3, best ${p.best}` : t.sub) : `Get a star on ${TRACKS[i - 1].name} to open it` };
         }),
-      })
-      .then((pick) => {
-        if (flow.disposed) return;
-        let ti = Math.max(0, TRACKS.findIndex((t) => t.id === pick));
-        if (!open(ti)) {
-          hud.message('Locked for now', 1200);
-          while (ti > 0 && !open(ti)) ti--;
-        }
-        flow.preview.remove();
-        flow.preview = null;
-        flow.ride = setupRide(ctx, ti, prog, flow);
       });
+      if (flow.disposed) return -1;
+      let ti = Math.max(0, TRACKS.findIndex((t) => t.id === pick));
+      if (!open(ti)) {
+        hud.message('Locked for now', 1200);
+        while (ti > 0 && !open(ti)) ti--;
+      }
+      return ti;
+    };
+    const go = (ti, coop) => {
+      flow.preview.remove();
+      flow.preview = null;
+      flow.ride = setupRide(ctx, ti, prog, flow, coop);
+    };
+    // Played together (the other copy): ride the starter's ride in the same car, in the role they picked
+    const asGuest = async () => {
+      flow.plan?.off();
+      flow.card = waitCard({ title: `${nameOf(ctx.partner)} is picking a ride`, text: 'You ride together in the front car: one leans, one catches.' });
+      const plan = await guestPlan(ctx, 'plan', { isGone: gone });
+      flow.card.close();
+      if (flow.disposed) return true;
+      if (plan && plan !== 'solo' && TRACKS[plan.ti]) return go(plan.ti, { ...plan, owner: false }), true;
+      return false;
+    };
+    (async () => {
+      if (on.inRoom && !on.isHost && (await asGuest())) return;
+      const ti = await pickRide();
+      if (ti < 0 || flow.disposed) return;
+      // (both opened it at once and the other copy's session won: this one rides theirs)
+      if (on.inRoom && !on.isHost && (await asGuest())) return;
+      if (on.inRoom && on.isHost) {
+        flow.plan = hostPlan(ctx);
+        const here = await waitForPartner(ctx, { what: `ride ${TRACKS[ti].name}`, isGone: gone });
+        if (!on.isHost) {
+          if (!(await asGuest())) go(ti, null);
+          return;
+        }
+        if (here) {
+          const role = await hud.choose({
+            title: 'Who leans?',
+            text: 'One of you leans the car toward the stars, the other catches them with hands up.',
+            options: [
+              { id: `lean-${ctx.me}`, label: `${nameOf(ctx.me)} leans`, sub: `${nameOf(ctx.partner)} catches` },
+              { id: `lean-${ctx.partner}`, label: `${nameOf(ctx.partner)} leans`, sub: `${nameOf(ctx.me)} catches` },
+            ],
+          });
+          if (flow.disposed) return;
+          if (role && on.partnerHere) {
+            const plan = { ti, lean: role.slice(5), seed: on.seed % 1000, at: on.now() + 4200 };
+            flow.plan.set(plan);
+            return go(ti, { ...plan, owner: true });
+          }
+        }
+        flow.plan.alone();
+      }
+      go(ti, null);
+    })();
     return {
       update(dt, t) {
+        dt *= window.__coasterSpeed || 1;
         if (flow.ride) flow.ride.update(dt, t);
         else flow.preview?.update(dt, t);
       },
       dispose() {
         flow.disposed = true;
+        flow.card?.close();
+        flow.plan?.off();
+        flow.ride?.dispose?.();
         ctx.camera.up.set(0, 1, 0);
       },
     };
@@ -127,8 +181,14 @@ function makePreview(ctx) {
   };
 }
 
-// Build the chosen ride and run it
-function setupRide(ctx, ti, prog, flow) {
+// How long the hands stay up after a tap (ms), and how long the train's copy waits for the other
+// player's lean or hands before it decides a catch they took part in
+const GRAB = 550;
+const GRACE = 380;
+
+// Build the chosen ride and run it. coop (played together): { lean: the kid who leans, seed, at: the
+// shared start time, owner: true on the copy that runs the train and decides the catches }
+function setupRide(ctx, ti, prog, flow, coop = null) {
     const { scene, camera, renderer, hud, input, sound, fx } = ctx;
     const k = kit();
     const T = TRACKS[ti];
@@ -196,7 +256,7 @@ function setupRide(ctx, ti, prog, flow) {
 
     // ------------------------------------------------ stars and hearts along the track
     const R = (() => {
-      let a = (ti + 1) * 9973 + Math.floor(Math.random() * 1000);
+      let a = (ti + 1) * 9973 + (coop ? coop.seed : Math.floor(Math.random() * 1000));
       return () => ((a = (a * 16807) % 2147483647) / 2147483647);
     })();
     const P = T.pickups;
@@ -252,7 +312,10 @@ function setupRide(ctx, ti, prog, flow) {
       return m;
     };
     const counts = { star: 0, heart: 0, gold: 0 };
-    for (const p of picks) p.slot = counts[p.kind]++;
+    for (const [i, p] of picks.entries()) {
+      p.slot = counts[p.kind]++;
+      p.i = i;
+    }
     const inst = {
       star: mkInst(starGeo(0.38, 0.17, 0.12), '#ffd166', '#ffb347', counts.star),
       heart: mkInst(heartGeo(0.62, 0.16), '#ff5d7a', '#ff3d6e', counts.heart),
@@ -279,12 +342,45 @@ function setupRide(ctx, ti, prog, flow) {
     const camUp = new THREE.Vector3(0, 1, 0);
     const Y = new THREE.Vector3(0, 1, 0);
     const sc = new THREE.Vector3();
-    if (/dev\.html/.test(location.pathname)) window.__coaster = { st, picks, track };
+    // Played together: who leans, who catches, the lean over time, the taps, the catches decided so far
+    const C = coop && {
+      owner: !!coop.owner,
+      leaner: coop.lean,
+      catcher: coop.lean === 'roji' ? 'homama' : 'roji',
+      mine: coop.lean === ctx.me ? 'lean' : 'catch',
+      here: true, // the other player's copy still rides
+      leanH: new History(5000),
+      follow: new Follow({ delay: 120 }),
+      grabs: [], // the catcher's taps (shared clock ms)
+      grabAt: -1e9,
+      pts: { roji: 0, homama: 0 },
+      pend: [],
+      res: [], // [pick index, 1 caught | 0 missed, when]
+      seen: new Set(),
+      sentGrabs: [],
+      ownerSt: null,
+    };
+    const now = () => ctx.online.now();
+    window.__coaster = { st, picks, track, C };
     const comboMul = () => (st.combo >= 12 ? 3 : st.combo >= 6 ? 2 : 1);
-    const showScore = () => hud.score(`${st.score} <span style="font-weight:400;font-size:.8em">points</span>${comboMul() > 1 ? ` <span style="color:#ef5b6f">x${comboMul()}</span>` : ''}`);
+    let shown = '';
+    const showScore = () => {
+      const html = `${st.score} <span style="font-weight:400;font-size:.8em">points</span>${comboMul() > 1 ? ` <span style="color:#ef5b6f">x${comboMul()}</span>` : ''}`;
+      if (html === shown) return;
+      shown = html;
+      hud.score(html);
+    };
     showScore();
-    hud.hint('A and D (or the arrows) to lean, Space for hands up');
-    hud.buttons({ action: 'Hands up', jump: null });
+    const setRole = () => {
+      if (!C || C.mine === 'lean') {
+        hud.hint(C ? `A and D (or the arrows) to lean. ${nameOf(C.catcher)} catches.` : 'A and D (or the arrows) to lean, Space for hands up');
+        hud.buttons(C ? { action: null, jump: null } : { action: 'Hands up', jump: null });
+      } else {
+        hud.hint(`Space (or a tap) to catch each one as it reaches you. ${nameOf(C.leaner)} leans.`);
+        hud.buttons({ action: 'Catch', jump: null, stick: false });
+      }
+    };
+    setRole();
 
     const pickPos = (p, out, t) => {
       track.at(p.d, fr);
@@ -396,7 +492,7 @@ function setupRide(ctx, ti, prog, flow) {
       const lean = st.lean;
       const drop = st.drop;
       for (const [w, kid] of Object.entries(kids)) {
-        kid.hands = st.hands || drop > 0.5 ? 'wave2' : null;
+        kid.hands = (C ? st.hands && w === C.catcher : st.hands) || drop > 0.5 ? 'wave2' : null;
         kid.update(dt, t, 0, 0, 0);
         kid.body.rotation.z = lean * 0.3;
         const scream = drop > 0.3 ? 1 : 0;
@@ -423,9 +519,14 @@ function setupRide(ctx, ti, prog, flow) {
     camera.lookAt(camLook);
     env.follow(fr.p);
     const ready = (async () => {
-      await new Promise((r) => setTimeout(r, 300));
-      if (flow.disposed) return;
-      await hud.countdown(3);
+      if (C) {
+        hud.message(`<span style="font-size:.5em">${C.mine === 'lean' ? `You lean, ${nameOf(C.catcher)} catches` : `${nameOf(C.leaner)} leans, you catch`}</span>`, 1500);
+        if (!(await countTo(ctx, coop.at, { isGone: () => flow.disposed }))) return;
+      } else {
+        await new Promise((r) => setTimeout(r, 300));
+        if (flow.disposed) return;
+        await hud.countdown(3);
+      }
       if (flow.disposed) return;
       st.phase = 'ride';
       st.v = 3;
@@ -435,6 +536,16 @@ function setupRide(ctx, ti, prog, flow) {
 
     const finish = async () => {
       st.phase = 'done';
+      if (C) {
+        // together: the final numbers from the train's copy
+        const f = await settleFinal(ctx, C, { flush: () => judge(true), numbers: () => ({ sc: st.score, r: C.pts.roji, h: C.pts.homama, gp: st.gotPts, g: st.got }) });
+        if (flow.disposed) return;
+        if (f) {
+          Object.assign(st, { score: f.sc | 0, gotPts: f.gp | 0, got: f.g | 0 });
+          C.pts = { roji: f.r | 0, homama: f.h | 0 };
+        }
+        showScore();
+      }
       const pct = MAX ? st.gotPts / MAX : 0;
       const stars = pct >= 0.85 ? 3 : pct >= 0.62 ? 2 : pct >= 0.38 ? 1 : 0;
       const old = prog[T.id] || { best: 0, stars: 0 };
@@ -443,24 +554,158 @@ function setupRide(ctx, ti, prog, flow) {
       ctx.save('progress', prog);
       const newBest = st.score > old.best && old.best > 0;
       const nextOpen = stars >= 1 && old.stars < 1 && ti < TRACKS.length - 1 ? `<br><b>${TRACKS[ti + 1].name}</b> is open now.` : '';
-      const photo = st.photo ? `<img src="${st.photo}" alt="Ride photo of Roji and Homama" style="width:100%;border-radius:12px;display:block;margin:0 0 10px">` : '';
+      // together the card also holds both results, so the photo is smaller (it still fits on a phone)
+      const photo = st.photo ? `<img src="${st.photo}" alt="Ride photo of Roji and Homama" style="${C ? 'max-width:100%;max-height:21vh;margin:0 auto 8px' : 'width:100%;margin:0 0 10px'};border-radius:12px;display:block">` : '';
       const line = stars === 3 ? 'Homama says it was the best ride of his life. Roji wants to go again.' : stars === 2 ? 'Roji is still laughing. Homama is still holding her hand.' : stars === 1 ? 'Roji screamed the whole way down. Homama loved every second.' : 'You caught a few. One more go?';
       if (fireworks) fireworks.show(true);
       await new Promise((r) => setTimeout(r, fireworks ? 1800 : 600));
       if (flow.disposed) return;
+      const title = stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a ride!';
+      if (C) {
+        // each one's share of the points; the two shares add up to the score both see
+        const mine = C.here ? C.pts[ctx.me] : st.score;
+        const who = `${nameOf(C.leaner)} leaned and ${nameOf(C.catcher)} caught`;
+        hud.score(''); // (the card says the score)
+        ctx.finish({
+          win: stars > 0,
+          score: mine,
+          stars,
+          title,
+          text: `${photo}${st.got} of ${picks.length} caught, ${st.score} points together${newBest ? ' (a new best!)' : ''}. ${who}.${innerHeight > 520 ? `<br>${line}` : ''}${nextOpen}`,
+        });
+        return;
+      }
       ctx.finish({
         win: stars > 0,
         score: st.score,
         stars,
-        title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a ride!',
+        title,
         text: `${photo}${st.got} of ${picks.length} caught, ${st.score} points${newBest ? ' (a new best!)' : ''}. Best ${rec.best}.<br>${line}${nextOpen}`,
       });
+    };
+
+    // ------------------------------------------------ played together
+    const catchOk = (p, lean) => (p.lane === 0 ? Math.abs(lean) < 0.65 : Math.abs(lean - p.passCur) < 0.55);
+    const gotIt = (p, i, at) => {
+      p.got = true;
+      st.combo++;
+      const pts = VALUE[p.kind] * comboMul();
+      st.score += pts;
+      st.got++;
+      st.gotPts += VALUE[p.kind];
+      if (C) {
+        const [a, b] = halves(pts, false);
+        C.pts[C.leaner] += a;
+        C.pts[C.catcher] += b;
+        C.res.push([i, 1, at]);
+      }
+      if (p.kind === 'heart') st.hearts++;
+      catchFx(p);
+      if (st.combo === 6 || st.combo === 12) hud.message(`Combo x${comboMul()}!`, 900);
+      showScore();
+    };
+    const missIt = (p, i, at) => {
+      p.missed = true;
+      if (st.combo >= 6) hud.message('Combo lost', 700);
+      st.combo = 0;
+      if (C) C.res.push([i, 0, at]);
+      showScore();
+    };
+    const tmpF = new THREE.Vector3();
+    let frameT = 0;
+    const catchFx = (p) => {
+      pickPos(p, tmpF, frameT);
+      fx.burst(tmpF, p.kind === 'heart' ? ['#ff5d7a', '#ffd1dc', '#ffffff'] : ['#ffd166', '#fff3c4', '#ffffff'], p.kind === 'gold' ? 26 : 14);
+      if (p.kind === 'heart') fx.heartsAt(tmpF, 3);
+      sound.ui(p.kind === 'star' ? 'coin' : 'good');
+    };
+    // The train's copy decides each catch once it knows the lean and the hands at the moment it passed
+    const judge = (force = false) => {
+      const T0 = now();
+      const remoteLean = C.mine !== 'lean' && C.here;
+      const remoteHands = C.mine !== 'catch' && C.here;
+      for (let j = C.pend.length - 1; j >= 0; j--) {
+        const p = C.pend[j];
+        const T = p.passAt;
+        const late = force || T0 > T + GRACE;
+        if (remoteLean && C.leanH.lastAt() < T && !late) continue;
+        const lean = C.leanH.at(T) ?? 0;
+        const grabbed = C.grabs.some((g) => g >= T - GRAB && g <= T + 120);
+        if (grabbed && catchOk(p, lean)) gotIt(p, p.i, T0);
+        else if (!catchOk(p, lean) || late || (!remoteHands && T0 > T + 120)) missIt(p, p.i, T0);
+        else continue;
+        C.pend.splice(j, 1);
+      }
+    };
+    // The other copy shows what the train's copy decided, and keeps its train with it
+    const follow = (s) => {
+      for (const [i, ok] of s.res || []) {
+        if (C.seen.has(i) || !picks[i]) continue;
+        C.seen.add(i);
+        const p = picks[i];
+        if (p.got || p.missed) continue;
+        if (ok) {
+          p.got = true;
+          catchFx(p);
+        } else p.missed = true;
+      }
+      const combo = st.combo;
+      st.score = s.sc | 0;
+      st.got = s.g | 0;
+      st.gotPts = s.gp | 0;
+      st.combo = s.c | 0;
+      C.pts = { roji: s.r | 0, homama: s.h | 0 };
+      if ((st.combo === 6 || st.combo === 12) && combo !== st.combo) hud.message(`Combo x${comboMul()}!`, 900);
+      if (combo >= 6 && st.combo === 0) hud.message('Combo lost', 700);
+      showScore();
+    };
+    if (C) {
+      ctx.online.on('state', (s) => {
+        if (!s || typeof s !== 'object') return;
+        if (C.mine !== 'lean' && typeof s.lean === 'number') {
+          C.leanH.push(s.at, s.lean);
+          C.follow.push({ at: s.at, lean: s.lean });
+        }
+        if (C.mine !== 'catch' && Array.isArray(s.gr)) for (const g of s.gr) if (typeof g === 'number' && !C.grabs.includes(g)) C.grabs.push(g);
+        if (!C.owner && s.o) {
+          C.ownerSt = s;
+          follow(s);
+          if (s.ph === 'brake' && st.phase === 'ride') st.phase = 'brake';
+        }
+      });
+      ctx.online.on('fin', (d) => {
+        if (!d || typeof d !== 'object') return;
+        C.fin = d;
+        C.finWait?.();
+      });
+      ctx.online.on('leave', () => {
+        C.finWait?.();
+        if (!C.here) return;
+        C.here = false;
+        C.owner = true; // the computer takes the other seat and this copy runs the train now
+        C.pend = picks.filter((p) => p.passAt && !p.got && !p.missed);
+        hud.message(`<span style="font-size:.5em">${nameOf(ctx.partner)} left the ride. The computer ${C.mine === 'lean' ? 'catches' : 'leans'} now.</span>`, 2200);
+      });
+    }
+    // what this copy tells the other one (a few times a second)
+    const shareNow = () => {
+      const t0 = now();
+      C.grabs = C.grabs.filter((g) => t0 - g < 4000);
+      const s = { at: t0 };
+      if (C.mine === 'lean') s.lean = +st.lean.toFixed(3);
+      else s.gr = C.grabs.filter((g) => t0 - g < 2200);
+      if (C.owner) {
+        C.res = C.res.filter((x) => t0 - x[2] < 3000);
+        Object.assign(s, { o: 1, d: +st.d.toFixed(2), ds: +st.dist.toFixed(2), v: +st.v.toFixed(2), ph: st.phase, sc: st.score, r: C.pts.roji, h: C.pts.homama, gp: st.gotPts, g: st.got, c: st.combo, res: C.res.map((x) => [x[0], x[1]]) });
+      }
+      ctx.online.share(s);
     };
 
     const tmpP = new THREE.Vector3();
     return {
       update(dt, t) {
         st.t += dt;
+        frameT = t;
         // ---------------------------------------- input
         const ax = input.axis().x;
         let want = Math.abs(ax) > 0.2 ? Math.max(-1, Math.min(1, ax * 1.3)) : 0;
@@ -471,15 +716,39 @@ function setupRide(ctx, ti, prog, flow) {
         }
         // (the test scripts can ride on autopilot in the dev harness)
         let autoHands = false;
+        const nx = picks.find((p) => !p.got && !p.missed && !p.passAt && p.d > st.d - 0.5);
+        const autoWant = () => (nx && nx.d - st.d < 14 ? (nx.lane === 0 ? 0 : nx.cur) : 0);
         if (window.__coasterAuto) {
-          const nx = picks.find((p) => !p.got && !p.missed && p.d > st.d - 0.5);
           if (nx && nx.d - st.d < 14) {
-            want = nx.lane === 0 ? 0 : nx.cur;
+            want = autoWant();
             autoHands = nx.lane === 0;
           }
         }
-        st.lean = damp(st.lean, want, 9, dt);
-        st.hands = input.held('action') || input.held('jump') || autoHands;
+        if (!C) {
+          st.lean = damp(st.lean, want, 9, dt);
+          st.hands = input.held('action') || input.held('jump') || autoHands;
+        } else {
+          const t0 = now();
+          const riding = st.phase === 'ride';
+          // the lean: ours, the other player's (from their device), or the computer's once they left
+          if (C.mine === 'lean') st.lean = damp(st.lean, riding ? want : 0, 9, dt);
+          else if (C.here) {
+            const s = C.follow.sample(t0);
+            if (s) st.lean = s.lean;
+          } else st.lean = damp(st.lean, riding ? autoWant() : 0, 9, dt);
+          if (C.mine === 'lean' || !C.here) C.leanH.push(t0, st.lean);
+          // the hands: a tap raises them for a moment to catch the one passing the car
+          const soon = nx && nx.d - st.d < Math.max(0.6, st.v * (dt + 0.08));
+          const tapped = C.mine === 'catch' && (input.pressed('action') || input.pressed('jump') || input.pointer.justDown || (window.__coasterAuto && soon));
+          const autoTap = C.mine === 'lean' && !C.here && soon;
+          if (riding && (tapped || autoTap) && t0 - C.grabAt > GRAB * 0.6) {
+            C.grabAt = t0;
+            C.grabs.push(t0);
+          }
+          const last = C.grabs.length ? Math.max(...C.grabs) : -1e9;
+          st.hands = t0 - last < GRAB;
+          shareNow();
+        }
 
         // ---------------------------------------- the ride
         let tag = {};
@@ -493,6 +762,18 @@ function setupRide(ctx, ti, prog, flow) {
           if (moved < -track.length / 2) moved += track.length;
           st.dist += moved;
           // back into the station
+          // the other copy keeps its train where the train's copy has it (a little ahead for the delay)
+          if (C && !C.owner && C.ownerSt) {
+            const s = C.ownerSt;
+            const ahead = (s.v * Math.max(0, now() - s.at)) / 1000;
+            let gap = s.d + ahead - st.d;
+            if (gap > track.length / 2) gap -= track.length;
+            if (gap < -track.length / 2) gap += track.length;
+            const k = Math.abs(gap) > 4 ? 1 : 1 - Math.exp(-5 * dt);
+            st.d = (((st.d + gap * k) % track.length) + track.length) % track.length;
+            st.dist += (s.ds + ahead - st.dist) * k;
+            st.v = damp(st.v, s.v, 6, dt);
+          }
           const left = track.length - st.dist - 4;
           if (left < 22) {
             st.phase = 'brake';
@@ -531,6 +812,15 @@ function setupRide(ctx, ti, prog, flow) {
             if (p.got || p.missed) continue;
             if (p.d > st.d + 0.3 || p.d < before - 60) continue;
             if (p.d <= st.d + 0.3 && p.d > before - 1) {
+              if (C) {
+                // together: the train's copy decides it once it has the lean and the hands of that moment
+                if (!p.passAt) {
+                  p.passAt = now();
+                  p.passCur = p.cur;
+                  if (C.owner) C.pend.push(p);
+                }
+                continue;
+              }
               const ok = p.lane === 0 ? st.hands && Math.abs(st.lean) < 0.65 : Math.abs(st.lean - p.cur) < 0.55;
               if (ok) {
                 p.got = true;
@@ -554,13 +844,14 @@ function setupRide(ctx, ti, prog, flow) {
               }
             }
           }
+          if (C?.owner) judge();
           // a tip for the first few stars on the first ride
           for (const p of picks) {
             if (!p.tut || p.told || p.got || p.missed) continue;
             const ahead = p.d - st.d;
             if (ahead < 26 && ahead > 0) {
               p.told = true;
-              hud.message(p.lane === -1 ? 'Lean left!' : p.lane === 1 ? 'Lean right!' : 'Hands up!', 1300);
+              hud.message(C?.mine === 'catch' ? (p.lane === 0 ? 'Catch it up high!' : 'Catch it as it reaches you!') : p.lane === -1 ? 'Lean left!' : p.lane === 1 ? 'Lean right!' : C ? 'Stay in the middle!' : 'Hands up!', 1300);
             }
           }
         }
@@ -605,6 +896,9 @@ function setupRide(ctx, ti, prog, flow) {
         camera.up.copy(camUp);
         camera.lookAt(camLook);
         env.follow(fr.p);
+      },
+      dispose() {
+        if (window.__coaster?.st === st) delete window.__coaster;
       },
     };
 }

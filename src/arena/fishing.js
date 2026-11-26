@@ -3,11 +3,15 @@ import { buildScene, SEA, WEATHER } from './fishing/scene.js';
 import { makeUI } from './fishing/ui.js';
 import { heartGeo } from '../places/school/kit.js';
 import { dotTexture } from '../places/harbour/models.js';
+import { hostPlan, guestPlan, waitCard, waitForPartner, Follow, nameOf } from './coop/kit.js';
 
 // Harbour Fishing: a day out on the end of the pier in three rounds. Each round has its own goal,
 // weather and time of day (morning, then a breezy or rainy afternoon, then sunset or a starry night).
 // Cast with power, wait for the float to dip, then reel: keep the fish inside the green bar.
 // Everything caught goes into the fish book; stars from every trip unlock new tackle.
+// Played together online, both fish side by side at the end of the pier, each casting their own rod:
+// every catch counts for the round's goal and goes into both fish books. The starter's copy keeps the
+// rounds and the clock.
 
 const GOALS = {
   sardines: { text: 'Catch 3 sardines', tip: 'Sardines swim close to the pier', short: 'Sardines', need: 3, ok: (c) => c.id === 'sardine', boost: { sardine: 3 } },
@@ -103,32 +107,36 @@ export default {
     const palState = { stand: 0, next: 'sit', look: 0 };
 
     // ---------------------------------------------------------------- rod, line, float
-    const rod = new THREE.Group();
-    rod.position.set(0.03, 0.6, 0.3);
-    const rodMat = util.mat(has('rod') ? '#f4c24f' : '#3f7bf0', { rough: 0.45, metal: has('rod') ? 0.4 : 0 });
-    const segs = [];
-    let parent = rod;
-    [[0.8, 0.032, 0.026], [0.65, 0.026, 0.018], [0.55, 0.018, 0.01]].forEach(([len, r0, r1], i) => {
-      const seg = new THREE.Group();
-      seg.position.y = i === 0 ? 0 : parent.userData.len;
-      const geo = new THREE.CylinderGeometry(r1, r0, len, 7);
-      geo.translate(0, len / 2, 0);
-      seg.add(util.mesh(geo, rodMat));
-      seg.userData.len = len;
-      parent.add(seg);
-      segs.push(seg);
-      parent = seg;
-    });
-    const tip = new THREE.Object3D();
-    tip.position.y = 0.55;
-    segs[2].add(tip);
-    const reelM = util.mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.06, 12), util.mat('#3d4a52', { metal: 0.4, rough: 0.4 }));
-    reelM.rotation.z = PI / 2;
-    reelM.position.set(0.06, 0.18, 0.02);
-    const crank = util.mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), util.mat('#ef5b6f'));
-    crank.position.set(0.1, 0.18, 0.02);
-    rod.add(reelM, crank);
-    rod.rotation.x = 0.95;
+    const makeRod = (gold) => {
+      const rod = new THREE.Group();
+      rod.position.set(0.03, 0.6, 0.3);
+      const rodMat = util.mat(gold ? '#f4c24f' : '#3f7bf0', { rough: 0.45, metal: gold ? 0.4 : 0 });
+      const segs = [];
+      let parent = rod;
+      [[0.8, 0.032, 0.026], [0.65, 0.026, 0.018], [0.55, 0.018, 0.01]].forEach(([len, r0, r1], i) => {
+        const seg = new THREE.Group();
+        seg.position.y = i === 0 ? 0 : parent.userData.len;
+        const geo = new THREE.CylinderGeometry(r1, r0, len, 7);
+        geo.translate(0, len / 2, 0);
+        seg.add(util.mesh(geo, rodMat));
+        seg.userData.len = len;
+        parent.add(seg);
+        segs.push(seg);
+        parent = seg;
+      });
+      const tip = new THREE.Object3D();
+      tip.position.y = 0.55;
+      segs[2].add(tip);
+      const reelM = util.mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.06, 12), util.mat('#3d4a52', { metal: 0.4, rough: 0.4 }));
+      reelM.rotation.z = PI / 2;
+      reelM.position.set(0.06, 0.18, 0.02);
+      const crank = util.mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), util.mat('#ef5b6f'));
+      crank.position.set(0.1, 0.18, 0.02);
+      rod.add(reelM, crank);
+      rod.rotation.x = 0.95;
+      return { rod, segs, tip, crank };
+    };
+    const { rod, segs, tip, crank } = makeRod(has('rod'));
     me.root.add(rod);
 
     const LINE_N = 24;
@@ -189,6 +197,31 @@ export default {
       scene.add(d);
       dots.push(d);
     }
+
+    // ---------------------------------------------------------------- played together: the other one's rod
+    const on = ctx.online;
+    const now = () => on.now();
+    let C = null; // { owner, here, follow, myX, theirX, stars, endReq, ... } once the trip is shared
+    const palRig = makeRod(false);
+    palRig.rod.visible = false;
+    pal.root.add(palRig.rod);
+    const palLineGeo = new THREE.BufferGeometry().setFromPoints(Array.from({ length: LINE_N }, () => new THREE.Vector3()));
+    const palLine = new THREE.Line(palLineGeo, new THREE.LineBasicMaterial({ color: '#fbfaf5', transparent: true, opacity: 0.9 }));
+    palLine.frustumCulled = false;
+    palLine.visible = false;
+    scene.add(palLine);
+    const palFloat = new THREE.Group();
+    {
+      const top = util.mesh(new THREE.SphereGeometry(0.09, 14, 10, 0, PI * 2, 0, PI / 2), util.mat(palIsHomama ? '#5fb4ff' : '#ff8fb1', { rough: 0.35 }), { cast: false });
+      const bot = util.mesh(new THREE.SphereGeometry(0.09, 14, 10, 0, PI * 2, PI / 2, PI / 2), util.mat('#ffffff', { rough: 0.35 }), { cast: false });
+      const stick = util.mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 5), util.mat('#3b2b3f'));
+      stick.position.y = 0.12;
+      palFloat.add(top, bot, stick);
+    }
+    palFloat.visible = false;
+    scene.add(palFloat);
+    const palTipW = new THREE.Vector3();
+    const palEnd = new THREE.Vector3();
 
     // ---------------------------------------------------------------- splashes
     const rings = [];
@@ -321,10 +354,13 @@ export default {
       swimmers.length = 0;
       for (let i = 0; i < 6; i++) spawn();
       const g = GOALS[trip[round]];
-      if (g?.special === 'golden') spawn({ id: 'golden', at: { x: (Math.random() - 0.5) * 16, z: -17 - Math.random() * 6 } });
+      // together, the golden fish and the bottle start in the same place on both piers
+      const r = C ? util.rng((C.seed + round * 7919) >>> 0) : Math.random;
+      if (g?.special === 'golden') spawn({ id: 'golden', at: { x: (r() - 0.5) * 16, z: -17 - r() * 6 } });
       bottleFloat.visible = g?.special === 'bottle';
-      bottle.x = (Math.random() - 0.5) * 12;
-      bottle.z = -9 - Math.random() * 6;
+      bottle.x = (r() - 0.5) * 12;
+      bottle.z = -9 - r() * 6;
+      if (C) bottle.h = 0;
     };
     const bottle = { x: 0, z: -10, h: 0 };
 
@@ -377,6 +413,7 @@ export default {
 
     const headScreen = new THREE.Vector3();
     const palSay = (text, force = false) => {
+      if (C?.here) return; // the other player speaks for themselves
       if (!force && elapsed - lastSay < 5) return;
       lastSay = elapsed;
       pal.head.getWorldPosition(headScreen);
@@ -401,6 +438,7 @@ export default {
 
     // The partner stands up to cheer, then sits back down
     const palCheer = (type = 'cheer') => {
+      if (C?.here) return;
       if (palState.stand > 0) return;
       palState.stand = 2.2;
       pal.carry(null);
@@ -423,6 +461,11 @@ export default {
 
     // ---------------------------------------------------------------- rounds
     const startRound = (i) => {
+      if (C?.owner && C.here) on.send('rstart', { i }); // together: the other pier starts it too
+      if (C) {
+        C.endReq = null;
+        C.endWait = 0;
+      }
       if (reel?.model) reel.model.removeFromParent();
       reel = null;
       ui.reel(false);
@@ -449,13 +492,23 @@ export default {
       else if (i === 0) setTimeout(() => !disposed && palSay(lines.start, true), 3600);
     };
 
-    const endRound = (success) => {
+    // given: the round's end as the starter's copy decided it (together, on the other pier)
+    const endRound = (success, given = null) => {
+      if (C) tidyUp();
       roundDone = true;
       ui.power(null);
       ui.reel(false);
-      const k = timeLeft / limit;
-      const stars = success ? (k >= 0.45 ? 3 : k >= 0.2 ? 2 : 1) : 0;
+      const k = given ? given.k : C?.endReq?.k ?? timeLeft / limit;
+      const stars = given ? given.stars | 0 : success ? (k >= 0.45 ? 3 : k >= 0.2 ? 2 : 1) : 0;
       roundStars[round] = stars;
+      if (C) {
+        // each one's share of the round's stars, for the catches that counted
+        const sh = given?.sh || shareStars(stars);
+        C.stars.roji += sh.roji | 0;
+        C.stars.homama += sh.homama | 0;
+        if (C.owner && C.here && !given) on.send('rend', { i: round, ok: success ? 1 : 0, stars, k, sh });
+        C.endReq = null;
+      }
       hudScore();
       if (success) {
         hud.message(`<span style="font-size:.7em">Goal complete!</span><br><span style="color:#ffd166">${'&#9733;'.repeat(stars)}${'&#9734;'.repeat(3 - stars)}</span>`, 2300);
@@ -469,9 +522,12 @@ export default {
       go('roundEnd');
     };
 
-    const finishTrip = () => {
+    const finishTrip = (given = null) => {
       go('done');
+      if (C && given) for (let i = 0; i < 3; i++) roundStars[i] = given.rs?.[i] | 0;
       const total = roundStars.reduce((a, b) => a + (b || 0), 0);
+      if (C?.owner && C.here) on.send('tend', { rs: roundStars, sh: C.stars });
+      if (C && given?.sh) C.stars = { roji: given.sh.roji | 0, homama: given.sh.homama | 0 };
       const before = stats.total;
       stats.trips += 1;
       stats.total += total;
@@ -480,31 +536,215 @@ export default {
       const fresh = UNLOCKS.filter((u) => before < u.at && stats.total >= u.at);
       const next = UNLOCKS.find((u) => stats.total < u.at);
       const allDone = roundStars.every((s) => s > 0);
-      let text = `You earned <b>${total} of 9 stars</b> today (best ${stats.best}). Fish book: ${bookCount()} of ${FISH.length}.`;
+      let text = C?.here
+        ? `You earned <b>${total} of 9 stars</b> together today (${meName} ${C.stars[ctx.me]}, ${palName} ${C.stars[ctx.partner]}). Fish book: ${bookCount()} of ${FISH.length}.`
+        : `You earned <b>${total} of 9 stars</b> today (best ${stats.best}). Fish book: ${bookCount()} of ${FISH.length}.`;
       if (fresh.length) text += `<br>Unlocked: <b>${fresh.map((u) => u.name).join(', ')}</b>!`;
       else if (next) text += `<br>${next.at - stats.total} more stars for the ${next.name.replace(/ \(.*\)/, '')}.`;
-      ctx.finish({ win: allDone, stars: total, title: allDone ? (total >= 8 ? 'What a catch!' : 'A lovely day out!') : total > 0 ? 'So close!' : 'Back to the harbour', text });
+      // together, each one's share of the stars (the two add up to the day's stars); the card says the score
+      if (C?.here) hud.score('');
+      ctx.finish({ win: allDone, stars: C?.here ? C.stars[ctx.me] : total, title: allDone ? (total >= 8 ? 'What a catch!' : 'A lovely day out!') : total > 0 ? 'So close!' : 'Back to the harbour', text });
     };
 
     // ---------------------------------------------------------------- catching
-    const recordCatch = (id, size) => {
+    // by: who caught it (together, the other one's catches count too); count: false for one that came
+    // in after its round ended
+    const recordCatch = (id, size, by = ctx.me, count = true) => {
       const info = FISH_BY_ID[id];
       const prev = book[id];
       const isNew = !prev;
       book[id] = { n: (prev?.n || 0) + 1, best: Math.max(prev?.best || 0, size) };
       ctx.save('book', book);
       ui.bookCount(bookCount());
-      const c = { id, info, size };
-      got.push(c);
+      const c = { id, info, size, by };
+      if (count) got.push(c);
       const col = ['', '#7a9a8f', '#2f9fb8', '#c76fa8', '#e0a020'][info.rarity];
+      const who = by !== ctx.me ? `<div class="r" style="color:#7a6470">${nameOf(by)} caught one</div>` : '';
       ui.card(
-        `<div class="r" style="color:${col}">${RARITY[info.rarity]}${'&#9733;'.repeat(info.rarity)}</div><h3>${info.name}${isNew ? '<span class="new">New!</span>' : ''}</h3>${info.junk ? '' : `<div class="sz">${size} cm${prev && size > prev.best ? ' &middot; a new best!' : ''}</div>`}<p>${info.line}</p>`,
+        `${who}<div class="r" style="color:${col}">${RARITY[info.rarity]}${'&#9733;'.repeat(info.rarity)}</div><h3>${info.name}${isNew ? '<span class="new">New!</span>' : ''}</h3>${info.junk ? '' : `<div class="sz">${size} cm${prev && size > prev.best ? ' &middot; a new best!' : ''}</div>`}<p>${info.line}</p>`,
         3000,
       );
       return { c, isNew };
     };
 
     const goalCount = () => hudScore();
+
+    // ---------------------------------------------------------------- fishing together
+    // The round's stars split by the catches that counted (the last one breaks a tie)
+    const shareStars = (stars) => {
+      const g = GOALS[trip[round]];
+      const cr = { roji: 0, homama: 0 };
+      let last = ctx.me;
+      const seen = new Set();
+      for (const c of got) {
+        const counts = g.kinds ? !c.info.junk && !seen.has(c.id) : g.ok(c);
+        if (g.kinds) seen.add(c.id);
+        if (counts) {
+          cr[c.by]++;
+          last = c.by;
+        }
+      }
+      const n = cr.roji + cr.homama;
+      if (!n || !stars) return { roji: 0, homama: 0, [last]: stars };
+      const out = { roji: Math.floor((stars * cr.roji) / n), homama: Math.floor((stars * cr.homama) / n) };
+      out[last] += stars - out.roji - out.homama;
+      return out;
+    };
+    // Settle whatever we were doing when a round ends (a fish on the line goes back, one in the hands goes in the bucket)
+    const tidyUp = () => {
+      if (state === 'landing' && landing) {
+        if (!landing.done) {
+          recordCatch(landing.id, landing.size);
+          if (C?.here) on.send('catch', { id: landing.id, size: landing.size, r: round });
+        }
+        me.carry(null);
+        landing.model.removeFromParent();
+        landing = null;
+      }
+      if (reel?.model) reel.model.removeFromParent();
+      reel = null;
+      if (biter && swimmers.includes(biter)) biter.state = 'roam';
+      biter = null;
+      bang.visible = false;
+      float.visible = false;
+      rod.visible = true;
+      line.visible = true;
+      me.hands = 'read';
+    };
+    const standPal = () => {
+      pal.carry(null);
+      pal.pose = 'stand';
+      pal.root.position.set(C.theirX, 0, -0.32);
+      pal.root.rotation.y = PI;
+      pal.head.rotation.y = 0;
+      palRig.rod.visible = true;
+      palLine.visible = true;
+    };
+    const sitPal = () => {
+      if (C?.carry) pal.carry(null);
+      pal.pose = 'sit';
+      pal.root.position.copy(PAL_SEAT);
+      pal.root.rotation.y = PI - 0.45;
+      pal.carry(juice);
+      palRig.rod.visible = false;
+      palLine.visible = false;
+      palFloat.visible = false;
+    };
+    // The other pier's catch: into the fish book and the bucket, and toward the round's goal
+    const theirCatch = (d) => {
+      if (!C || !d || !FISH_BY_ID[d.id]) return;
+      const counts = d.r === round && !roundDone;
+      const size = Math.max(1, Math.min(400, +d.size || 1));
+      recordCatch(d.id, size, ctx.partner, counts);
+      setTimeout(() => {
+        if (disposed) return;
+        const mini = makeFish(d.id, { fresh: true });
+        mini.scale.setScalar(Math.min(0.3, clamp(size / 100, 0.16, 1.15) * 0.6));
+        mini.rotation.set(-PI / 2, 0, Math.random() * PI);
+        mini.position.set((Math.random() - 0.5) * 0.12, 0.3 + bucketFish.length * 0.02, (Math.random() - 0.5) * 0.12);
+        world.bucket.add(mini);
+        bucketFish.push(mini);
+        if (bucketFish.length > 6) bucketFish.shift().removeFromParent();
+      }, 1800);
+      if (C.owner && counts) {
+        const g = GOALS[trip[round]];
+        if (goalCount() >= g.need && !C.endReq?.ok) C.endReq = { ok: true, k: timeLeft / limit };
+      }
+    };
+    const partnerLeft = () => {
+      if (!C?.here) return;
+      C.here = false;
+      C.owner = true; // this pier keeps the rounds and the clock now
+      sitPal();
+      hud.message(`<span style="font-size:.5em">${palName} left the pier</span>`, 2000);
+    };
+    // The trip is shared from here on: both piers fish the same rounds
+    const together = (owner, seed) => {
+      C = { owner, here: true, seed: seed >>> 0, follow: new Follow({ delay: 130, angles: ['a'] }), myX: owner ? 0.32 : -0.72, theirX: owner ? -0.72 : 0.32, stars: { roji: 0, homama: 0 }, endReq: null, endWait: 0, carry: null, carryId: '', pst: null };
+      me.root.position.x = C.myX;
+      PIER_END.x = C.myX;
+      standPal();
+      on.on('state', (st2) => {
+        if (!st2 || typeof st2 !== 'object' || !Number.isFinite(st2.at)) return;
+        C.follow.push(st2);
+        C.pst = st2;
+        // the other pier keeps the clock with the starter's
+        if (!C.owner && Number.isFinite(st2.tl) && st2.rd === round && !roundDone) {
+          const want = st2.tl - Math.max(0, now() - st2.at) / 1000;
+          if (Math.abs(want - timeLeft) > 1.5) timeLeft = want;
+          else timeLeft += (want - timeLeft) * 0.3;
+        }
+      });
+      on.on('catch', theirCatch);
+      on.on('rstart', (d) => !C.owner && Number.isInteger(d?.i) && d.i >= 0 && d.i < 3 && startRound(d.i));
+      on.on('rend', (d) => !C.owner && d?.i === round && !roundDone && endRound(!!d.ok, d));
+      on.on('tend', (d) => !C.owner && state !== 'done' && finishTrip(d || {}));
+      on.on('leave', partnerLeft);
+    };
+    // What this pier shows the other one
+    const shareNow = () => {
+      const s = { at: now(), s: state, a: +aim.toFixed(3), w: +windup.toFixed(3), sn: +snap.toFixed(3), b: state === 'reel' ? 1 : state === 'bite' ? 0.8 : 0, fv: float.visible ? 1 : 0 };
+      const hp = state === 'reel' ? hook : float.position;
+      Object.assign(s, { hx: +hp.x.toFixed(2), hy: +hp.y.toFixed(2), hz: +hp.z.toFixed(2) });
+      if (state === 'landing' && landing?.done) Object.assign(s, { c: landing.id, cl: +landing.len.toFixed(2) });
+      if (C.owner) Object.assign(s, { tl: +timeLeft.toFixed(2), rd: round });
+      on.share(s);
+    };
+    // The other one's kid at their side of the pier: their rod, line and float as their device has them
+    const renderPal = (dt, t) => {
+      const s = C.follow.sample(now());
+      pal.root.position.set(C.theirX, 0, -0.32);
+      if (!s) {
+        pal.update(dt, t, 0, 0, 0);
+        return;
+      }
+      const R = palRig;
+      pal.root.rotation.y = damp(pal.root.rotation.y, PI - (s.a || 0) * 0.5, 6, dt);
+      R.rod.rotation.x = damp(R.rod.rotation.x, 0.95 - (s.w || 0) * 1.4 + (s.sn || 0) * 0.5, 14, dt);
+      R.rod.rotation.z = damp(R.rod.rotation.z, -(s.a || 0) * 0.6, 8, dt);
+      R.segs[1].rotation.x = damp(R.segs[1].rotation.x, (s.b || 0) * 0.55 * 0.35, 10, dt);
+      R.segs[2].rotation.x = damp(R.segs[2].rotation.x, (s.b || 0) * 0.55 * 0.6, 10, dt);
+      pal.hands = s.s === 'reel' ? 'stir' : 'read';
+      pal.update(dt, t, 0, 0, 0);
+      if ((s.w || 0) > 0.05 || (s.sn || 0) > 0) {
+        const a = -1.05 - s.w * 1.3 + s.sn * 0.4;
+        pal.arms[0].rotation.set(a, 0, -0.3);
+        pal.arms[1].rotation.set(a, 0, 0.3);
+      }
+      if (s.s === 'reel') R.crank.rotation.x += dt * 14;
+      // their catch in their hands
+      if (s.c && C.carryId !== s.c) {
+        const m = makeFish(s.c, { fresh: true });
+        m.scale.setScalar(clamp(s.cl || 0.4, 0.16, 1.15));
+        m.position.set(0, 0.02, 0.05);
+        m.rotation.set(0, 0, 0.15);
+        pal.carry(m);
+        C.carry = m;
+        C.carryId = s.c;
+        R.rod.visible = false;
+      } else if (!s.c && C.carryId) {
+        pal.carry(null);
+        C.carry = null;
+        C.carryId = '';
+        R.rod.visible = true;
+      }
+      // their line, from the rod tip to the float (or the fish while reeling)
+      pal.root.updateMatrixWorld(true);
+      R.tip.getWorldPosition(palTipW);
+      const resting = ['aim', 'charge', 'roundIntro', 'roundEnd', 'done', 'intro', 'landing'].includes(s.s) || (!s.fv && s.s !== 'reel');
+      palFloat.visible = !!s.fv && s.s !== 'reel';
+      palFloat.position.set(s.hx, s.s === 'cast' ? s.hy : world.waveY(s.hx, s.hz, t) - (s.s === 'bite' ? 0.14 : 0), s.hz);
+      palLine.visible = !C.carryId;
+      if (resting) palEnd.copy(palTipW).add(tmp.set(0, -0.35, 0));
+      else palEnd.set(s.hx, s.s === 'cast' ? s.hy : palFloat.position.y, s.hz);
+      const slack = s.s === 'wait' ? 0.6 : s.s === 'cast' ? 0.25 : s.s === 'reel' ? 0.02 : 0.05;
+      const p = palLineGeo.attributes.position;
+      for (let i = 0; i < LINE_N; i++) {
+        const u = i / (LINE_N - 1);
+        p.setXYZ(i, lerp(palTipW.x, palEnd.x, u), lerp(palTipW.y, palEnd.y, u) - Math.sin(u * PI) * slack, lerp(palTipW.z, palEnd.z, u));
+      }
+      p.needsUpdate = true;
+    };
 
     // ---------------------------------------------------------------- input
     const ray = new THREE.Raycaster();
@@ -534,10 +774,27 @@ export default {
     const auto = () => window.__fishingAuto === true;
     window.__fishing = {
       get state() {
-        return { state, round, timeLeft: +timeLeft.toFixed(1), got: got.map((c) => c.id), stars: roundStars, trip, weathers, swimmers: swimmers.length };
+        return { state, round, timeLeft: +timeLeft.toFixed(1), got: got.map((c) => c.id), by: got.map((c) => c.by), stars: roundStars, trip, weathers, swimmers: swimmers.length, roundDone, together: C && { owner: C.owner, here: C.here, stars: { ...C.stars }, x: C.myX, their: C.pst?.s || null } };
       },
       skip() {
         timeLeft = 0.5;
+      },
+      // a fish straight into the hands (for the tests)
+      catchNow(id = 'sardine') {
+        const info = FISH_BY_ID[id];
+        if (!info || !['aim', 'wait', 'retrieve'].includes(state)) return false;
+        const size = rollSize(info);
+        const len = clamp(size / 100, 0.16, 1.15);
+        const model = makeFish(id, { fresh: true });
+        model.scale.setScalar(len);
+        model.visible = false;
+        scene.add(model);
+        float.visible = false;
+        biter = null;
+        hook.set(PIER_END.x, SEA, PIER_END.z - 4);
+        reel = { s: { id, size, info }, model, len };
+        startLanding();
+        return true;
       },
       round: (i, id) => {
         if (id) {
@@ -568,14 +825,56 @@ export default {
     let disposed = false;
 
     // Intro card: the day's three goals
+    let card = null;
+    let plan = null;
+    const at = (t) => new Promise((r) => setTimeout(r, Math.max(0, t - now())));
+    // Played together (the other copy): fish the starter's trip next to them
+    const asGuest = async () => {
+      plan?.off();
+      card = waitCard({ title: `${palName} is getting the rods ready`, text: 'You fish side by side at the end of the pier, and every catch counts for both of you.' });
+      const p = await guestPlan(ctx, 'plan', { isGone: () => disposed });
+      card.close();
+      if (disposed) return true;
+      if (p && p !== 'solo' && Array.isArray(p.trip) && p.trip.every((id) => GOALS[id]) && Array.isArray(p.weathers)) {
+        p.trip.forEach((id, i) => (trip[i] = id));
+        p.weathers.forEach((w, i) => (weathers[i] = WEATHER[w] ? w : weathers[i]));
+        together(false, p.seed);
+        world.set(weathers[0], 0.01);
+        await at(p.at);
+        if (!disposed) startRound(0);
+        return true;
+      }
+      return false;
+    };
     setTimeout(async () => {
       if (disposed) return;
+      if (on.inRoom && !on.isHost && (await asGuest())) return;
       const list = trip.map((id, i) => `<b>${i + 1}.</b> ${GOALS[id].text} <small style="color:#9a8890">(${WEATHER[weathers[i]].label.toLowerCase()})</small>`).join('<br>');
       await hud.choose({
         title: "Today's fishing trip",
         text: `${list}<br><span style="font-size:.85em">Hold to cast further. When the float dips, reel. Keep the fish inside the green bar.</span>`,
         options: [{ id: 'go', label: "Let's fish" }],
       });
+      if (disposed) return;
+      // (both opened it at once and the other copy's session won: this one fishes their trip)
+      if (on.inRoom && !on.isHost && (await asGuest())) return;
+      if (on.inRoom && on.isHost) {
+        plan = hostPlan(ctx);
+        const here = await waitForPartner(ctx, { what: 'fish with you', isGone: () => disposed });
+        if (!on.isHost) {
+          if (!(await asGuest()) && !disposed) startRound(0);
+          return;
+        }
+        if (here) {
+          const p = { trip: [...trip], weathers: [...weathers], seed: on.seed, at: now() + 1800 };
+          plan.set(p);
+          together(true, p.seed);
+          await at(p.at);
+          if (!disposed) startRound(0);
+          return;
+        }
+        plan.alone();
+      }
       if (disposed) return;
       startRound(0);
     }, 450);
@@ -757,10 +1056,11 @@ export default {
     const update = (dt, t) => {
       dt *= window.__fishingSpeed || 1;
       elapsed += dt;
-      if (ui.bookOpen || paused) {
+      if ((ui.bookOpen && !C?.here) || paused) {
         world.update(0, t, PIER_END);
         renderKids(0, t);
         updateCamera(dt);
+        if (C?.here) shareNow();
         return;
       }
       if (input.pressed('b')) openBook();
@@ -774,7 +1074,18 @@ export default {
         timeLeft -= dt;
         if (GOALS[trip[round]]?.special === 'golden') world.sinkSun = clamp(1 - timeLeft / limit, 0, 1);
       }
-      if (timeLeft <= 0 && playing && !roundDone) {
+      if (C) {
+        // together: the starter's copy ends a round once neither of them has a fish on the line
+        if (C.owner && !roundDone) {
+          if (timeLeft <= 0 && !C.endReq && (playing || state === 'roundIntro')) C.endReq = { ok: false, k: 0 };
+          if (C.endReq) {
+            C.endWait += dt;
+            const ps = C.here ? C.pst?.s : null;
+            const busy = ['reel', 'landing', 'bite'].includes(state) || ['reel', 'landing', 'bite'].includes(ps);
+            if (!busy || C.endWait > 8) endRound(C.endReq.ok);
+          }
+        }
+      } else if (timeLeft <= 0 && playing && !roundDone) {
         float.visible = false;
         biter = null;
         bang.visible = false;
@@ -954,6 +1265,7 @@ export default {
             L.model.rotation.set(0, 0, 0.15);
             me.carry(L.model);
             const { c, isNew } = recordCatch(L.id, L.size);
+            if (C?.here) on.send('catch', { id: L.id, size: L.size, r: round });
             const info = c.info;
             if (L.id === 'golden') {
               palCheer('spin');
@@ -1003,7 +1315,11 @@ export default {
           landing = null;
           const n = goalCount();
           const g = GOALS[trip[round]];
-          if (n >= g.need && !roundDone) endRound(true);
+          if (C) {
+            // together: the starter's copy ends the round (when neither of them is reeling)
+            if (C.owner && n >= g.need && !roundDone && !C.endReq?.ok) C.endReq = { ok: true, k: timeLeft / limit };
+            go(roundDone ? 'roundEnd' : 'aim');
+          } else if (n >= g.need && !roundDone) endRound(true);
           else if (timeLeft <= 0 && !roundDone) endRound(false);
           else go('aim');
         }
@@ -1017,7 +1333,7 @@ export default {
           go('aim');
         }
       } else if (state === 'roundEnd') {
-        if (st > 2.6) {
+        if (st > 2.6 && (!C || C.owner)) {
           if (round < 2) startRound(round + 1);
           else finishTrip();
         }
@@ -1038,13 +1354,14 @@ export default {
       }
       floatTop.emissiveIntensity = world.weather.night * 0.8;
       floatGlow.material.opacity = world.weather.night * 0.7;
-      if (timeLeft >= 0 && Math.floor(elapsed * 4) !== Math.floor((elapsed - dt) * 4)) hudScore();
+      if (timeLeft >= 0 && Math.floor(elapsed * 4) !== Math.floor((elapsed - dt) * 4) && !(C?.here && state === 'done')) hudScore();
 
       renderKids(dt, t);
       world.update(dt, t, PIER_END);
       updateSwimmers(dt, t);
       updateFx(dt);
       updateCamera(dt);
+      if (C?.here) shareNow();
     };
 
     // ---------------------------------------------------------------- automatic play for tests
@@ -1091,8 +1408,10 @@ export default {
         me.arms[1].rotation.set(a, 0, 0.3);
       }
       me.root.rotation.y = damp(me.root.rotation.y, PI - aim * 0.5, 6, dt);
+      // Together: the other one fishing next to us, as their device has it
+      if (C?.here) renderPal(dt, t);
       // Partner: sitting with a juice box, or standing up to cheer
-      if (palState.stand > 0) {
+      else if (palState.stand > 0) {
         palState.stand -= dt;
         if (palState.stand <= 0) {
           pal.pose = 'sit';
@@ -1101,8 +1420,8 @@ export default {
           pal.carry(juice);
         }
       }
-      pal.update(dt, t, 0, 0, 0);
-      if (pal.pose === 'sit') {
+      if (!C?.here) pal.update(dt, t, 0, 0, 0);
+      if (pal.pose === 'sit' && !C?.here) {
         // Watch the float
         const look = float.visible ? clamp(Math.atan2(hook.x - pal.root.position.x, -(hook.z - pal.root.position.z)) * 0.5 - 0.3, -0.6, 0.6) : -0.2;
         palState.look = damp(palState.look, look, 3, dt);
@@ -1172,8 +1491,9 @@ export default {
       const focusX = state === 'reel' || state === 'wait' || state === 'bite' ? hook.x * 0.35 : Math.sin(aim) * 3;
       const focusZ = state === 'reel' || state === 'wait' || state === 'bite' ? Math.max(-14, hook.z * 0.6) : -8;
       const portrait = innerWidth / innerHeight < 1.4;
-      wantPos.set(2.3 + focusX * 0.2, 3.7 + (portrait ? 1.2 : 0), 5.6 + (portrait ? 2 : 0));
-      wantLook.set(focusX - 0.3, -0.6, focusZ - 3);
+      const shift = C ? C.myX - 0.2 : 0; // together: behind our own kid
+      wantPos.set(2.3 + focusX * 0.2 + shift, 3.7 + (portrait ? 1.2 : 0), 5.6 + (portrait ? 2 : 0));
+      wantLook.set(focusX - 0.3 + shift, -0.6, focusZ - 3);
       camPos.x = damp(camPos.x, wantPos.x, 2.2, dt);
       camPos.y = damp(camPos.y, wantPos.y, 2.2, dt);
       camPos.z = damp(camPos.z, wantPos.z, 2.2, dt);
@@ -1198,6 +1518,8 @@ export default {
       update,
       dispose() {
         disposed = true;
+        card?.close();
+        plan?.off();
         window.removeEventListener('keydown', onKey, true);
         ui.dispose();
         delete window.__fishing;

@@ -9,6 +9,7 @@ import { Street } from './parade/street.js';
 import { Highway, HIT_Z, laneX } from './parade/lanes.js';
 import { Dancer } from './parade/dance.js';
 import { makeUI } from './parade/ui.js';
+import { hostPlan, guestPlan, waitCard, waitForPartner, nameOf as kidName } from './coop/kit.js';
 
 // Roji Land Parade: a rhythm dance game on the parade float with Mimi and Bobo. Arrows slide down the
 // dance carpet to the beat of an original song; hit them as they reach the pads (arrow keys or
@@ -17,6 +18,8 @@ import { makeUI } from './parade/ui.js';
 // a phrase, then you copy it), a part where Roji and Homama dance together, and a finale with
 // confetti and fireworks. Three songs, each faster, with hold notes, two arrows at once and golden
 // notes; stars and a best score per song, and the next song opens with a star on the one before.
+// Played together online it is a real duet: each player dances their own kid from their own device (in
+// the duet part each takes their own turn), and the combo is shared: a miss by either breaks it.
 
 const WIN = { perfect: 0.055, great: 0.1, good: 0.15 };
 const PTS = { perfect: 100, great: 70, good: 40 };
@@ -240,29 +243,87 @@ export default {
       for (const s of SONGS) prog[s.id] = prog[s.id] || { best: 0, stars: 1 };
     };
 
-    choose().then((i) => {
-      if (i < 0 || flow.disposed) return;
+    const startSong = (i, duo = null) => {
       const song = SONGS[i];
       if (song.time !== world.time) {
         world.remove();
         world = buildWorld(song.time);
       }
       flow.preview = null;
-      flow.game = play(song, i);
-    });
+      flow.game = play(song, i, duo);
+    };
+    const ol = ctx.online;
+    const isGone = () => flow.disposed;
+    // Played together (the other copy): dance the starter's song with them, with the same one in front
+    const asGuest = async () => {
+      flow.plan?.off();
+      flow.card = waitCard({ title: `${nameOf(ctx.partner)} is picking a song`, text: 'You dance together on the float, each of you your own steps.' });
+      const p = await guestPlan(ctx, 'plan', { isGone });
+      flow.card.close();
+      if (flow.disposed) return true;
+      if (p && p !== 'solo' && SONGS[p.i] && (p.lead === 'roji' || p.lead === 'homama')) {
+        lead = p.lead;
+        placeRoles(true);
+        startSong(p.i, { at: p.at, owner: false });
+        return true;
+      }
+      return false;
+    };
+    (async () => {
+      if (ol.inRoom && !ol.isHost && (await asGuest())) return;
+      const i = await choose();
+      if (i < 0 || flow.disposed) return;
+      // (both opened it at once and the other copy's session won: this one dances theirs)
+      if (ol.inRoom && !ol.isHost && (await asGuest())) return;
+      if (ol.inRoom && ol.isHost) {
+        flow.plan = hostPlan(ctx);
+        const here = await waitForPartner(ctx, { what: `dance ${SONGS[i].name}`, isGone });
+        if (!ol.isHost) {
+          if (!(await asGuest())) startSong(i);
+          return;
+        }
+        if (here) {
+          const p = { i, lead, at: ol.now() + 4200 };
+          flow.plan.set(p);
+          return startSong(i, { at: p.at, owner: true });
+        }
+        flow.plan.alone();
+      }
+      startSong(i);
+    })();
 
     // ------------------------------------------------ one song
-    function play(song, si) {
+    // duo (played together): { at: the shared start of the count-in, owner }
+    function play(song, si, duo = null) {
       const chart = buildChart(song);
       const notes = chart.notes;
       const partner = other(lead);
       const band = new Band(sound, { me: lead, partner });
       band.load(chart.music);
       if (song.time === 'night') for (const n of notes) if (n.special) n.gold = true;
+      // A duet: each player dances their own kid. Everyone plays every note, except in the duet part
+      // where each takes their own turn; on this device 'me' is ours, 'partner' the other player's.
+      const D = duo && {
+        lead: ctx.me === lead,
+        here: true,
+        mineD: dancers[ctx.me],
+        theirD: dancers[other(ctx.me)],
+        them: null, // their latest shared state
+        seenHits: new Set(),
+        sentHits: [],
+        misses: 0,
+        theirMisses: 0,
+        fin: null,
+        at: duo.at,
+      };
+      if (D && !D.lead) for (const n of notes) if (chart.sections[n.sec].kind === 'duet') n.owner = n.owner === 'partner' ? 'me' : 'partner';
       const mine = notes.filter((n) => n.owner !== 'partner');
       const total = mine.length + mine.filter((n) => n.end).length;
-      const st = { t: -(chart.countIn + 0.8), phase: 'count', score: 0, combo: 0, maxCombo: 0, acc: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, holds: 0, missRow: 0, head: 0, sec: -1, bar: -1, endT: 0, lastBubble: -99, twirl: 0, clapI: 0, milestone: 0, hitsAt: new Map() };
+      const st = { t: -(chart.countIn + 0.8) - (D ? Math.max(0, D.at - ctx.online.now()) / 1000 : 0), phase: 'count', score: 0, combo: 0, maxCombo: 0, acc: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, holds: 0, missRow: 0, head: 0, sec: -1, bar: -1, endT: 0, lastBubble: -99, twirl: 0, clapI: 0, milestone: 0, hitsAt: new Map() };
       dbg.st = st;
+      dbg.duo = D;
+      dbg.combo = () => combo();
+      dbg.team = () => teamScore();
       dbg.notes = notes;
       dbg.chart = chart;
       hud.title('Roji Land Parade', song.name);
@@ -274,10 +335,14 @@ export default {
       const fireworks = new Fireworks(rig, { area: { x: 0, z: -18, w: 28, h0: 7.5, h1: 12.5, depth: 6, ground: 2 }, size: song.time === 'night' ? 0.75 : 0.6, sound, listener: () => 0.75 });
       const leadD = dancers[lead];
       const partD = dancers[partner];
+      // who our hits move, and who the other player's hits (or the computer) move
+      const myD = D ? D.mineD : leadD;
+      const theirD = D ? D.theirD : partD;
       leadD.mode = 'dance';
       partD.mode = 'dance';
       partD.groove = 0.45;
       const say = (kind) => {
+        if (D?.here) return; // the other player is a person: no lines for them
         if (st.t - st.lastBubble < 4) return;
         st.lastBubble = st.t;
         ui.bubble(pick(LINES[partner][kind]), 1.9);
@@ -351,10 +416,20 @@ export default {
       });
 
       // ---------------------------------------- scoring
-      const mult = () => 1 + Math.min(3, Math.floor(st.combo / 10));
-      const showScore = () => hud.score(`${st.score.toLocaleString('en')} <span style="font-weight:400;font-size:.8em">points</span>`);
+      // together the combo is shared (our run plus theirs since the last miss by either) and the score
+      // badge shows both scores added up
+      const combo = () => st.combo + (D?.here && D.them ? D.them.cb | 0 : 0);
+      const mult = () => 1 + Math.min(3, Math.floor(combo() / 10));
+      const teamScore = () => st.score + (D?.here && D.them ? D.them.sc | 0 : 0);
+      let shownScore = -1;
+      const showScore = () => {
+        const n = teamScore();
+        if (n === shownScore) return;
+        shownScore = n;
+        hud.score(`${n.toLocaleString('en')} <span style="font-weight:400;font-size:.8em">points</span>`);
+      };
       showScore();
-      const level = () => Math.min(1, st.combo / 30);
+      const level = () => Math.min(1, combo() / 30);
       const wp = new THREE.Vector3();
       const screenOf = (x, y, z) => {
         wp.set(x, y, z);
@@ -380,7 +455,7 @@ export default {
         n.grade = grade;
         st.counts[grade]++;
         st.combo++;
-        st.maxCombo = Math.max(st.maxCombo, st.combo);
+        st.maxCombo = Math.max(st.maxCombo, combo());
         st.missRow = 0;
         st.acc += WEIGHT[grade];
         const pts = PTS[grade] * (n.special ? 2 : 1) * mult();
@@ -391,20 +466,21 @@ export default {
         flt.flashTile(n.lane);
         const p = screenOf(laneX(n.lane), 0.95, HIT_Z);
         ui.judge(p.x, p.y, grade, WORD[grade]);
-        ui.combo(st.combo, mult());
+        ui.combo(combo(), mult());
         showScore();
         // the dance move: two arrows at once make a bigger move
         const pair = n.double ? notes.find((o) => o !== n && o.double && Math.abs(o.t - n.t) < 0.001) : null;
         let mv = n.lane;
         if (pair?.done && Math.abs((st.hitsAt.get(pair.id) ?? -9) - at) < 0.15) mv = (n.lane === 0 || n.lane === 3) && (pair.lane === 0 || pair.lane === 3) ? 'wide' : 'star';
         st.hitsAt.set(n.id, at);
-        leadD.move(mv);
-        if (n.owner === 'both') partD.move(typeof mv === 'number' ? 3 - mv : mv);
+        myD.move(mv);
+        if (n.owner === 'both' && !D?.here) theirD.move(typeof mv === 'number' ? 3 - mv : mv);
+        if (D) D.sentHits.push([n.id, mv, ctx.online.now()]);
         if (n.end) {
           n.holding = true;
           n.holdLane = n.lane;
           if (secs[n.sec].kind === 'together') startTwirl();
-          else leadD.spinning = true;
+          else myD.spinning = true;
         }
         if (n.special) {
           const m = n.lane < 2 ? flt.mimi : flt.bobo;
@@ -412,25 +488,32 @@ export default {
           fx.heartsAt(worldOf(m.x, 3.4, -3.8), 3);
           if (n.gold) fireworks.launch(Math.random() < 0.5 ? 'peony' : 'ring', { x: (Math.random() - 0.5) * 18, z: -18, y: 8 + Math.random() * 4 }, ['#ffd166', '#fff3c4']);
         }
-        const ms = Math.floor(st.combo / 25);
+        checkMilestone();
+        if (st.combo === 12) say('cheer');
+      };
+      const checkMilestone = () => {
+        const ms = Math.floor(combo() / 25);
         if (ms > st.milestone) {
           st.milestone = ms;
           milestone();
-          ui.banner(`${st.combo} in a row!`, 1300);
+          ui.banner(`${combo()} in a row!`, 1300);
           if (Math.random() < 0.6) say('cheer');
         }
-        if (st.combo === 12) say('cheer');
       };
       const miss = (n) => {
         n.missed = true;
         st.counts.miss++;
-        if (st.combo >= 10) band.aww();
+        if (combo() >= 10) band.aww();
         st.combo = 0;
+        if (D) {
+          D.misses++;
+          D.sentHits.push([n.id, 'miss', ctx.online.now()]);
+        }
         st.missRow++;
         ui.combo(0, 1);
         band.setLead(false);
         band.miss();
-        leadD.move('miss');
+        myD.move('miss');
         const p = screenOf(laneX(n.lane), 0.95, HIT_Z);
         ui.judge(p.x, p.y, 'miss', WORD.miss);
         if (st.missRow === 3) {
@@ -450,7 +533,7 @@ export default {
           ui.judge(p.x, p.y, 'hold', 'Held!');
           band.hit(n.lane, 'perfect');
         } else n.broken = true;
-        leadD.spinning = false;
+        myD.spinning = false;
         if (st.twirl > 0 && secs[n.sec].kind === 'together') stopTwirl(ok);
       };
 
@@ -473,6 +556,7 @@ export default {
       const finale = () => {
         st.phase = 'finale';
         st.endT = 0;
+        if (D?.here) ctx.online.send('fin', { sc: st.score, a: Math.round(st.acc * 100) / 100, n: total });
         world.street.cheer(3);
         band.cheer(1.3);
         for (const s of [-1, 1]) fx.burst(worldOf(s * 2.3, 1.6, -1.6), ['#ff6f9a', '#ffd166', '#5fb4ff', '#7fd8bf', '#c7a6ff', '#ffffff'], 60);
@@ -481,8 +565,12 @@ export default {
         ui.show(false);
         hud.hint('');
       };
-      const results = () => {
-        const acc = total ? st.acc / total : 0;
+      const results = async () => {
+        // together: the other player's final numbers, so both cards say the same
+        if (D?.here && !D.fin) await new Promise((r) => ((D.finWait = r), setTimeout(r, 4000)));
+        if (flow.disposed) return;
+        const F = D?.here && D.fin ? { sc: D.fin.sc | 0, a: +D.fin.a || 0, n: D.fin.n | 0 } : null;
+        const acc = F ? (st.acc + F.a) / Math.max(1, total + F.n) : total ? st.acc / total : 0;
         const stars = acc >= 0.9 ? 3 : acc >= 0.75 ? 2 : acc >= 0.5 ? 1 : 0;
         const old = prog[song.id] || { best: 0, stars: 0 };
         const rec = { best: Math.max(old.best, st.score), stars: Math.max(old.stars, stars) };
@@ -493,6 +581,19 @@ export default {
         const L = nameOf(lead);
         const line = stars === 3 ? 'Mimi and Bobo want Roji and Homama in every parade now.' : stars === 2 ? 'The whole street danced along.' : stars === 1 ? 'Roji is still smiling. Homama is still holding her hand.' : `${L} will get it next time. One more go?`;
         const c = st.counts;
+        if (F) {
+          const team = st.score + F.sc;
+          hud.score(''); // (the card says the score)
+          const them = nameOf(other(ctx.me));
+          ctx.finish({
+            win: stars > 0,
+            score: st.score,
+            stars,
+            title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a parade!',
+            text: `${team.toLocaleString('en')} points together: you ${st.score.toLocaleString('en')}, ${them} ${F.sc.toLocaleString('en')}.<br>Perfect ${c.perfect}, great ${c.great}, good ${c.good}, missed ${c.miss}. Longest combo ${st.maxCombo}.<br>${line}${next}`,
+          });
+          return;
+        }
         ctx.finish({
           win: stars > 0,
           score: st.score,
@@ -536,6 +637,62 @@ export default {
       say('start');
       const tip = document.body.classList.contains('touch') ? 'Tap a lane as its arrow reaches the pad' : 'Press each arrow key as its arrow reaches the pad';
 
+      // ---------------------------------------- together: our steps for the other device, theirs from it
+      const duoTick = () => {
+        const t0 = ctx.online.now();
+        D.sentHits = D.sentHits.filter((h) => t0 - h[2] < 1600);
+        const a = Math.round(st.acc * 100) / 100;
+        ctx.online.share({ at: t0, sc: st.score, cb: st.combo, m: D.misses, a, n: total, h: D.sentHits.map((h) => [h[0], h[1]]) });
+        const s = D.them;
+        if (!s || !D.here) return;
+        for (const [id, mv] of Array.isArray(s.h) ? s.h : []) {
+          if (D.seenHits.has(id) || !notes[id]) continue;
+          D.seenHits.add(id);
+          const n = notes[id];
+          if (mv === 'miss') {
+            theirD.move('miss');
+            continue;
+          }
+          theirD.move(typeof mv === 'number' || mv === 'wide' || mv === 'star' ? mv : n.lane);
+          // their own turn on our carpet lights up as they dance it
+          if (n.owner === 'partner') {
+            lanes.hitFx(n.lane, 'great', '#c7a6ff');
+            lanes.press[n.lane] = 1;
+          }
+        }
+        // a miss on their side breaks our run too
+        if ((s.m | 0) > D.theirMisses) {
+          D.theirMisses = s.m | 0;
+          if (st.combo > 0 || combo() > 0) {
+            st.combo = 0;
+            ui.combo(combo(), mult());
+          }
+        }
+        showScore();
+        if (combo() !== D.shownCombo) {
+          D.shownCombo = combo();
+          ui.combo(combo(), mult());
+        }
+        checkMilestone();
+      };
+      if (D) {
+        ctx.online.on('state', (s) => {
+          if (s && typeof s === 'object' && Number.isFinite(s.at)) D.them = s;
+        });
+        ctx.online.on('fin', (d) => {
+          if (d && typeof d === 'object') D.fin = d;
+          D.finWait?.();
+        });
+        ctx.online.on('skip', (d) => Number.isFinite(d?.at) && (D.at = d.at));
+        ctx.online.on('leave', () => {
+          D.finWait?.();
+          if (!D.here) return;
+          D.here = false;
+          ui.banner(`${nameOf(other(ctx.me))} left the float. Keep dancing!`, 2600);
+          showScore();
+        });
+      }
+
       const auto = () => dbg.auto === true;
       return {
         update(dt, t) {
@@ -543,6 +700,13 @@ export default {
           const sdt = dt * sp;
           const prevT = st.t;
           st.t += sdt; // (after the last note it keeps the dancers on the beat)
+          // together: both songs run on the shared clock
+          if (D && st.phase !== 'done') {
+            const want = (ctx.online.now() - D.at) / 1000 - (chart.countIn + 0.8);
+            if (Math.abs(want - st.t) > 0.25) st.t = want;
+            else st.t += (want - st.t) * Math.min(1, dt * 2);
+          }
+          if (D) duoTick();
           if (st.phase === 'count') {
             // the count-in clicks: 3, 2, 1, dance
             const ci = Math.floor((st.t + chart.countIn) / (chart.countIn / 4));
@@ -604,10 +768,11 @@ export default {
             for (let i = st.head; i < notes.length; i++) {
               const n = notes[i];
               if (n.t > st.t) break;
-              // the partner's turn in the duet: they dance it on time
+              // the partner's turn in the duet: they dance it on time (together, from their own device)
               if (n.owner === 'partner' && !n.done) {
                 n.done = true;
-                partD.move(n.lane);
+                if (D?.here) continue;
+                theirD.move(n.lane);
                 lanes.hitFx(n.lane, 'great', '#c7a6ff');
                 lanes.press[n.lane] = 1;
                 continue;
@@ -633,7 +798,7 @@ export default {
               const S = secs[si2];
               let text = S.label;
               if (S.kind === 'intro' && si === 0) text = tip;
-              if (S.kind === 'duet') text = `Duet! ${nameOf(partner)} dances first, then you copy`;
+              if (S.kind === 'duet') text = D && !D.lead ? `Duet! You dance first, then ${nameOf(lead)} copies` : `Duet! ${nameOf(partner)} dances first, then you copy`;
               if (S.kind === 'together') text = `Together! ${nameOf(lead)} and ${nameOf(partner)}`;
               ui.banner(text, S.kind === 'intro' && si === 0 ? 3600 : 2200);
               if (S.kind === 'chorus' || S.kind === 'finale') flt.mimi.waveT = flt.bobo.waveT = 1.6;
@@ -662,7 +827,7 @@ export default {
               if (key !== st.turnKey) {
                 st.turnKey = key;
                 // (the duet's own banner already says who goes first)
-                if (barI > 0) ui.banner(owner === 'partner' ? `${nameOf(partner)}\u2019s turn` : 'Your turn: copy it!', 1500);
+                if (barI > 0) ui.banner(D && !D.lead ? (owner === 'partner' ? 'Your turn!' : `${nameOf(lead)}\u2019s turn`) : owner === 'partner' ? `${nameOf(partner)}\u2019s turn` : 'Your turn: copy it!', 1500);
                 if (owner === 'partner' && barI === 0) say('call');
               }
             } else if (S.kind === 'together') {
@@ -674,7 +839,7 @@ export default {
             } else if (!st.twirl) {
               placeRoles();
               leadD.mode = 'dance';
-              partD.mode = st.combo >= 8 ? 'dance' : 'clap';
+              partD.mode = st.combo >= 8 || D?.here ? 'dance' : 'clap';
               partD.groove = 0.45;
             }
             // song 1 has no holds: Homama twirls Roji in the rest after the last note of "together"
@@ -739,6 +904,11 @@ export default {
     dbg.skip = (sec) => {
       const g = flow.game;
       if (!g || !dbg.st) return;
+      // together: both songs jump (the starter's copy moves the shared start)
+      if (dbg.duo && sec > dbg.st.t) {
+        dbg.duo.at -= (sec - dbg.st.t) * 1000;
+        ctx.online.send('skip', { at: dbg.duo.at });
+      }
       dbg.st.t = Math.max(dbg.st.t, sec);
     };
     Object.defineProperty(dbg, 'state', {
@@ -752,6 +922,8 @@ export default {
       },
       dispose() {
         flow.disposed = true;
+        flow.card?.close();
+        flow.plan?.off();
         flow.game?.dispose();
         for (const off of listeners) off();
         ui.remove();

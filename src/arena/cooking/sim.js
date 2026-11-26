@@ -4,6 +4,9 @@ import { partMesh, plateGeo, panGeo, potGeo, jugGeo, extGeo, fillMesh, VC, VC_SH
 
 // The game state of one shift: food and plates, stations, both chefs, orders, fire and the score.
 // The view (kitchen.js) shows stations; this file owns the items and moves the chefs.
+// Played together online: a chef with `net` is moved by the other player's device (only its actions
+// run here), and a Sim with `mirror` (the other copy) moves only its own chef and passes its actions to
+// onUse, while the starter's copy sends what the kitchen looks like.
 
 export const R = 0.3; // a chef's radius
 export const SPEED = 4.3;
@@ -499,6 +502,18 @@ export class Sim {
     const W = this.world;
     const moved = W.update(dt);
     if (moved) this.emit('grid', {});
+    if (this.mirror) {
+      // the other copy: the starter's copy runs the kitchen; here only our own chef moves
+      if (this.running) {
+        this.time = Math.max(0, this.time - dt);
+        for (const o of this.orders) o.t = Math.max(0, o.t - dt);
+      }
+      this.beltView();
+      for (const c of this.chefs) if (!c.net) this.moveChef(c, dt);
+      this.pushApart(dt);
+      for (const c of this.chefs) if (!c.net) this.unstick(c);
+      return;
+    }
     if (this.running) {
       this.time = Math.max(0, this.time - dt);
       // orders
@@ -643,6 +658,19 @@ export class Sim {
     }
     this.onFire = any;
   }
+  // the other copy: items ride the belt where the starter's copy says they are
+  beltView() {
+    const B = this.world.belt;
+    if (!B) return;
+    for (const q of B) {
+      const it = q.item;
+      if (!it || it.cell !== q) continue;
+      const a = this.world.pos(q);
+      const b = q.next ? this.world.pos(q.next) : a;
+      const k = q.next ? Math.min(it.beltT, 1) : 0;
+      it.obj.position.set((b.x - a.x) * k, ITEM_Y.belt, (b.z - a.z) * k);
+    }
+  }
   belt(dt) {
     const B = this.world.belt;
     if (!B) return;
@@ -684,6 +712,14 @@ export class Sim {
     c.dashCd -= dt;
     c.bumpT -= dt;
     c.sayT -= dt;
+    if (c.net) {
+      // moved by the other player's device: only what they pick up, put down, chop or wash happens here
+      if (k.use && this.running) this.use(c);
+      k.use = false;
+      if (k.work && this.running) this.work(c, dt);
+      else c.working = null;
+      return;
+    }
     // ride a moving truck or tile
     const under = W.at(c.x, c.z);
     if (under) {
@@ -738,11 +774,16 @@ export class Sim {
       c.vz *= ice ? -0.3 : 0;
     }
     c.speed = Math.hypot(c.vx, c.vz);
-    // actions
-    if (k.use && this.running) this.use(c);
-    k.use = false;
-    if (k.work && this.running) this.work(c, dt);
-    else c.working = null;
+    // actions (the other copy hands them to the starter's copy)
+    if (this.mirror) {
+      if (k.use && this.running) this.onUse?.(c);
+      k.use = false;
+    } else {
+      if (k.use && this.running) this.use(c);
+      k.use = false;
+      if (k.work && this.running) this.work(c, dt);
+      else c.working = null;
+    }
     // hop (happy jumps)
     if (c.hop > 0 || c.hopV) {
       c.hopV -= 20 * dt;
@@ -767,8 +808,8 @@ export class Sim {
     const ux = dx / d;
     const uz = dz / d;
     const rel = (a.vx - b.vx) * ux + (a.vz - b.vz) * uz;
-    // the computer chef gives way to a person
-    const wa = a.ctrlKind === 'ai' && b.ctrlKind !== 'ai' ? 1.6 : b.ctrlKind === 'ai' && a.ctrlKind !== 'ai' ? 0.4 : 1;
+    // the computer chef gives way to a person; a chef moved by the other device is moved there only
+    const wa = a.net ? 0 : b.net ? 2 : a.ctrlKind === 'ai' && b.ctrlKind !== 'ai' ? 1.6 : b.ctrlKind === 'ai' && a.ctrlKind !== 'ai' ? 0.4 : 1;
     const wb = 2 - wa;
     if (this.world.fits(a.x - ux * push * wa, a.z - uz * push * wa, R)) {
       a.x -= ux * push * wa;
@@ -778,14 +819,14 @@ export class Sim {
       b.x += ux * push * wb;
       b.z += uz * push * wb;
     }
-    if (rel > 2.2 && a.bumpT <= 0 && b.bumpT <= 0) {
+    if (rel > 2.2 && a.bumpT <= 0 && b.bumpT <= 0 && !this.mirror) {
       a.bumpT = b.bumpT = 1.6;
       this.emit('bump', { a, b });
     }
   }
   // A sliding counter or an opening hatch nudges any chef standing in its way.
   unstick(c) {
-    if (this.world.fits(c.x, c.z, R)) return;
+    if (c.net || this.world.fits(c.x, c.z, R)) return;
     const s = this.world.at(c.x, c.z);
     const dir = s && s.sec ? { x: Math.sign(this.world.sections[s.sec].dx) || 0, z: 0 } : null;
     const p = this.world.nearestFit(c.x, c.z, R, dir);

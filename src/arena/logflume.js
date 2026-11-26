@@ -8,6 +8,7 @@ import { makeCrew, makeSfx, snapPhoto, flash } from './logflume/rig.js';
 import { runSplashRound } from './logflume/splashround.js';
 import { kit } from '../places/school/kit.js';
 import { Fireworks } from '../places/park/fireworks.js';
+import { hostPlan, guestPlan, waitCard, waitForPartner, countTo, History, Follow, halves, nameOf, settleFinal } from './coop/kit.js';
 
 // Roji Land's Log Flume: Roji and Homama ride a smiling log boat down a winding water channel.
 // Lean left and right to catch stars and fruit, reach up for the ones on balloons, duck under low
@@ -15,6 +16,8 @@ import { Fireworks } from '../places/park/fireworks.js';
 // hill and down the drop into the splash lagoon (Homama shields Roji, or they both get soaked), with a
 // ride photo. Three rides open with stars (Jungle Falls, Castle Moat, Firefly Night) and a splash round
 // where you aim water at targets on the banks. Debug hook: window.__logflume (auto, speed, finishNow).
+// Played together online, both ride the same log: one steers, the other grabs the pickups as they pass
+// and ducks under the branches. The starter's copy runs the log and decides what was caught.
 
 const VALUE = { star: 1, fruit: 2, heart: 3, gold: 5 };
 const LANE = 0.95;
@@ -96,13 +99,63 @@ export default {
         return mode;
       }
     };
-    menu().then((mode) => {
-      if (!mode || flow.disposed) return;
+    const go = (mode, coop = null) => {
       const keep = mode.id === 'jungle' ? flow.preview.take() : null;
       flow.preview?.remove();
       flow.preview = null;
-      flow.cur = mode.id === 'splash' ? runSplashRound(ctx, { prog, flow, dbg, rider: flow.rider }) : runRide(ctx, mode, { prog, flow, dbg, rider: flow.rider, keep });
-    });
+      // together, the one who grabs and ducks is the crew's "me" (the steerer leans the log)
+      const rider = coop ? (coop.steer === 'roji' ? 'homama' : 'roji') : flow.rider;
+      flow.cur = mode.id === 'splash' ? runSplashRound(ctx, { prog, flow, dbg, rider: flow.rider }) : runRide(ctx, mode, { prog, flow, dbg, rider, keep, coop });
+    };
+    const on = ctx.online;
+    const gone = () => flow.disposed;
+    // Played together (the other copy): ride the starter's course in the same log, in the role they picked
+    const asGuest = async () => {
+      flow.plan?.off();
+      flow.card = waitCard({ title: `${name(ctx.partner)} is picking a ride`, text: 'You ride together in the same log: one steers, one grabs and ducks.' });
+      const plan = await guestPlan(ctx, 'plan', { isGone: gone });
+      flow.card.close();
+      if (flow.disposed) return true;
+      const mode = plan && plan !== 'solo' && COURSES.find((m) => m.id === plan.mode);
+      if (mode) return go(mode, { ...plan, owner: false }), true;
+      return false;
+    };
+    (async () => {
+      if (on.inRoom && !on.isHost && (await asGuest())) return;
+      const mode = await menu();
+      if (!mode || flow.disposed) return;
+      // (both opened it at once and the other copy's session won: this one rides theirs)
+      if (on.inRoom && !on.isHost && mode.id !== 'splash' && (await asGuest())) return;
+      if (on.inRoom && on.isHost && mode.id !== 'splash') {
+        flow.plan = hostPlan(ctx);
+        const here = await waitForPartner(ctx, { what: `ride ${mode.name}`, isGone: gone });
+        if (!on.isHost) {
+          if (!(await asGuest())) go(mode);
+          return;
+        }
+        if (here) {
+          const role = await hud.choose({
+            title: 'Who steers?',
+            text: 'One of you steers the log, the other grabs the stars and fruit as they pass and ducks under the branches.',
+            options: [
+              { id: `steer-${ctx.me}`, label: `${name(ctx.me)} steers`, sub: `${name(ctx.partner)} grabs and ducks` },
+              { id: `steer-${ctx.partner}`, label: `${name(ctx.partner)} steers`, sub: `${name(ctx.me)} grabs and ducks` },
+            ],
+          });
+          if (flow.disposed) return;
+          if (role && on.partnerHere) {
+            const plan = { mode: mode.id, steer: role.slice(6), seed: on.seed % 100000, at: on.now() + 4600 };
+            flow.plan.set(plan);
+            return go(mode, { ...plan, owner: true });
+          }
+        }
+        flow.plan.alone();
+      } else if (on.inRoom && on.isHost) {
+        flow.plan = hostPlan(ctx);
+        flow.plan.alone(); // the splash round: each plays their own
+      }
+      go(mode);
+    })();
     return {
       update(dt, t) {
         dt = Math.min(0.1, dt) * (dbg.speed || 1);
@@ -111,6 +164,8 @@ export default {
       },
       dispose() {
         flow.disposed = true;
+        flow.card?.close();
+        flow.plan?.off();
         flow.cur?.dispose?.();
         flow.preview?.dispose?.();
         clearTimeout(sayTimer);
@@ -203,7 +258,14 @@ function flowSpeed(track, course) {
 }
 
 // ------------------------------------------------------------------ a ride down the flume
-function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
+// Together: how long a grab reaches out (ms), and how long the log's copy waits for the other player's
+// steering, grab or duck before it decides what they took part in
+const GRAB = 600;
+const GRACE = 400;
+
+// coop (played together): { steer: the kid who steers, seed, at: the shared start, owner: true on the
+// copy that runs the log and decides what was caught }
+function runRide(ctx, course, { prog, flow, dbg, rider, keep, coop = null }) {
   const { scene, camera, hud, input, sound, fx } = ctx;
   const k = kit();
   const TH = THEMES[course.time];
@@ -251,7 +313,7 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
   log.body.add(shield);
   const fireworks = night ? new Fireworks(scene, { area: { x: 0, z: 0, w: 26, h0: 12, h1: 19, depth: 8, ground: 1 }, size: 0.8, sound, listener: () => 0.7 }) : null;
   const R = (() => {
-    let a = 7 + Math.floor(Math.random() * 100000);
+    let a = 7 + (coop ? coop.seed : Math.floor(Math.random() * 100000));
     return () => ((a = (a * 16807) % 2147483647) / 2147483647);
   })();
   const parts = spans(track);
@@ -402,10 +464,48 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     st.d = endD - 0.5;
   };
   const comboMul = () => (st.combo >= 12 ? 3 : st.combo >= 5 ? 2 : 1);
-  const showScore = () => hud.score(`${st.score} <span style="font-weight:400;font-size:.8em">${st.score === 1 ? 'point' : 'points'}</span>${comboMul() > 1 ? ` <span style="color:#ef5b6f">x${comboMul()}</span>` : ''}`);
+  let shownScore = '';
+  const showScore = () => {
+    const html = `${st.score} <span style="font-weight:400;font-size:.8em">${st.score === 1 ? 'point' : 'points'}</span>${comboMul() > 1 ? ` <span style="color:#ef5b6f">x${comboMul()}</span>` : ''}`;
+    if (html === shownScore) return;
+    shownScore = html;
+    hud.score(html);
+  };
   showScore();
-  hud.hint('A and D (or arrows) lean, S or Space ducks, W reaches up');
-  hud.buttons({ action: 'Duck', jump: null, extra: [{ id: 'reach', label: 'Reach' }] });
+  // Played together: who steers, who grabs and ducks, their inputs over time, and what was decided
+  const C = coop && {
+    owner: !!coop.owner,
+    steerer: coop.steer,
+    catcher: coop.steer === 'roji' ? 'homama' : 'roji',
+    mine: coop.steer === ctx.me ? 'steer' : 'catch',
+    here: true,
+    xH: new History(5000), // the log's place across the channel
+    duckH: new History(5000),
+    follow: new Follow({ delay: 120 }),
+    grabs: [],
+    grabAt: -1e9,
+    duckOn: false,
+    duckLog: [], // [when, 0 | 1] the catcher's duck going down and up
+    pts: { roji: 0, homama: 0 },
+    pend: [], // things passed that wait for a decision
+    res: [], // [key, 1 | 0, when]: 'i<n>' an item, 'o<n>' an obstacle
+    seen: new Set(),
+    ownerSt: null,
+  };
+  dbg.C = C;
+  items.forEach((it, i) => (it.i = i));
+  obstacles.forEach((o, i) => (o.i = i));
+  const now = () => ctx.online.now();
+  if (!C) {
+    hud.hint('A and D (or arrows) lean, S or Space ducks, W reaches up');
+    hud.buttons({ action: 'Duck', jump: null, extra: [{ id: 'reach', label: 'Reach' }] });
+  } else if (C.mine === 'steer') {
+    hud.hint(`A and D (or the arrows) steer. ${name(C.catcher)} grabs and ducks.`);
+    hud.buttons({ action: null, jump: null });
+  } else {
+    hud.hint(`Space (or a tap) grabs each one as it reaches you, S ducks. ${name(C.steerer)} steers.`);
+    hud.buttons({ action: 'Grab', jump: null, extra: [{ id: 'duck', label: 'Duck' }], stick: false });
+  }
   const me = crew.me;
   const pal = crew.pal;
   const meName = name(rider);
@@ -444,13 +544,252 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     st.told[key] = true;
     hud.message(text, 1300);
   };
+  // a pickup caught (score: false on the other copy, which takes the score from the log's copy)
+  const gotItem = (it, score = true) => {
+    it.got = true;
+    if (score) {
+      st.combo++;
+      st.bestCombo = Math.max(st.bestCombo, st.combo);
+      const pts = VALUE[it.kind] * comboMul();
+      st.score += pts;
+      st.got++;
+      st.gotPts += VALUE[it.kind];
+      if (C) {
+        const [a, b] = halves(pts, false);
+        C.pts[C.steerer] += a;
+        C.pts[C.catcher] += b;
+      }
+    }
+    itemPos(it, tmpI, frameT);
+    const cols = it.kind === 'heart' ? ['#ff5d7a', '#ffd1dc', '#ffffff'] : it.kind === 'fruit' ? (night ? ['#f4ff9a', '#d8ff7a', '#ffffff'] : ['#ffb347', '#ef3b4f', '#ffe066', '#ffffff']) : ['#ffd166', '#fff3c4', '#ffffff'];
+    fx.burst(tmpI, cols, it.kind === 'gold' ? 26 : 14);
+    if (it.kind === 'heart') {
+      fx.heartsAt(tmpI, 3);
+      crew.st.heart = 1;
+      sfx.sweet();
+    } else sound.ui(it.kind === 'star' ? 'coin' : 'good');
+    if (st.combo === 5 || st.combo === 12) {
+      hud.message(`Combo x${comboMul()}!`, 900);
+      crew.st.cheer = 1;
+    }
+    showScore();
+  };
+  const missItem = (it, score = true) => {
+    it.missed = true;
+    if (st.combo >= 5) hud.message('Combo lost', 700);
+    if (score) st.combo = 0;
+    showScore();
+  };
+  const tmpI = new THREE.Vector3();
+  let frameT = 0;
+  // Did the log get past an obstacle? x: where it was across the channel, ducked: the duck was down
+  const passed = (o, x, ducked, jetFire) => {
+    const lane = Math.round(clamp(x, -1, 1));
+    if (o.type === 'duck') return ducked;
+    if (o.type === 'falls') return lane === o.dry;
+    if (o.type === 'jet') return !(jetFire && Math.abs(x - o.jet.target) < 0.6);
+    if (o.type === 'float') return Math.abs(x - o.lane) < 0.62 ? false : true;
+    return true;
+  };
+  // What happens for it. score: change the score (the log's copy), push: bounce the log (where it is steered)
+  const outcome = (o, ok, x, { score = true, push = true } = {}) => {
+    o.decided = true;
+    const give = (pts, text) => {
+      if (score) {
+        award(pts, text);
+        if (C) C.pts[o.type === 'duck' ? C.catcher : C.steerer] += pts;
+      } else if (text) hud.message(text, 800);
+    };
+    const hurt = (text, wet = false) => {
+      if (!score) {
+        if (wet) {
+          st.wetT = 3.5;
+          sfx.splash(0.7);
+          headPos(me, v);
+          water.spray(v.add(v2.set(0, 0.6, 0)), v2.set(0, -1, 0), 26, { spread: 2.2, size: 0.9 });
+          crew.st.shake = 1;
+        }
+        hud.message(text, 900);
+        return;
+      }
+      if (wet) soak(text);
+      else lose(text);
+    };
+    if (o.type === 'duck') {
+      if (ok) {
+        give(1, null);
+        sfx.plop();
+      } else {
+        hurt('Bonk!');
+        sfx.bonk();
+        if (score) st.v *= 0.7;
+        st.leafT = 4;
+        headPos(me, v);
+        fx.burst(v.add(v2.set(0, 0.4, 0)), [TH.leaf[0], TH.leaf[1], '#ffffff'], 18);
+        crew.st.shake = 0.8;
+      }
+    } else if (o.type === 'falls') {
+      if (ok) {
+        give(2, 'Stayed dry!');
+        sound.ui('good');
+      } else hurt('Soaked!', true);
+    } else if (o.type === 'jet') {
+      if (!ok) hurt('Splash!', true);
+      else {
+        give(2, null);
+        sfx.plop();
+      }
+    } else if (o.type === 'float') {
+      if (!ok) {
+        hurt('Boing!');
+        o.f.hit();
+        if (course.floats === 'frog') sfx.croak();
+        else if (course.floats === 'hippo') sfx.honk();
+        else sfx.boing();
+        if (push) st.xv += (x >= o.lane ? 1 : -1) * 6;
+        if (score) st.v *= 0.8;
+      } else {
+        give(1, null);
+        if (course.floats === 'frog') sfx.croak();
+      }
+    }
+  };
+  // The log's copy decides what was caught and passed once it has both players' inputs of that moment
+  const judge = (force = false) => {
+    const T0 = now();
+    const remoteSteer = C.mine !== 'steer' && C.here;
+    const remoteCatch = C.mine !== 'catch' && C.here;
+    for (let j = C.pend.length - 1; j >= 0; j--) {
+      const e = C.pend[j];
+      const T = e.at;
+      const late = force || T0 > T + GRACE;
+      if (e.it) {
+        if (remoteSteer && C.xH.lastAt() < T && !late) continue;
+        const x = C.xH.num(T) ?? st.x;
+        const lane = Math.abs(x - e.it.passCur) < 0.52;
+        const grabbed = C.grabs.some((g) => g >= T - GRAB && g <= T + 120);
+        if (lane && grabbed) {
+          gotItem(e.it);
+          C.res.push([`i${e.it.i}`, 1, T0]);
+        } else if (!lane || late || (!remoteCatch && T0 > T + 120)) {
+          missItem(e.it);
+          C.res.push([`i${e.it.i}`, 0, T0]);
+        } else continue;
+      } else {
+        const o = e.o;
+        const byCatcher = o.type === 'duck';
+        if ((byCatcher ? remoteCatch && C.duckH.lastAt() < T : remoteSteer && C.xH.lastAt() < T) && !late) continue;
+        const x = C.xH.num(T) ?? st.x;
+        const ok = passed(o, x, !!C.duckH.at(T - 50), e.fire);
+        outcome(o, ok, x, { push: !remoteSteer });
+        C.res.push([`o${o.i}`, ok ? 1 : 0, T0]);
+      }
+      C.pend.splice(j, 1);
+    }
+  };
+  // The other copy shows what the log's copy decided and keeps its log with it
+  const followOwner = (s) => {
+    for (const [key, ok] of s.res || []) {
+      if (C.seen.has(key)) continue;
+      C.seen.add(key);
+      const n = +key.slice(1);
+      if (key[0] === 'i' && items[n] && !items[n].got && !items[n].missed) (ok ? gotItem : missItem)(items[n], false);
+      if (key[0] === 'o' && obstacles[n] && !obstacles[n].decided) outcome(obstacles[n], !!ok, st.x, { score: false, push: C.mine === 'steer' });
+    }
+    const combo = st.combo;
+    st.score = s.sc | 0;
+    st.got = s.g | 0;
+    st.gotPts = s.gp | 0;
+    st.combo = s.c | 0;
+    st.wet = s.w | 0;
+    st.hits = s.hi | 0;
+    st.bestCombo = Math.max(st.bestCombo, st.combo);
+    C.pts = { roji: s.r | 0, homama: s.h | 0 };
+    if (combo >= 5 && st.combo === 0) hud.message('Combo lost', 700);
+    if (combo !== st.combo && (st.combo === 5 || st.combo === 12)) hud.message(`Combo x${comboMul()}!`, 900);
+    // the jets as the log's copy runs them
+    for (const [n, target, state] of s.jt || []) {
+      const j = jets[n];
+      if (!j || j.state === state || j.state === 'done') continue;
+      j.target = target;
+      if (state === 'warn') {
+        track.at(j.d, fr);
+        warn.position.copy(fr.p).addScaledVector(fr.l, -j.target * LANE).add(v.set(0, 0.04, 0));
+        j.t = 0;
+      }
+      if (state === 'fire' && !j.mesh) {
+        j.mesh = jetArc(j);
+        scene.add(j.mesh);
+        sfx.squirt();
+        warnMat.opacity = 0;
+        j.t = 0;
+      }
+      if (state === 'done' && j.mesh) {
+        j.mesh.removeFromParent();
+        j.mesh.geometry.dispose();
+        j.mesh = null;
+      }
+      j.state = state;
+    }
+    showScore();
+  };
+  if (C) {
+    ctx.online.on('state', (s) => {
+      if (!s || typeof s !== 'object' || !Number.isFinite(s.at)) return;
+      if (C.mine !== 'steer' && typeof s.x === 'number') {
+        C.xH.push(s.at, s.x);
+        C.follow.push({ at: s.at, x: s.x, xv: s.xv || 0 });
+      }
+      if (C.mine !== 'catch') {
+        if (Array.isArray(s.gr)) for (const g of s.gr) if (typeof g === 'number' && !C.grabs.includes(g)) C.grabs.push(g);
+        for (const [at, dk] of Array.isArray(s.du) ? s.du : []) C.duckH.push(at, dk);
+        if (typeof s.dk === 'number') C.duckH.push(s.at, s.dk);
+      }
+      if (!C.owner && s.o) {
+        C.ownerSt = s;
+        followOwner(s);
+      }
+    });
+    ctx.online.on('fin', (d) => {
+      if (!d || typeof d !== 'object') return;
+      C.fin = d;
+      C.finWait?.();
+    });
+    ctx.online.on('leave', () => {
+      C.finWait?.();
+      if (!C.here) return;
+      C.here = false;
+      C.owner = true; // the computer takes the other seat and this copy runs the log now
+      C.pend = [...items.filter((it) => it.passAt && !it.got && !it.missed).map((it) => ({ it, at: it.passAt })), ...obstacles.filter((o) => o.passAt && !o.decided).map((o) => ({ o, at: o.passAt, fire: o.jet?.state === 'fire' }))];
+      hud.message(`<span style="font-size:.5em">${name(ctx.partner)} left the ride. The computer ${C.mine === 'steer' ? 'grabs and ducks' : 'steers'} now.</span>`, 2200);
+    });
+  }
+  const shareNow = () => {
+    const t0 = now();
+    C.grabs = C.grabs.filter((g) => t0 - g < 4000);
+    C.duckLog = C.duckLog.filter((x) => t0 - x[0] < 2000);
+    const s = { at: t0 };
+    if (C.mine === 'steer') Object.assign(s, { x: +st.x.toFixed(3), xv: +st.xv.toFixed(2) });
+    else Object.assign(s, { gr: C.grabs.filter((g) => t0 - g < 2200), dk: C.duckOn ? 1 : 0, du: C.duckLog });
+    if (C.owner) {
+      C.res = C.res.filter((x) => t0 - x[2] < 3000);
+      const jt = jets.map((j, n) => [n, j.target, j.state]).filter((x) => x[2] === 'warn' || x[2] === 'fire' || (x[2] === 'done' && jets[x[0]].d > st.d - 12));
+      Object.assign(s, { o: 1, d: +st.d.toFixed(2), v: +st.v.toFixed(2), sc: st.score, r: C.pts.roji, h: C.pts.homama, gp: st.gotPts, g: st.got, c: st.combo, w: st.wet, hi: st.hits, res: C.res.map((x) => [x[0], x[1]]), jt });
+    }
+    ctx.online.share(s);
+  };
 
   // ---------------------------------------------------------------- the countdown
   const begin = (async () => {
     await new Promise((r) => setTimeout(r, 350));
     if (flow.disposed) return;
-    flow.say(`${palName}: ${rider === 'roji' ? 'I will hold on to you, Roji.' : 'Steer us well, my love.'}`, 2200);
-    await hud.countdown(3);
+    if (C) {
+      flow.say(C.mine === 'steer' ? `You steer, ${name(C.catcher)} grabs and ducks.` : `${name(C.steerer)} steers, you grab and duck.`, 2600);
+      if (!(await countTo(ctx, coop.at, { isGone: () => flow.disposed }))) return;
+    } else {
+      flow.say(`${palName}: ${rider === 'roji' ? 'I will hold on to you, Roji.' : 'Steer us well, my love.'}`, 2200);
+      await hud.countdown(3);
+    }
     if (flow.disposed) return;
     sfx.whistle();
     st.phase = 'ride';
@@ -463,6 +802,16 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     if (st.phase === 'done') return;
     st.phase = 'done';
     sfx.stream(0, 0);
+    if (C) {
+      // together: the final numbers from the log's copy
+      const f = await settleFinal(ctx, C, { flush: () => judge(true), numbers: () => ({ sc: st.score, r: C.pts.roji, h: C.pts.homama, gp: st.gotPts, g: st.got, w: st.wet }) });
+      if (flow.disposed) return;
+      if (f) {
+        Object.assign(st, { score: f.sc | 0, gotPts: f.gp | 0, got: f.g | 0, wet: f.w | 0 });
+        C.pts = { roji: f.r | 0, homama: f.h | 0 };
+      }
+      showScore();
+    }
     const pct = MAX ? st.gotPts / MAX : 0;
     const stars = pct >= 0.78 ? 3 : pct >= 0.52 ? 2 : pct >= 0.28 ? 1 : 0;
     const old = prog[course.id] || { best: 0, stars: 0 };
@@ -473,7 +822,7 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     const nowTotal = MODES.reduce((s, m) => s + (prog[m.id]?.stars || 0), 0);
     const opened = before.filter((m) => nowTotal >= m.need).map((m) => m.name);
     const newBest = st.score > old.best && old.best > 0;
-    const photo = st.photo ? `<img src="${st.photo}" alt="Ride photo of Roji and Homama" style="display:block;max-width:100%;max-height:36vh;border-radius:12px;margin:0 auto 10px">` : '';
+    const photo = st.photo ? `<img src="${st.photo}" alt="Ride photo of Roji and Homama" style="display:block;max-width:100%;max-height:${C ? 19 : 36}vh;border-radius:12px;margin:0 auto ${C ? 8 : 10}px">` : '';
     const dry = st.wet === 0 ? ' Dry until the big splash.' : st.wet === 1 ? ' Soaked once on the way.' : ` Soaked ${st.wet} times on the way.`;
     const line =
       st.shieldMode === 'shield'
@@ -483,12 +832,26 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     await new Promise((r) => setTimeout(r, fireworks ? 1600 : 500));
     if (flow.disposed) return;
     hud.score('');
+    const opens = opened.length ? `<br><b>${opened.join(' and ')}</b> ${opened.length > 1 ? 'are' : 'is'} open now.` : '';
+    const title = stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a splash!';
+    if (C) {
+      // each one's share of the points; the two shares add up to the score both saw
+      ctx.finish({
+        win: stars > 0,
+        score: C.here ? C.pts[ctx.me] : st.score,
+        stars,
+        title,
+        // (short screens: the card also holds both results, so it keeps to the numbers)
+        text: `${photo}${st.score} ${st.score === 1 ? 'point' : 'points'} together${newBest ? ' (a new best!)' : ''}. ${st.got} of ${items.length} caught. ${name(C.steerer)} steered and ${name(C.catcher)} grabbed.${innerHeight > 520 ? `${dry}<br>${line}` : ''}${opens}`,
+      });
+      return;
+    }
     ctx.finish({
       win: stars > 0,
       score: st.score,
       stars,
-      title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a splash!',
-      text: `${photo}${st.score} ${st.score === 1 ? 'point' : 'points'}${newBest ? ' (a new best!)' : `, best ${rec.best}`}. ${st.got} of ${items.length} caught.${dry}<br>${line}${opened.length ? `<br><b>${opened.join(' and ')}</b> ${opened.length > 1 ? 'are' : 'is'} open now.` : ''}`,
+      title,
+      text: `${photo}${st.score} ${st.score === 1 ? 'point' : 'points'}${newBest ? ' (a new best!)' : `, best ${rec.best}`}. ${st.got} of ${items.length} caught.${dry}<br>${line}${opens}`,
     });
   };
 
@@ -566,6 +929,7 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
   let pointerWant = 0;
   const update = (dt, t) => {
     st.t += dt;
+    frameT = t;
     const running = st.phase === 'ride';
     // ---------------------------------------- input
     let want = 0;
@@ -580,21 +944,67 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     }
     let duckHeld = input.held('action') || input.held('jump') || input.held('s') || input.held('arrowdown');
     let reachHeld = input.held('reach') || input.held('w') || input.held('arrowup');
-    if (dbg.auto && running) {
+    if (dbg.auto && running && !C) {
       const a = autoplay();
       want = a.want;
       duckHeld = a.duck;
       reachHeld = a.reach;
+    }
+    // together: our part (steering, or grabbing and ducking), the other player's from their device, or
+    // the computer's once they left
+    let steerHere = true;
+    if (C) {
+      const t0 = now();
+      const a = running && (dbg.auto || !C.here) ? autoplay() : null;
+      const nxt = items.find((it) => !it.got && !it.missed && !it.passAt && it.d > st.d - 0.3);
+      const soon = running && nxt && nxt.d - st.d < Math.max(0.5, st.v * (dt + 0.08));
+      if (C.mine === 'steer') {
+        if (a && dbg.auto) want = a.want;
+      } else if (!C.here) want = a ? a.want : 0;
+      else steerHere = false;
+      if (C.mine === 'catch') {
+        duckHeld = input.held('duck') || input.held('s') || input.held('arrowdown') || !!(a && dbg.auto && a.duck);
+        const tap = input.pressed('action') || input.pressed('jump') || input.pressed('w') || input.pressed('arrowup') || input.pointer.justDown || (dbg.auto && soon);
+        if (running && tap && t0 - C.grabAt > GRAB * 0.55) {
+          C.grabAt = t0;
+          C.grabs.push(t0);
+        }
+      } else if (!C.here) {
+        duckHeld = !!a?.duck;
+        if (soon && t0 - C.grabAt > GRAB * 0.55) {
+          C.grabAt = t0;
+          C.grabs.push(t0);
+        }
+      } else duckHeld = !!C.duckH.at(t0 - C.follow.delay);
+      if (C.mine === 'catch' || !C.here) {
+        if (duckHeld !== C.duckOn) {
+          C.duckOn = duckHeld;
+          C.duckLog.push([t0, duckHeld ? 1 : 0]);
+        }
+        C.duckH.push(t0, duckHeld ? 1 : 0);
+      }
+      const last = C.grabs.length ? Math.max(...C.grabs) : -1e9;
+      reachHeld = t0 - last < GRAB;
     }
     if (!running) {
       want = 0;
       duckHeld = false;
       reachHeld = false;
     }
-    // the log swings across the channel on a soft spring and bumps the walls
-    st.xv += ((want - st.x) * 46 - st.xv * 10) * dt;
-    st.x += st.xv * dt;
-    if (Math.abs(st.x) > 1.08) {
+    if (steerHere) {
+      // the log swings across the channel on a soft spring and bumps the walls
+      st.xv += ((want - st.x) * 46 - st.xv * 10) * dt;
+      st.x += st.xv * dt;
+    } else {
+      // the other player steers: their log, a moment behind
+      const s = C.follow.sample(now());
+      if (s) {
+        st.x = s.x;
+        st.xv = s.xv;
+      }
+    }
+    if (C && steerHere) C.xH.push(now(), st.x);
+    if (Math.abs(st.x) > 1.08 && steerHere) {
       if (Math.abs(st.xv) > 1.5) {
         sfx.bonk();
         logPos(lp);
@@ -624,6 +1034,14 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
       if (top && st.d > top.d1 - 2.5 && st.d < top.d1 + 0.5) st.v = Math.min(st.v, 1.3);
       st.v = Math.max(0.4, st.v);
       st.d = Math.min(endD, st.d + st.v * dt);
+      // the other copy keeps its log where the log's copy has it (a little ahead for the delay)
+      if (C && !C.owner && C.ownerSt) {
+        const s = C.ownerSt;
+        const want = Math.min(endD, s.d + (s.v * Math.max(0, now() - s.at)) / 1000);
+        const gap = want - st.d;
+        st.d = Math.min(endD, st.d + gap * (Math.abs(gap) > 4 ? 1 : 1 - Math.exp(-5 * dt)));
+        st.v = damp(st.v, s.v, 6, dt);
+      }
       if (st.d >= endD - 0.05) finish();
     }
     track.at(st.d, fr);
@@ -720,44 +1138,28 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
         if (it.got || it.missed) continue;
         if (it.d > st.d + 0.2) break;
         if (it.d < before - 1) continue;
-        const ok = Math.abs(st.x - it.cur) < 0.52 && (!it.high || crew.st.reach > 0.5);
-        if (ok) {
-          it.got = true;
-          st.combo++;
-          st.bestCombo = Math.max(st.bestCombo, st.combo);
-          const pts = VALUE[it.kind] * comboMul();
-          st.score += pts;
-          st.got++;
-          st.gotPts += VALUE[it.kind];
-          itemPos(it, tmp, t);
-          const cols = it.kind === 'heart' ? ['#ff5d7a', '#ffd1dc', '#ffffff'] : it.kind === 'fruit' ? (night ? ['#f4ff9a', '#d8ff7a', '#ffffff'] : ['#ffb347', '#ef3b4f', '#ffe066', '#ffffff']) : ['#ffd166', '#fff3c4', '#ffffff'];
-          fx.burst(tmp, cols, it.kind === 'gold' ? 26 : 14);
-          if (it.kind === 'heart') {
-            fx.heartsAt(tmp, 3);
-            crew.st.heart = 1;
-            sfx.sweet();
-          } else sound.ui(it.kind === 'star' ? 'coin' : 'good');
-          if (st.combo === 5 || st.combo === 12) {
-            hud.message(`Combo x${comboMul()}!`, 900);
-            crew.st.cheer = 1;
+        if (C) {
+          // together: the log's copy decides it once it has the steering and the grab of that moment
+          if (!it.passAt) {
+            it.passAt = now();
+            it.passCur = it.cur;
+            if (C.owner) C.pend.push({ it, at: it.passAt });
           }
-          showScore();
-        } else {
-          it.missed = true;
-          if (st.combo >= 5) hud.message('Combo lost', 700);
-          st.combo = 0;
-          showScore();
+          continue;
         }
+        const ok = Math.abs(st.x - it.cur) < 0.52 && (!it.high || crew.st.reach > 0.5);
+        if (ok) gotItem(it);
+        else missItem(it);
       }
       // tips for the first ones on the first ride
       for (const it of items.slice(0, 4)) {
         if (it.told || it.got || it.missed || course.id !== 'jungle') continue;
         if (it.d - st.d < 18 && it.d > st.d) {
           it.told = true;
-          hud.message(it.high ? 'Reach up!' : it.lane < 0 ? 'Lean left!' : it.lane > 0 ? 'Lean right!' : 'Stay in the middle!', 1200);
+          hud.message(C?.mine === 'catch' ? 'Grab it as it reaches you!' : it.high && !C ? 'Reach up!' : it.lane < 0 ? 'Lean left!' : it.lane > 0 ? 'Lean right!' : 'Stay in the middle!', 1200);
         }
       }
-      if (items.some((it) => it.high && !it.got && !it.missed && it.d - st.d < 16 && it.d > st.d)) tell('reach', 'Reach up for the balloons!');
+      if (C?.mine !== 'steer' && items.some((it) => it.high && !it.got && !it.missed && it.d - st.d < 16 && it.d > st.d)) tell('reach', C ? 'Grab the balloons as they pass!' : 'Reach up for the balloons!');
     }
     crew.st.cheer = damp(crew.st.cheer, 0, 1.4, dt);
     crew.st.heart = damp(crew.st.heart, 0, 1.2, dt);
@@ -777,49 +1179,18 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
         }
         if (o.d > st.d) continue;
         o.done = true;
-        const lane = Math.round(clamp(st.x, -1, 1));
-        if (o.type === 'duck') {
-          if (crew.st.duck > 0.55) {
-            award(1, null);
-            sfx.plop();
-          } else {
-            lose('Bonk!');
-            sfx.bonk();
-            st.v *= 0.7;
-            st.leafT = 4;
-            headPos(me, v);
-            fx.burst(v.add(v2.set(0, 0.4, 0)), [TH.leaf[0], TH.leaf[1], '#ffffff'], 18);
-            crew.st.shake = 0.8;
-          }
-        } else if (o.type === 'falls') {
-          if (lane === o.dry) {
-            award(2, 'Stayed dry!');
-            sound.ui('good');
-          } else soak('Soaked!');
-        } else if (o.type === 'jet') {
-          const j = o.jet;
-          if (j.state === 'fire' && Math.abs(st.x - j.target) < 0.6) soak('Splash!');
-          else {
-            award(2, null);
-            sfx.plop();
-          }
-        } else if (o.type === 'float') {
-          if (Math.abs(st.x - o.lane) < 0.62) {
-            lose('Boing!');
-            o.f.hit();
-            if (course.floats === 'frog') sfx.croak();
-            else if (course.floats === 'hippo') sfx.honk();
-            else sfx.boing();
-            st.xv += (st.x >= o.lane ? 1 : -1) * 6;
-            st.v *= 0.8;
-          } else {
-            award(1, null);
-            if (course.floats === 'frog') sfx.croak();
-          }
+        if (C) {
+          // together: the log's copy decides it once it has the steering or the duck of that moment
+          o.passAt = now();
+          if (C.owner) C.pend.push({ o, at: o.passAt, fire: o.jet?.state === 'fire' });
+          continue;
         }
+        outcome(o, passed(o, st.x, crew.st.duck > 0.55, o.jet?.state === 'fire'), st.x);
       }
-      // the jets: aim at the lane the log is in, glow, then fire while it passes
-      for (const j of jets) {
+      if (C?.owner) judge();
+      // the jets: aim at the lane the log is in, glow, then fire while it passes (the other copy
+      // shows the jets as the log's copy runs them)
+      for (const j of C && !C.owner ? [] : jets) {
         const ahead = j.d - st.d;
         if (j.state === 'idle' && ahead < 15 && ahead > 4) {
           j.state = 'warn';
@@ -853,7 +1224,20 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
           }
         }
       }
+      if (C && !C.owner) {
+        for (const j of jets) {
+          if (j.state === 'warn') {
+            warnMat.opacity = 0.4 + Math.sin(st.t * 14) * 0.3;
+            warn.scale.setScalar(1 + Math.sin(st.t * 10) * 0.12);
+          }
+          if (j.state === 'fire' && j.mesh && Math.random() < 0.5) {
+            const end = j.mesh.userData.curve.v2;
+            water.spray(end, v.set(0, 2.2, 0), 2, { spread: 1.4, floor: end.y - 0.05 });
+          }
+        }
+      }
     }
+    if (C) shareNow();
     for (const o of floats) {
       track.at(o.d, fr);
       o.f.root.position.copy(fr.p).addScaledVector(fr.l, -o.lane * LANE);

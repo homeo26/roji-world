@@ -7,11 +7,16 @@ import { buildKitchen, THEMES } from './cooking/kitchen.js';
 import { Icons, Rings, Puffs, Flames, Words, makeMarkers, Sfx } from './cooking/fx.js';
 import { createUI } from './cooking/ui.js';
 import { makeChef } from './cooking/chefs.js';
+import { encodeItems, decodeItems, applyItems, encodeCells, applyCells, encodeOrders, decodeOrders, dishIndex, dishAt } from './cooking/online.js';
+import { Follow, countTo, nameOf } from './coop/kit.js';
 
 // Roji's YumYum Kitchen, an Overcooked style co-op kitchen. Roji and Homama are both chefs: you play
 // one, and the other is a helpful computer chef (or a second player on the same keyboard). Fetch from
 // crates, chop on boards, cook in pans and pots, slice the shawarma spit, wash plates, plate up the
 // orders and serve them at the pass before their timers run out. Eight kitchens, each with a twist.
+// Played together online, the other chef is the other player, moved by their own device: the starter's
+// copy runs the shift (the orders, the coins, the food and the clock) and the other copy sends its
+// chef's moves and what it picks up, puts down, chops and washes. A helper chef steps in if they go.
 
 const NAME = { roji: 'Roji', homama: 'Homama' };
 const PART_COL = { tomato: '#ec4b4b', cucumber: '#4f9e45', lettuce: '#7ccc5a', onion: '#c873b2', lemon: '#ffd23f', lamb: '#d9616b' };
@@ -39,6 +44,23 @@ export default {
     let alive = true;
     const timers = [];
     const later = (ms, fn) => timers.push(setTimeout(() => alive && fn(), ms));
+    // ---------------------------------------------------------------- played together
+    const ol = ctx.online;
+    const NET = {
+      on: ol.inRoom && !ol.isHost, // the other player cooks in this kitchen with us
+      owner: !ol.inRoom || ol.isHost, // this copy runs the shift
+      follow: new Follow({ delay: 120, angles: ['y'] }),
+      uses: [], // the other chef's pick-ups and put-downs for the next step (owner)
+      events: [], // what happened, for the other copy's sounds and words (owner)
+      seq: 0,
+      lastSeq: 0,
+      coins: { roji: 0, homama: 0 }, // each chef's share of the coins
+      snap: null, // the latest kitchen from the owner (the other copy)
+      fresh: false,
+      snapAt: 0,
+      goAt: 0,
+    };
+    const modeNow = () => (NET.on ? 'solo' : progress.mode);
 
     // ---------------------------------------------------------------- the two chefs (built once)
     const kids = { roji: makeChef(ctx, 'roji'), homama: makeChef(ctx, 'homama') };
@@ -136,8 +158,15 @@ export default {
       const world = new World(lv);
       const view = buildKitchen(world, lv.theme, { scene });
       const sim = new Sim({ world, level: lv, view, emit: onEvent, fast: lv.fast || 1 });
-      const first = sim.addChef(me, kids[me], lv.a, 'p1');
-      const second = sim.addChef(pal, kids[pal], lv.b, mode === 'duo' ? 'p2' : 'ai');
+      // together, the starter's chef starts on the first spot on both copies; the other copy moves only its own
+      const mirror = NET.on && !NET.owner;
+      const first = mirror ? sim.addChef(pal, kids[pal], lv.a, 'net') : sim.addChef(me, kids[me], lv.a, 'p1');
+      const second = mirror ? sim.addChef(me, kids[me], lv.b, 'p1') : sim.addChef(pal, kids[pal], lv.b, mode === 'duo' ? 'p2' : 'ai');
+      if (mirror) {
+        first.net = true;
+        sim.mirror = true;
+        sim.onUse = (c) => sendUse(c);
+      }
       for (const c of sim.chefs) {
         c.kid.root.position.set(c.x, 0, c.z);
         c.kid.root.rotation.y = c.yaw;
@@ -145,10 +174,11 @@ export default {
         c.kid.hands = null;
       }
       const brains = new Map();
-      if (mode !== 'duo') brains.set(second, new Brain(sim, second, 'helper'));
+      if (mode !== 'duo' && !mirror) brains.set(second, new Brain(sim, second, 'helper'));
       second.brain = brains.get(second) || null;
       first.brain = null;
       L = { i, lv, world, sim, view, chefs: sim.chefs, brains, mode, lastWarn: null, fireBanner: 0, chopT: new Map(), steamT: 0, loveI: 0 };
+      if (NET.on && NET.owner) netOn();
       fitCamera();
       sim.update(0.001);
       return L;
@@ -165,6 +195,235 @@ export default {
           c.brain = b;
         }
       }
+    }
+
+    // The other player's chef: moved by their device (net), or by a helper (the computer) when they go
+    const chefOf = (id) => L?.sim.chefs.find((c) => c.id === id) || null;
+    const calm = (c) => Object.assign(c.ctrl, { ax: 0, az: 0, use: false, work: false, dash: false, target: null, face: null });
+    function netOn() {
+      const c = chefOf(pal);
+      if (!c || c.net) return;
+      c.net = true;
+      c.ctrlKind = 'net';
+      L.brains.delete(c);
+      c.brain = null;
+      calm(c);
+    }
+    function netOff() {
+      const c = chefOf(pal);
+      if (!c || !c.net) return;
+      c.net = false;
+      c.ctrlKind = 'ai';
+      c.vx = c.vz = 0;
+      calm(c);
+      const b = new Brain(L.sim, c, 'helper');
+      L.brains.set(c, b);
+      c.brain = b;
+      if (auto === true) setAuto(true);
+    }
+    // owner: their chef where their device has it, and their next pick-up or put-down
+    function applyRemoteChef() {
+      const c = chefOf(pal);
+      if (!c?.net) return;
+      const s = NET.follow.sample(ol.now());
+      if (s && s.lv === L.i) {
+        c.x = s.x;
+        c.z = s.z;
+        c.yaw = s.y;
+        c.speed = s.sp || 0;
+        c.turn = s.tu || 0;
+        c.hop = s.hp || 0;
+        c.ctrl.work = !!s.w && phase === 'play';
+        c.ctrl.target = s.wt >= 0 ? L.world.cells[s.wt] || null : null;
+      }
+      const u = NET.uses.shift();
+      if (u && phase === 'play') {
+        if (Number.isFinite(u.x) && Number.isFinite(u.z)) {
+          c.x = u.x;
+          c.z = u.z;
+          c.yaw = Number.isFinite(u.y) ? u.y : c.yaw;
+        }
+        c.ctrl.target = u.i >= 0 ? L.world.cells[u.i] || null : null;
+        c.ctrl.use = true;
+      }
+    }
+    // owner: what the kitchen looks like, for the other copy (a few times a second)
+    const RELAY = new Set(['say', 'reject', 'hint', 'crate', 'pick', 'drop', 'combine', 'add', 'spit', 'trash', 'chopped', 'sliced', 'washed', 'cooked', 'burnt', 'fire', 'fireout', 'served', 'missed', 'bump', 'rush', 'nudged']);
+    function relay(type, d) {
+      if (!RELAY.has(type)) return;
+      const who = d.chef?.id || d.a?.id || '';
+      const e = [++NET.seq, type, who ? who[0] : '', d.cell ? d.cell.i : -1];
+      if (type === 'say' || type === 'reject') e.push(String(d.text || '').slice(0, 40));
+      else if (type === 'hint') e.push(d.kind || '');
+      else if (type === 'chopped') e.push(d.item?.id || '');
+      else if (type === 'served') e.push(dishIndex(d.dish), d.pts, d.tip, d.streak, d.order.id);
+      else if (type === 'missed') e.push(d.order.id, d.lost || 0);
+      NET.events.push({ at: ol.now(), e });
+    }
+    function sendKitchen() {
+      const t0 = ol.now();
+      if (t0 - NET.snapAt < 85) return;
+      NET.snapAt = t0;
+      const S = L.sim;
+      const hc = chefOf(me);
+      const nc = chefOf(pal);
+      NET.events = NET.events.filter((x) => t0 - x.at < 1600);
+      const s = {
+        at: t0,
+        lv: L.i,
+        ph: phase,
+        t: +S.time.toFixed(2),
+        wt: +L.world.t.toFixed(3),
+        sc: S.score,
+        sv: S.served,
+        ms: S.missed,
+        tp: S.tips,
+        sk: S.streak,
+        bs: S.bestStreak,
+        no: +S.nextOrder.toFixed(2),
+        ru: S.rushed ? 1 : 0,
+        oi: S.orderId,
+        u: S.uid,
+        rt: S.returns.map((x) => +x.toFixed(1)),
+        o: encodeOrders(S),
+        q: encodeCells(S),
+        it: encodeItems(S),
+        c: { x: +hc.x.toFixed(3), z: +hc.z.toFixed(3), y: +hc.yaw.toFixed(3), sp: +hc.speed.toFixed(2), tu: +Math.max(-30, Math.min(30, hc.turn)).toFixed(1), hp: +hc.hop.toFixed(3), wk: hc.working || 0, wc: hc.workCell?.i ?? -1 },
+        n: { wk: nc?.working || 0, wc: nc?.workCell?.i ?? -1 },
+        e: NET.events.map((x) => x.e),
+        cn: [NET.coins.roji, NET.coins.homama],
+      };
+      let len = JSON.stringify(s).length;
+      if (len > 1470) {
+        s.it = encodeItems(S, false);
+        len = JSON.stringify(s).length;
+      }
+      if (len > 1470) {
+        s.e = s.e.slice(-3);
+        len = JSON.stringify(s).length;
+      }
+      if (len <= 1490) ol.share(s);
+    }
+    // the other copy: our chef for the starter's copy, and what we pick up or put down
+    function sendChef() {
+      const c = chefOf(me);
+      if (!c) return;
+      const q = L.sim.target(c);
+      ol.share({ at: ol.now(), lv: L.i, x: +c.x.toFixed(3), z: +c.z.toFixed(3), y: +c.yaw.toFixed(3), sp: +c.speed.toFixed(2), tu: +Math.max(-30, Math.min(30, c.turn)).toFixed(1), hp: +c.hop.toFixed(3), w: c.ctrl.work ? 1 : 0, wt: q ? q.i : -1 });
+    }
+    function sendUse(c) {
+      const q = L.sim.target(c);
+      ol.send('u', { i: q ? q.i : -1, x: +c.x.toFixed(3), z: +c.z.toFixed(3), y: +c.yaw.toFixed(3) });
+    }
+    // the other copy: the kitchen as the starter's copy has it
+    function applySnap(s) {
+      if (!L || s.lv !== L.i) return;
+      const S = L.sim;
+      const W = L.world;
+      const lag = Math.max(0, ol.now() - s.at) / 1000;
+      const play = s.ph === 'play';
+      const tw = Math.max(0, s.t - (play ? lag : 0));
+      S.time = Math.abs(S.time - tw) > 0.6 ? tw : S.time + (tw - S.time) * 0.3;
+      const wt = s.wt + lag;
+      W.t = Math.abs(W.t - wt) > 0.3 ? wt : W.t + (wt - W.t) * 0.3;
+      Object.assign(S, { score: s.sc | 0, served: s.sv | 0, missed: s.ms | 0, tips: s.tp | 0, streak: s.sk | 0, bestStreak: s.bs | 0, nextOrder: +s.no || 0, rushed: !!s.ru, orderId: s.oi | 0, uid: Math.max(S.uid, s.u | 0), returns: Array.isArray(s.rt) ? s.rt.filter(Number.isFinite) : [] });
+      if (Array.isArray(s.cn)) NET.coins = { roji: s.cn[0] | 0, homama: s.cn[1] | 0 };
+      applyCells(S, s.q);
+      applyItems(S, decodeItems(s.it), { roji: chefOf('roji'), homama: chefOf('homama') });
+      const hc = chefOf(pal);
+      const mc = chefOf(me);
+      if (s.c) {
+        hc.working = s.c.wk || null;
+        hc.workCell = W.cells[s.c.wc] || null;
+        NET.follow.push({ at: s.at, x: s.c.x, z: s.c.z, y: s.c.y, sp: s.c.sp, tu: s.c.tu, hp: s.c.hp });
+      }
+      if (s.n) {
+        mc.working = s.n.wk || null;
+        mc.workCell = W.cells[s.n.wc] || null;
+      }
+      for (const e of Array.isArray(s.e) ? s.e : []) {
+        if (!Array.isArray(e) || !(e[0] > NET.lastSeq)) continue;
+        NET.lastSeq = e[0];
+        replay(e);
+      }
+      // the order tickets
+      const list = decodeOrders(s.o);
+      const ids = new Set(list.map((o) => o.id));
+      for (const o of S.orders) if (!ids.has(o.id)) ui.endOrder(o, 'done');
+      const old = new Map(S.orders.map((o) => [o.id, o]));
+      S.orders = list.map((o) => {
+        const p = old.get(o.id);
+        if (p) {
+          p.t = Math.max(0, o.t - (play ? lag : 0));
+          return p;
+        }
+        ui.addOrder(o);
+        sfx.pop();
+        later(120, () => sfx.ding());
+        return o;
+      });
+    }
+    function replay(e) {
+      const [, type, cid, ci, ...x] = e;
+      const chef = cid ? chefOf(cid === 'r' ? 'roji' : 'homama') : null;
+      const d = { chef, cell: ci >= 0 ? L.world.cells[ci] || null : null };
+      if ((type === 'say' || type === 'reject' || type === 'hint' || type === 'nudged' || type === 'dash') && !chef) return;
+      if (type === 'say' || type === 'reject') d.text = x[0];
+      else if (type === 'hint') d.kind = x[0];
+      else if (type === 'chopped') d.item = { id: x[0] };
+      else if (type === 'served') {
+        Object.assign(d, { dish: dishAt(x[0]), pts: x[1] | 0, tip: x[2] | 0, streak: x[3] | 0, order: { id: x[4] } });
+        if (!d.dish || !d.cell) return;
+      } else if (type === 'missed') {
+        d.order = L.sim.orders.find((o) => o.id === x[0]);
+        d.lost = x[1] | 0;
+        if (!d.order) return;
+      } else if (type === 'bump') {
+        d.a = chefOf('roji');
+        d.b = chefOf('homama');
+      }
+      if ((type === 'add' || type === 'chopped' || type === 'burnt' || type === 'served') && !d.cell) return;
+      onEvent(type, d);
+    }
+    // the chefs' shares of the coins: a served order to whoever served it, a missed one off both
+    function coinsServed(id, n) {
+      if (id in NET.coins) NET.coins[id] += n;
+    }
+    function coinsLost(n) {
+      for (let k = 0; k < n; k++) {
+        const who = NET.coins.roji >= NET.coins.homama ? 'roji' : 'homama';
+        if (NET.coins[who] > 0) NET.coins[who]--;
+      }
+    }
+    // the other copy: the starter started a shift (or we joined theirs): cook it with them
+    async function joinShift(d) {
+      if (!Number.isInteger(d?.i) || !LEVELS[d.i]) return;
+      ui.closeCard();
+      const i = d.i;
+      if (!L || L.i !== i || L.sim.clock > 0.5 || !L.sim.mirror || phase === 'over') build(i, 'solo');
+      ctx.online.next();
+      ctx.online.progress(LEVELS[i].name);
+      NET.lastSeq = 0;
+      const c = chefOf(me);
+      if (Number.isFinite(d.x) && Number.isFinite(d.z) && L.world.fits(d.x, d.z, R)) {
+        c.x = d.x;
+        c.z = d.z;
+        c.yaw = Number.isFinite(d.y) ? d.y : c.yaw;
+      }
+      phase = 'count';
+      ui.setPlay(true);
+      ui.setClock(L.lv.time, L.lv.time);
+      ui.setScore(0, L.lv.stars);
+      setButtons();
+      const at = d.at || 0;
+      if (at > ol.now() + 200) {
+        const goOn = await countTo(ctx, at, { isGone: () => !alive || !L || L.i !== i });
+        if (!goOn) return;
+      }
+      if (!alive || !L || L.i !== i || phase !== 'count') return;
+      phase = 'play';
+      setButtons();
+      L.sim.running = true;
     }
 
     // ---------------------------------------------------------------- camera that fits the kitchen
@@ -260,7 +519,7 @@ export default {
     const axisOf = (u, d, l, r) => ({ x: (keys.has(r) ? 1 : 0) - (keys.has(l) ? 1 : 0), y: (keys.has(u) ? 1 : 0) - (keys.has(d) ? 1 : 0) });
     function readControls() {
       const S = L.sim;
-      const humans = S.chefs.filter((c) => c.ctrlKind !== 'ai');
+      const humans = S.chefs.filter((c) => c.ctrlKind !== 'ai' && !c.net); // (the other player's chef is theirs)
       for (const c of humans) {
         const k = c.ctrl;
         let a;
@@ -294,7 +553,7 @@ export default {
         k.target = null;
         k.face = null;
       }
-      if (L.mode !== 'duo' && !auto && (hit.has('Tab') || input.pressed('swap')) && phase === 'play') swap();
+      if (L.mode !== 'duo' && !auto && !NET.on && (hit.has('Tab') || input.pressed('swap')) && phase === 'play') swap();
       hit.clear();
     }
     function swap() {
@@ -324,6 +583,11 @@ export default {
     function onEvent(type, d) {
       if (!L || !alive) return;
       const S = L.sim;
+      if (NET.owner) {
+        if (type === 'served') coinsServed(d.chef?.id, d.pts + d.tip);
+        if (type === 'missed') coinsLost(d.lost || 0);
+        if (NET.on) relay(type, d);
+      }
       switch (type) {
         case 'say':
           words.add(d.text, v3.set(d.chef.x, 2, d.chef.z), { kind: 'say', follow: d.chef, life: 1.7 });
@@ -398,8 +662,8 @@ export default {
           ctx.fx.burst(p.clone(), ['#cf4569', '#ffd166', '#fffaf0', '#7cc95a'], 40);
           ui.say(d.tip && d.streak > 1 ? `${DISH[d.dish].name}! Tip x${d.streak}` : `${DISH[d.dish].name} served!`, 'good', 1500);
           for (const c of S.chefs) S.jump(c, 4);
-          // now and then, a small loving moment between the two chefs
-          if (S.served % 4 === 0) {
+          // now and then, a small loving moment between the two chefs (not when the other one is a person)
+          if (S.served % 4 === 0 && !NET.on) {
             const [who, text] = LOVE[L.loveI++ % LOVE.length];
             const c = S.chefs.find((x) => x.id === who);
             if (c) later(500, () => {
@@ -420,7 +684,7 @@ export default {
           d.b.kid.squash = 0.8;
           const ai = d.a.ctrlKind === 'ai' ? d.a : d.b.ctrlKind === 'ai' ? d.b : d.a;
           const lines = ['Behind!', 'Oops!', 'Sorry, love!', 'Coming through!'];
-          words.add(lines[Math.floor(Math.random() * lines.length)], v3.set(ai.x, 2, ai.z), { kind: 'say', follow: ai, life: 1.3 });
+          if (!NET.on) words.add(lines[Math.floor(Math.random() * lines.length)], v3.set(ai.x, 2, ai.z), { kind: 'say', follow: ai, life: 1.3 });
           break;
         }
         case 'dash':
@@ -446,8 +710,9 @@ export default {
         hud.hint('');
         return;
       }
-      hud.buttons({ action: 'Pick up', jump: 'Chop', extra: [{ id: 'dash', label: 'Dash' }, { id: 'swap', label: 'Swap' }] });
+      hud.buttons({ action: 'Pick up', jump: 'Chop', extra: NET.on ? [{ id: 'dash', label: 'Dash' }] : [{ id: 'dash', label: 'Dash' }, { id: 'swap', label: 'Swap' }] });
       if (L.mode === 'duo') hud.hint(`${NAME[me]}: WASD, E, Space, L-Shift   ${NAME[pal]}: arrows, Enter, R-Shift, R-Ctrl`);
+      else if (NET.on) hud.hint(`E pick up or put down, hold Space to chop or wash, Shift dash. ${NAME[pal]} cooks with you.`);
       else hud.hint('E pick up or put down, hold Space to chop or wash, Shift dash, Tab swap chefs');
       lastLabels = '';
     }
@@ -480,11 +745,15 @@ export default {
       setButtons();
       const nx = LEVELS.findIndex((_, i) => isOpen(progress, i) && !progress.stars[i]);
       const show = nx < 0 ? 0 : nx;
-      if (!L || L.i !== show) build(show, progress.mode);
+      if (!L || L.i !== show) build(show, modeNow());
       ui.showMap({
         progress,
         chef: NAME[me],
-        onPlay: (i) => showIntro(i),
+        // together, the starter's copy picks the kitchen (the other copy asks it to)
+        onPlay: (i) => {
+          if (NET.on && !NET.owner) ol.send('pick', { i });
+          showIntro(i);
+        },
         onMode: (m) => {
           progress.mode = m;
           saveProgress(ctx.save, progress);
@@ -494,30 +763,47 @@ export default {
     }
     function showIntro(i) {
       phase = 'intro';
-      if (!L || L.i !== i || L.mode !== progress.mode || L.sim.clock > 0.5) build(i, progress.mode);
-      ui.showIntro({ i, lv: LEVELS[i], best: progress.best[i], mode: progress.mode, chef: NAME[me], partner: NAME[pal], onStart: () => begin(i), onBack: () => showMap() });
+      if (!L || L.i !== i || L.mode !== modeNow() || L.sim.clock > 0.5) build(i, modeNow());
+      if (NET.owner && ol.inRoom) ol.setting('level', i); // the other copy shows the same kitchen
+      const start = () => (NET.on && !NET.owner ? (ol.send('start', { i }), ui.say(`Starting with ${NAME[pal]}...`, 'good', 1400)) : begin(i));
+      ui.showIntro({ i, lv: LEVELS[i], best: progress.best[i], mode: NET.on ? 'online' : progress.mode, chef: NAME[me], partner: NAME[pal], onStart: start, onBack: () => showMap() });
     }
     let lastResult = null;
     async function begin(i, { skipCount = false } = {}) {
+      if (NET.on && !NET.owner) return ol.send('start', { i }); // the starter's copy starts the shift
       ui.closeCard();
       ctx.online.setting('level', i); // online: the other player cooks the same kitchen
       ctx.online.next();
       ctx.online.progress(LEVELS[i].name);
-      if (!L || L.i !== i || L.sim.clock > 0.5 || L.mode !== progress.mode) build(i, progress.mode);
+      if (!L || L.i !== i || L.sim.clock > 0.5 || L.mode !== modeNow()) build(i, modeNow());
       if (auto) setAuto(true);
+      NET.coins = { roji: 0, homama: 0 };
+      NET.uses.length = 0;
       phase = 'count';
       ui.setPlay(true);
       ui.setClock(L.lv.time, L.lv.time);
       ui.setScore(0, L.lv.stars);
-      if (!skipCount) await hud.countdown(3);
-      if (!alive || !L) return;
+      const myL = L;
+      if (NET.on) {
+        // together: both count down to the same moment
+        NET.goAt = ol.now() + (skipCount ? 300 : 3200);
+        ol.send('go', { i, at: NET.goAt });
+        if (!(await countTo(ctx, NET.goAt, { isGone: () => !alive || L !== myL }))) return;
+      } else if (!skipCount) await hud.countdown(3);
+      if (!alive || !L || L !== myL) return;
       phase = 'play';
       setButtons();
       L.sim.running = true;
     }
-    function timeUp() {
+    // given: the end of the shift as the starter's copy had it (together, on the other copy)
+    function timeUp(given = null) {
       phase = 'over';
       L.sim.running = false;
+      if (given) {
+        const S = L.sim;
+        Object.assign(S, { score: given.score | 0, served: given.served | 0, missed: given.missed | 0, tips: given.tips | 0, bestStreak: given.streak | 0, time: 0 });
+        if (Array.isArray(given.cn)) NET.coins = { roji: given.cn[0] | 0, homama: given.cn[1] | 0 };
+      }
       sfx.whistle();
       hud.message("Time's up!", 1800);
       setButtons();
@@ -536,7 +822,10 @@ export default {
       saveProgress(ctx.save, progress);
       const newly = LEVELS.findIndex((_, k) => !wasOpen[k] && isOpen(progress, k));
       lastResult = { win: stars > 0, coins: score, stars, level: LEVELS[i].id };
-      ctx.online.finished({ win: stars > 0, score, stars, title: LEVELS[i].name }); // online: the result for the other player
+      // online: the result for the other player (cooking together, each chef's share of the coins)
+      const shared = NET.on || given;
+      if (NET.on && NET.owner) ol.send('end', { i, score, served: S.served, missed: S.missed, tips: S.tips, streak: S.bestStreak, cn: [NET.coins.roji, NET.coins.homama] });
+      ctx.online.finished({ win: stars > 0, score: shared ? NET.coins[me] : score, stars, title: LEVELS[i].name });
       later(900, () => {
         for (const c of S.chefs) {
           c.kid.carry(null);
@@ -544,7 +833,7 @@ export default {
         }
         if (stars === 3) {
           ctx.fx.heartsAt(v3.set((S.chefs[0].x + S.chefs[1].x) / 2, 1.8, (S.chefs[0].z + S.chefs[1].z) / 2).clone(), 8);
-          later(1700, () => hugIfClose(S));
+          if (!shared) later(1700, () => hugIfClose(S));
         }
       });
       later(1900, () => {
@@ -568,8 +857,12 @@ export default {
           streak: S.bestStreak,
           unlocked: newly >= 0 ? LEVELS[newly].name : null,
           toNext,
+          split: shared ? `${NAME[me]} ${NET.coins[me]} &middot; ${NAME[pal]} ${NET.coins[pal]} coins` : '',
           canNext: nextOpen,
-          onNext: () => showIntro(i + 1),
+          onNext: () => {
+            if (NET.on && !NET.owner) ol.send('pick', { i: i + 1 });
+            showIntro(i + 1);
+          },
           onAgain: () => begin(i),
           onMap: () => showMap(),
           onExit: () => ctx.end(lastResult),
@@ -647,6 +940,7 @@ export default {
           phase,
           level: L.i,
           mode: L.mode,
+          net: { on: NET.on, owner: NET.owner, mirror: !!S.mirror, coins: { ...NET.coins }, items: S.items.size },
           time: +S.time.toFixed(1),
           score: S.score,
           served: S.served,
@@ -716,9 +1010,75 @@ export default {
     // ---------------------------------------------------------------- start on the kitchen map
     showMap();
     // Online: joining the other player's game opens the kitchen they are cooking in
-    const follow = (lv) => phase === 'menu' && Number.isInteger(lv) && lv >= 0 && lv < LEVELS.length && showIntro(lv);
+    const follow = (lv) => (phase === 'menu' || phase === 'over' || (phase === 'intro' && L?.i !== lv)) && !NET.owner && Number.isInteger(lv) && lv >= 0 && lv < LEVELS.length && showIntro(lv);
     if (!ctx.online.isHost) follow(ctx.online.setting('level'));
     ctx.online.on('setting', (k, v) => k === 'level' && !ctx.online.isHost && follow(v));
+    // Cooking together: the starter's copy runs the shift, the other copy shows it and sends its chef
+    const sendGo = () => {
+      const c = chefOf(pal);
+      ol.send('go', { i: L.i, at: NET.goAt, x: c ? +c.x.toFixed(3) : null, z: c ? +c.z.toFixed(3) : null, y: c ? +c.yaw.toFixed(3) : null });
+    };
+    ol.on('state', (st) => {
+      if (!st || typeof st !== 'object' || !Number.isFinite(st.at)) return;
+      if (NET.owner) NET.follow.push(st);
+      else {
+        NET.snap = st;
+        NET.fresh = true;
+      }
+    });
+    ol.on('u', (d) => NET.owner && NET.on && d && typeof d === 'object' && phase === 'play' && NET.uses.length < 6 && NET.uses.push(d));
+    ol.on('start', (d) => NET.owner && NET.on && Number.isInteger(d?.i) && LEVELS[d.i] && (phase === 'menu' || phase === 'intro' || phase === 'over') && begin(d.i));
+    ol.on('pick', (d) => NET.owner && NET.on && Number.isInteger(d?.i) && LEVELS[d.i] && (phase === 'menu' || phase === 'intro' || phase === 'over') && showIntro(d.i));
+    ol.on('go', (d) => !NET.owner && joinShift(d));
+    ol.on('end', (d) => !NET.owner && L && d?.i === L.i && phase !== 'over' && timeUp(d));
+    ol.on('join', () => {
+      if (!NET.owner || NET.on) return;
+      NET.on = true;
+      if (L) netOn();
+      if (phase === 'play' || phase === 'count') sendGo();
+      setButtons();
+    });
+    ol.on('want', () => NET.owner && NET.on && L && (phase === 'play' || phase === 'count') && sendGo());
+    ol.on('leave', () => {
+      if (!NET.on) return;
+      NET.on = false;
+      if (!NET.owner) {
+        // the starter left: this copy runs the shift now
+        NET.owner = true;
+        if (L) {
+          L.sim.mirror = false;
+          L.sim.onUse = null;
+        }
+      }
+      if (L) netOff();
+      ui.say(`${NAME[pal]} left the kitchen. A helper steps in.`, 'warn', 2600);
+      setButtons();
+    });
+    if (NET.on) ol.send('want', null);
+    // both opened the kitchen at once and the other copy's session won: this one cooks in theirs
+    function becomeGuest() {
+      NET.owner = false;
+      NET.on = true;
+      NET.flipped = true;
+      ui.closeCard();
+      build(L?.i ?? 0, 'solo');
+      const lv = ol.setting('level');
+      if (Number.isInteger(lv) && LEVELS[lv]) showIntro(lv);
+      else showMap();
+      ol.send('want', null);
+    }
+    // the other copy: the starter's chef, a moment behind
+    const followHost = () => {
+      const c = chefOf(pal);
+      const st = NET.follow.sample(ol.now());
+      if (!c || !st) return;
+      c.x = st.x;
+      c.z = st.z;
+      c.yaw = st.y;
+      c.speed = st.sp || 0;
+      c.turn = st.tu || 0;
+      c.hop = st.hp || 0;
+    };
 
     // ---------------------------------------------------------------- per frame
     const chopBeat = new Map();
@@ -886,6 +1246,7 @@ export default {
     return {
       update(dt, t) {
         if (!L) return;
+        if (ol.inRoom && NET.owner && !ol.isHost && !NET.flipped) becomeGuest();
         const rk = `${window.innerWidth}x${window.innerHeight}|${touch()}`;
         if (rk !== resizeKey) {
           resizeKey = rk;
@@ -895,17 +1256,29 @@ export default {
         if (phase === 'play' || phase === 'count' || phase === 'over' || phase === 'menu' || phase === 'intro') {
           if (phase === 'play') readControls();
           else hit.clear();
+          // together: the other chef from their device (the starter's copy), or the kitchen from the starter
+          if (NET.on && NET.owner) applyRemoteChef();
+          if (S.mirror) {
+            if (NET.fresh) {
+              NET.fresh = false;
+              applySnap(NET.snap);
+            }
+            followHost();
+            if (NET.snap?.ph === 'play' && NET.snap.lv >= 0 && (phase === 'menu' || phase === 'intro')) joinShift({ i: NET.snap.lv, at: 0 });
+          }
           const total = dt * speed;
           const n = Math.max(1, Math.ceil(total / 0.05));
           const sdt = total / n;
           for (let k = 0; k < n; k++) {
             for (const [c, b] of L.brains) if (c.ctrlKind === 'ai') b.update(sdt);
             S.update(sdt);
-            if (phase === 'play' && S.time <= 0) {
+            if (phase === 'play' && S.time <= 0 && !S.mirror) {
               timeUp();
               break;
             }
           }
+          if (NET.on && NET.owner) sendKitchen();
+          else if (S.mirror && NET.on) sendChef();
           L.view.update(total, t, S);
           drawChefs(total, t);
           drawIcons(t);
