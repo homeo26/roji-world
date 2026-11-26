@@ -3,6 +3,9 @@ import { brainBump, brainTag, brainBall, backOff } from './sim.js';
 // The five rounds of a night at the bumper cars. Each round sets up its cars, decides who its
 // computer drivers chase, scores the bumps its own way, and turns the result into 0 to 3 stars.
 // G is the running game (see bumpercars.js): G.me, G.partner, G.byId, G.cars, G.pop, G.toast, G.love ...
+// Words over the floor go through G.tell({ [carId]: text, '*': text for everyone else }, at, color, big)
+// (a line may be [text, color, big]), so played online each driver gets the words about their own car.
+// c.human marks the cars people drive (only G.me alone; both Roji and Homama when played together).
 
 const ring = (n, rx, rz, a0 = Math.PI / 2) =>
   Array.from({ length: n }, (_, i) => {
@@ -19,7 +22,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 // Homama only now and then goes after Roji (he prefers to watch her drive).
 function rivalWeight(G, c, o) {
   let w = 1;
-  if (o === G.me) w *= G.playerBias;
+  if (o.human) w *= G.playerBias;
   if (c.id === 'homama' && o.id === 'roji') w *= 0.45;
   if (c.id === 'roji' && o.id === 'homama') w *= 0.8;
   return w;
@@ -41,14 +44,12 @@ export const ROUNDS = [
       if (ev.kind !== 'bump' && ev.kind !== 'mega') return;
       const pts = ev.kind === 'mega' ? 2 : 1;
       ev.a.score += pts;
-      if (ev.a === G.me) G.pop(pts === 2 ? 'Mega bump! +2' : 'Bump! +1', ev, ev.kind === 'mega' ? '#ffd166' : '#ffffff', true);
-      else if (ev.b === G.me) G.pop(`${ev.a.name} got you!`, ev, '#ffd1dc');
-      else G.pop(pts === 2 ? 'Mega!' : 'Bonk!', ev, '#ffffff');
+      G.tell({ [ev.a.id]: [pts === 2 ? 'Mega bump! +2' : 'Bump! +1', ev.kind === 'mega' ? '#ffd166' : '#ffffff', true], [ev.b.id]: [`${ev.a.name} got you!`, '#ffd1dc'], '*': pts === 2 ? 'Mega!' : 'Bonk!' }, ev);
     },
     onHorn(G, c, hit) {
       const n = Math.min(3, hit.length);
       c.score += n;
-      if (c === G.me && n) G.pop(`Honk! +${n}`, c, '#ffd166', true);
+      if (n) G.tell({ [c.id]: [`Honk! +${n}`, '#ffd166', true] }, c);
     },
     hud: (G) => `Bumps <b>${G.me.score}</b>`,
     board: (G) => G.active.map((c) => ({ c, score: c.score })),
@@ -77,7 +78,7 @@ export const ROUNDS = [
     brain: (c, G, dt) => brainTag(c, G, dt),
     weight(G, c, o) {
       let w = 1;
-      if (o === G.me) w *= 0.6 + G.playerBias * 0.6;
+      if (o.human) w *= 0.6 + G.playerBias * 0.6;
       if (c.id === 'homama' && o.id === 'roji') w *= 0.3;
       return w;
     },
@@ -94,9 +95,7 @@ export const ROUNDS = [
       other.dizzy = Math.max(other.dizzy, 0.7);
       G.sfx.tag();
       G.flashCar(other, '#ffd166');
-      if (other === G.me) G.pop("You're it!", other, '#ffd166', true);
-      else if (it === G.me) G.pop('Tagged! Run!', other, '#ffffff', true);
-      else G.pop(`${other.name} is it`, other, '#ffe7a8');
+      G.tell({ [other.id]: ["You're it!", '#ffd166', true], [it.id]: ['Tagged! Run!', '#ffffff', true], '*': [`${other.name} is it`, '#ffe7a8'] }, other);
       if (it.id === 'homama' && other.id === 'roji') G.love('sorry');
       backOff(it, other, 0.9);
     },
@@ -138,8 +137,7 @@ export const ROUNDS = [
       const pts = ball.gold ? 3 : 1;
       if (!by) return;
       by.score += pts;
-      if (by === G.me) G.pop(ball.gold ? 'Golden goal! +3' : 'Goal! +1', ball, '#ffd166', true);
-      else G.pop(`${by.name} scores${ball.gold ? ' 3' : ''}!`, ball, '#ffffff');
+      G.tell({ [by.id]: [ball.gold ? 'Golden goal! +3' : 'Goal! +1', '#ffd166', true], '*': `${by.name} scores${ball.gold ? ' 3' : ''}!` }, ball);
     },
     update(G) {
       if (!G.goldDone && G.time <= 20) {
@@ -202,7 +200,8 @@ export const ROUNDS = [
     over(G) {
       const alive = G.active.filter((c) => c.alive);
       if (alive.length <= 1) return true;
-      if (!G.me.alive) {
+      // the round ends a moment after every car people drive is out
+      if ((G.humans || [G.me]).every((c) => !c.alive)) {
         G.meOutT = (G.meOutT || 0) + G.dt;
         return G.meOutT > 3.4;
       }
@@ -246,7 +245,7 @@ export const ROUNDS = [
     weight(G, c, o) {
       if (c.team === o.team) return 0;
       let w = 1;
-      if (o === G.me) w *= 0.55 + G.playerBias * 0.45;
+      if (o.human) w *= 0.55 + G.playerBias * 0.45;
       return w;
     },
     onBump(G, ev) {
@@ -264,11 +263,13 @@ export const ROUNDS = [
         G.teamScore[a.team] += 1;
         dbl = true;
       }
-      if (a.team === 0) G.pop(dbl ? 'Double bump! +2' : `Bump! +${pts}`, ev, dbl ? '#ffd166' : '#ffffff', a === G.me || dbl);
-      else G.pop(`${a.name} scores`, ev, '#ffd1dc');
+      const word = dbl ? 'Double bump! +2' : `Bump! +${pts}`;
+      const col = dbl ? '#ffd166' : '#ffffff';
+      if (a.team === 0) G.tell({ [a.id]: [word, col, true], '*': [word, col, dbl] }, ev);
+      else G.tell({ '*': [`${a.name} scores`, '#ffd1dc'] }, ev);
       // a mascot bumped Roji or Homama: the other one goes after it
       if (b.team === 0) {
-        const mate = b === G.me ? G.partner : null;
+        const mate = b === G.me && !G.partner.human ? G.partner : null;
         if (mate) {
           mate.ai.revenge = a;
           mate.ai.timer = 3;
@@ -283,7 +284,7 @@ export const ROUNDS = [
     onHorn(G, c, hit) {
       const n = hit.filter((o) => o.team !== c.team).length;
       G.teamScore[c.team] += n;
-      if (c === G.me && n) G.pop(`Honk! +${n}`, c, '#ffd166', true);
+      if (n) G.tell({ [c.id]: [`Honk! +${n}`, '#ffd166', true] }, c);
     },
     hud: (G) => `<span style="color:#ef5b6f">Us <b>${G.teamScore[0]}</b></span> : <b>${G.teamScore[1]}</b> Mimi and Bobo`,
     board: (G) => G.active.map((c) => ({ c, score: c.score })),

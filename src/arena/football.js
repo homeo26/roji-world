@@ -2,11 +2,15 @@
 // or play one vs one against your partner, each with a goalkeeper. Two short halves, first to 3 goals.
 // Stick to run, hold the action button to charge a shot and let go to shoot, action without the ball
 // to tackle, jump to pass to your teammate (or to call for the ball, or to chip in one vs one).
+// Online (both in a room and both play): Roji and Homama are one team against the Sunny Stars, each
+// running their own kid. The device that started the game (the host) runs the ball, the computer
+// players, the goals and the clock; the other device runs its own kid and sends its kicks and tackles.
 import * as THREE from 'three';
 import { damp, dampAngle, clamp, lerp } from '../util.js';
 import * as K from './riding/kit.js';
 import { buildStadium, A } from '../places/football/stadium.js';
 import { PAL, makeBall, blobShadow, sfx as FS } from '../places/football/models.js';
+import { Link, lerpA } from './duels/link.js';
 
 const { L, W, GW, GH, GD, BX, BZ } = A;
 const R = 0.24; // ball radius
@@ -79,6 +83,15 @@ export default {
     const tmp2 = V();
     const dbg = { auto: false, stats: { shots: [0, 0], saves: [0, 0], tackles: [0, 0], passes: [0, 0] } };
     window.__football = dbg;
+    // ---------------------------------------------------------------- online
+    const link = new Link(ctx.online);
+    let net = false; // the two of us play this match together right now
+    let played = false; // the match started together (it keeps real time to the end)
+    let goAt = 0;
+    const now = () => link.now();
+    const auth = () => !net || link.host; // runs the ball, the computer players and the score
+    const r2 = (v) => Math.round(v * 100);
+    const r1 = (v) => Math.round(v * 10);
 
     // Build the stadium before the choice so it shows behind the card
     S = buildStadium(ctx, { colors });
@@ -99,21 +112,39 @@ export default {
     camera.position.set(0, 14, 26);
     camera.lookAt(0, 0, 0);
 
-    hud.choose({
-      title: 'How do you want to play?',
-      text: 'Two short halves. First to 3 goals wins.',
-      options: [
-        { id: 'team', label: 'Team up', sub: `${meName} and ${themName} vs the Sunny Stars` },
-        { id: 'duel', label: 'One vs one', sub: `${meName} vs ${themName}, a keeper each` },
-      ],
-    }).then((id) => {
-      if (disposed) return;
-      if (!id) {
-        ctx.end({ quit: true });
-        return;
-      }
-      setup(id);
-    });
+    const askMode = () =>
+      hud
+        .choose({
+          title: 'How do you want to play?',
+          text: 'Two short halves. First to 3 goals wins.',
+          options: [
+            { id: 'team', label: 'Team up', sub: `${meName} and ${themName} vs the Sunny Stars` },
+            { id: 'duel', label: 'One vs one', sub: `${meName} vs ${themName}, a keeper each` },
+          ],
+        })
+        .then((id) => {
+          if (disposed) return;
+          if (!id) {
+            ctx.end({ quit: true });
+            return;
+          }
+          setup(id);
+        });
+    // In a room: wait for the other player, then team up, each running their own kid
+    if (!link.inRoom) askMode();
+    else
+      link.begin({ title: `Waiting for ${themName}`, text: `${themName} is invited to team up with you against the Sunny Stars.`, solo: 'Play without them', exit: () => ctx.end({ quit: true }) }).then((yes) => {
+        if (disposed) return;
+        if (!yes) return askMode();
+        net = played = true;
+        setup('team');
+        phase = 'sync';
+        phaseT = 0;
+        if (link.host) {
+          goAt = now() + 1200;
+          link.send('go', { at: goAt });
+        }
+      });
 
     // ---------------------------------------------------------------- people
     function gloves(kid, color) {
@@ -140,6 +171,8 @@ export default {
         team,
         role,
         isMe,
+        human: isMe, // a person runs this kid (online: both Roji and Homama)
+        remote: false, // host: run from the other device
         kid,
         ring,
         p: V(),
@@ -185,8 +218,16 @@ export default {
         colors = [a, b];
       }
       teamNames = team ? [`${meName} and ${themName}`, 'Sunny Stars'] : [meName, themName];
+      // online the host's kid comes first on both devices, so both share one list of players
+      if (net && !link.host) mate = makePlayer({ look: themId, name: themName, team: 0, role: 'field', speed: 5.4 });
       me = makePlayer({ look: meId, name: meName, team: 0, role: 'field', isMe: true, speed: 5.4 });
-      if (team) {
+      if (net) {
+        if (link.host) mate = makePlayer({ look: themId, name: themName, team: 0, role: 'field', speed: 5.4 });
+        mate.human = true;
+        mate.remote = link.host;
+        makePlayer({ look: LOOKS.lulu, name: 'Lulu', team: 1, role: 'field', speed: 4.75 });
+        makePlayer({ look: LOOKS.teo, name: 'Teo', team: 1, role: 'field', speed: 4.65 });
+      } else if (team) {
         mate = makePlayer({ look: themId, name: themName, team: 0, role: 'field', speed: 5.0 });
         makePlayer({ look: LOOKS.lulu, name: 'Lulu', team: 1, role: 'field', speed: 4.75 });
         makePlayer({ look: LOOKS.teo, name: 'Teo', team: 1, role: 'field', speed: 4.65 });
@@ -293,6 +334,19 @@ export default {
       }
     }
 
+    // A word at the top of the screen; the host also sends the other player theirs.
+    // lines: { [player index]: text, '*': text for everyone else }
+    function popFor(lines, color, ms) {
+      const pick = (pl) => (pl && players.indexOf(pl) in lines ? lines[players.indexOf(pl)] : lines['*']);
+      const mine = pick(me);
+      if (mine) pop(mine, color, ms);
+      if (net && link.host && mate?.remote) {
+        const v = pick(mate);
+        if (v) link.add(['p', v, color, ms]);
+      }
+    }
+    const popAll = (text, color, ms) => popFor({ '*': text }, color, ms);
+
     function blow(kind = 'short') {
       FS.whistle(sound, kind);
       if (ref) ref.blow = kind === 'short' ? 0.7 : 1.4;
@@ -323,7 +377,7 @@ export default {
         dx = lerp(fx0, tx / d, 0.85);
         dz = lerp(fz0, tzz / d, 0.85);
       }
-      if (!pl.isMe) {
+      if (!pl.human) {
         const err = (Math.random() - 0.5) * 0.14;
         const c = Math.cos(err);
         const sn = Math.sin(err);
@@ -346,7 +400,7 @@ export default {
       if (facing) dbg.stats.shots[pl.team]++;
       pl.yaw = Math.atan2(dx, dz);
       FS.kick(sound, k);
-      if (k > 0.8) pop('Power shot!', colors[pl.team], 700);
+      if (k > 0.8) popAll('Power shot!', colors[pl.team], 700);
     }
     function pass(from, to, throwIt = false) {
       const lead = tmp.copy(to.p).addScaledVector(to.v, 0.45);
@@ -378,7 +432,7 @@ export default {
       ball.shot = true;
       pl.yaw = Math.atan2(tx, tz);
       FS.kick(sound, 0.6);
-      pop('Chip!', colors[pl.team], 600);
+      popAll('Chip!', colors[pl.team], 600);
     }
     function tackle(pl) {
       if (pl.tackleCd > 0 || pl.dash > 0 || pl.stun > 0) return;
@@ -387,27 +441,28 @@ export default {
       if (pl.dashDir.lengthSq() < 0.01 || dist(pl.p, target) > 3.5) pl.dashDir.set(Math.sin(pl.yaw), 0, Math.cos(pl.yaw));
       pl.dashDir.normalize();
       pl.dash = 0.3;
-      pl.tackleCd = pl.isMe ? 0.7 : 1.5;
+      pl.tackleCd = pl.human ? 0.7 : 1.5;
       pl.yaw = Math.atan2(pl.dashDir.x, pl.dashDir.z);
       sound.ui('swoosh');
     }
     function steal(pl, victim) {
-      const success = pl.isMe ? 0.85 : victim.isMe ? 0.42 : 0.6;
+      const success = pl.human ? 0.85 : victim.human ? 0.42 : 0.6;
       pl.dash = 0;
       if (Math.random() > success) {
-        pop('Missed!', '#ffffff', 500);
+        popAll('Missed!', '#ffffff', 500);
         return;
       }
       dbg.stats.tackles[pl.team]++;
       victim.stun = 0.75;
       victim.kid.squash = 0.72;
       victim.hold = 0;
+      if (victim.remote) link.send('stun', {}); // their kid is theirs to slow down
       ball.owner = pl;
       ball.last = pl;
       pl.own = 0;
       FS.kick(sound, 0.5);
       sound.ui('pop');
-      pop(pl.isMe ? 'Got it!' : `${pl.name} steals it!`, colors[pl.team], 800);
+      popFor({ [players.indexOf(pl)]: 'Got it!', '*': `${pl.name} steals it!` }, colors[pl.team], 800);
     }
 
     // ---------------------------------------------------------------- AI
@@ -452,10 +507,10 @@ export default {
           pl.think = 0.16 + Math.random() * 0.14;
           const dGoal = Math.hypot(atkX - pl.p.x, pl.p.z);
           const pressured = opp && od < 1.4;
-          const wantsIt = mt && mt.isMe && mt.callFor > 0;
+          const wantsIt = mt && mt.human && mt.callFor > 0;
           if (wantsIt && pl.own > 0.1) pass(pl, mt);
           else if (pl.own > 0.45 && dGoal < 8.5 && Math.random() < 0.5) shoot(pl, 0.6 + Math.random() * 0.35);
-          else if (mt && pl.own > 0.4 && ((pressured && Math.random() < 0.45) || ((mt.p.x - pl.p.x) * s > 3 && openness(mt) > 2.5 && Math.random() < (mt.isMe ? 0.35 : 0.2)))) pass(pl, mt);
+          else if (mt && pl.own > 0.4 && ((pressured && Math.random() < 0.45) || ((mt.p.x - pl.p.x) * s > 3 && openness(mt) > 2.5 && Math.random() < (mt.human ? 0.35 : 0.2)))) pass(pl, mt);
           else if (pl.own > 3.2 && dGoal < 15) shoot(pl, 0.9);
         }
         return;
@@ -471,7 +526,7 @@ export default {
       let chaser = team[0];
       let cd = Infinity;
       for (const q of team) {
-        const d = dist(q.p, ball.p) - (q.isMe ? 0.6 : 0);
+        const d = dist(q.p, ball.p) - (q.human ? 0.6 : 0);
         if (d < cd) {
           cd = d;
           chaser = q;
@@ -483,7 +538,7 @@ export default {
       } else if (ball.owner) goTo(pl, lerp(ball.p.x, ownX, 0.45), ball.p.z * 0.5, pl.speed * 0.9);
       else goTo(pl, clamp(ball.p.x + s * 3, -L + 2, L - 2), ball.p.z > 0 ? ball.p.z - 3.5 : ball.p.z + 3.5, pl.speed * 0.8);
       const o = ball.owner;
-      if (o && o.team !== pl.team && o.role === 'field' && pl.tackleCd <= 0 && dist(pl.p, o.p) < 1.3 && Math.random() < dt * (o.isMe ? 1.3 : 2.2)) tackle(pl);
+      if (o && o.team !== pl.team && o.role === 'field' && pl.tackleCd <= 0 && dist(pl.p, o.p) < 1.3 && Math.random() < dt * (o.human ? 1.3 : 2.2)) tackle(pl);
     }
 
     function keeperAI(kp, dt) {
@@ -571,7 +626,10 @@ export default {
       setActionLabel(owns ? 'Shoot' : 'Tackle');
       if (input.pressed('action')) {
         if (owns) me.hold = 0.001;
-        else tackle(me);
+        else {
+          tackle(me);
+          if (net && !link.host && me.dash > 0) link.send('tackle', { x: r2(me.dashDir.x), z: r2(me.dashDir.z) });
+        }
       }
       if (me.hold > 0) {
         if (!owns) me.hold = 0;
@@ -580,20 +638,32 @@ export default {
           const k = clamp(me.hold / 0.9, 0.25, 1);
           // up or down on the stick picks the far or near corner
           const aim = Math.abs(ax.y) > 0.4 ? (ax.y > 0 ? -1 : 1) * (GW - 0.32) : null;
-          shoot(me, k, aim);
+          if (net && !link.host) guestKick('kick', { k: +k.toFixed(2), aim });
+          else shoot(me, k, aim);
         }
       }
       if (input.pressed('jump')) {
         if (mode === 'team') {
-          if (owns) pass(me, mate);
+          if (owns && net && !link.host) guestKick('pass', {});
+          else if (owns) pass(me, mate);
           else if (ball.owner === mate) {
             mate.callFor = 0;
             me.callFor = 0.9;
             chipText('Pass!', me);
+            if (net) link.send('call', {});
           } else hop(me);
         } else if (owns) chip(me);
         else hop(me);
       }
+    }
+    // Joiner: the host kicks the ball for us; our kid swings its leg at once
+    function guestKick(type, d) {
+      link.send(type, { ...d, yw: r2(me.yaw) / 100 });
+      me.kickT = 0;
+      me.hold = 0;
+      me.cd = 0.32;
+      me.kickedAt = now();
+      FS.kick(sound, d.k ?? 0.4);
     }
     function hop(pl) {
       if (pl.y > 0.01) return;
@@ -623,7 +693,9 @@ export default {
         pl.dash -= dt;
         pl.want.copy(pl.dashDir).multiplyScalar(8.4);
         const o = ball.owner;
-        if (o && o.team !== pl.team && o.role === 'field' && dist(o.p, pl.p) < 0.85) steal(pl, o);
+        if (!auth()) {
+          // the host decides what our tackle wins
+        } else if (o && o.team !== pl.team && o.role === 'field' && dist(o.p, pl.p) < 0.85) steal(pl, o);
         else if (!o && dist(ball.p, pl.p) < 0.75 && ball.p.y < 0.6) {
           ball.owner = pl;
           ball.last = pl;
@@ -755,7 +827,7 @@ export default {
                 v.x -= (dx / d) * into * 1.6;
                 v.z -= (dz / d) * into * 1.6;
                 FS.post(sound);
-                if (phase === 'play') pop('Off the post!', '#ffffff', 800);
+                if (phase === 'play') popAll('Off the post!', '#ffffff', 800);
               }
             }
           }
@@ -772,7 +844,7 @@ export default {
             v.x -= (ex / el) * into * 1.6;
             v.y -= (ey / el) * into * 1.6;
             FS.post(sound);
-            if (phase === 'play') pop('Off the bar!', '#ffffff', 800);
+            if (phase === 'play') popAll('Off the bar!', '#ffffff', 800);
           }
         }
         // the net: keeps a ball that went in, blocks one coming from the side, the back or the top
@@ -839,7 +911,7 @@ export default {
             ball.last = pl;
             pl.cd = 0.5;
             FS.kick(sound, 0.5);
-            pop(`${pl.name} saves!`, colors[pl.team], 900);
+            popAll(`${pl.name} saves!`, colors[pl.team], 900);
             dbg.stats.saves[pl.team]++;
             S.crowd.cheer(0.5);
           } else {
@@ -850,7 +922,7 @@ export default {
             sound.ui('pop');
             if (wasShot) {
               dbg.stats.saves[pl.team]++;
-              pop(`${pl.name} catches it!`, colors[pl.team], 900);
+              popAll(`${pl.name} catches it!`, colors[pl.team], 900);
               S.crowd.cheer(0.4);
             }
           }
@@ -884,19 +956,25 @@ export default {
     // ---------------------------------------------------------------- goals and match flow
     function goal(team, side) {
       score[team]++;
-      scoringTeam = team;
       const last = ball.last;
-      scorer = last && last.team === team && last.role === 'field' ? last : field(team)[0];
-      const own = last && last.team !== team;
+      const sc = last && last.team === team && last.role === 'field' ? last : field(team)[0];
+      const own = !!(last && last.team !== team);
+      if (net && link.host) link.send('ph', { k: 'goal', team, side, s: [...score], sc: players.indexOf(sc), own: own ? 1 : 0, bz: r2(ball.p.z), by: r2(ball.p.y), bv: r2(Math.hypot(ball.v.x, ball.v.z)) });
+      goalFx(team, side, sc, own, ball.p.z, ball.p.y, Math.hypot(ball.v.x, ball.v.z));
+    }
+    // The goal itself: the net, the crowd, the dance (both devices)
+    function goalFx(team, side, sc, own, bz, by, bv) {
+      scoringTeam = team;
+      scorer = sc;
       phase = 'goal';
       phaseT = 0;
       const gl = S.goals.find((q) => q.side === side);
-      gl.bulge(side * ball.p.z, ball.p.y, Math.min(1, Math.hypot(ball.v.x, ball.v.z) / 12));
+      gl.bulge(side * bz, by, Math.min(1, bv / 12));
       FS.net(sound);
       FS.cheer(sound, 1);
       S.crowd.cheer(1);
       blow('short');
-      fx.burst(new THREE.Vector3(side * (L + 0.4), 1.2, ball.p.z), [colors[team], '#ffffff', PAL.yellow, PAL.rose], 150);
+      fx.burst(new THREE.Vector3(side * (L + 0.4), 1.2, bz), [colors[team], '#ffffff', PAL.yellow, PAL.rose], 150);
       hud.message('GOAL!', 1600);
       const who = own ? 'A lucky goal!' : `${scorer.name} scores!`;
       after(0.5, () => pop(who, colors[team], 1600));
@@ -915,6 +993,7 @@ export default {
       if (mode === 'team' && team === 0 && scorer === mate) after(1.4, () => chipText('What a goal!', me));
     }
     function startReset(kTeam) {
+      if (net && link.host) link.send('ph', { k: 'reset', kt: kTeam, hf: half });
       kickTeam = kTeam;
       kickoffSpots(kickTeam);
       phase = 'reset';
@@ -931,6 +1010,7 @@ export default {
       ball.p.set(0, R, 0);
     }
     function finishMatch() {
+      if (net && link.host) link.send('ph', { k: 'full', s: [...score] });
       phase = 'full';
       phaseT = 0;
       blow('end');
@@ -984,7 +1064,8 @@ export default {
         }
       }
       if (win) ctx.save('wins', (ctx.load('wins', 0) || 0) + 1);
-      ctx.finish({ win, title, text, score: a, opp: b });
+      // Played together both are on one team, so the shared card shows one team result
+      ctx.finish({ win, title, text, score: a, opp: b, ...(mate?.human && ctx.online.inRoom ? { team: true } : {}) });
     }
 
     // ---------------------------------------------------------------- poses on top of Kid.update
@@ -1000,7 +1081,7 @@ export default {
         k.arms[1].rotation.x = -a * 0.3;
         if (q > 0.4) pl.kickT = -1;
       }
-      if (pl.isMe && pl.hold > 0) {
+      if (pl.human && pl.hold > 0) {
         const c = clamp(pl.hold / 0.9, 0, 1);
         k.legs[1].rotation.x = 0.25 + c * 0.6;
         k.body.rotation.x = -0.08 * c;
@@ -1114,6 +1195,10 @@ export default {
       chipT -= dt;
       S.update(dt, t);
       if (phase === 'choose') return;
+      if (phase === 'sync' && goAt && now() >= goAt) {
+        phase = 'intro';
+        phaseT = 0;
+      }
       if (phase === 'intro') {
         for (const [at, txt] of [[0.5, '3'], [1.3, '2'], [2.1, '1']]) if (phaseT - dt < at && phaseT >= at) {
           hud.message(txt, 700);
@@ -1126,12 +1211,14 @@ export default {
           phaseT = 0;
         }
       }
+      if (net && !link.host) return stepGuest(dt, t);
       const playing = phase === 'play';
       if (playing) {
         clock += dt;
         if (clock >= HALF) {
           clock = HALF;
           if (half === 1) {
+            if (net) link.send('ph', { k: 'half' });
             phase = 'half';
             phaseT = 0;
             blow('long');
@@ -1144,11 +1231,12 @@ export default {
       // decide
       for (const p of players) {
         p.faceCam = false;
+        if (p.remote) continue; // the other player runs their kid
         if (phase === 'play') {
           if (p.isMe && !dbg.auto) humanControl(dt);
           else if (p.role === 'keeper') keeperAI(p, dt);
           else fieldAI(p, dt);
-        } else if (phase === 'reset' || phase === 'intro') goTo(p, p.spot.x, p.spot.z, p.speed);
+        } else if (phase === 'reset' || phase === 'intro' || phase === 'sync') goTo(p, p.spot.x, p.spot.z, p.speed);
         else {
           p.want.set(0, 0, 0);
           // celebrate facing the camera
@@ -1158,7 +1246,7 @@ export default {
         }
       }
       if (!playing) setActionLabel('Shoot');
-      for (const p of players) movePlayer(p, dt, t);
+      for (const p of players) (p.remote ? remotePlayer(p, dt) : movePlayer(p, dt, t));
       separate();
       if (playing) touches();
       ballStep(dt);
@@ -1176,6 +1264,7 @@ export default {
       if (phase === 'reset') {
         const ready = players.every((p) => dist(p.p, p.spot) < 0.3);
         if (ready || phaseT > 2.6) {
+          if (net) link.send('ph', { k: 'play', hf: half });
           placeKickoff(true);
           blow('short');
           hud.message(half === 2 && clock === 0 ? 'Second half!' : 'Play!', 800);
@@ -1188,6 +1277,234 @@ export default {
         resultCard();
       }
       updateHud();
+    }
+
+    // ---------------------------------------------------------------- online: the host
+    // The other player's kid, where their device ran it (about 100 ms behind). Its tackle can still win
+    // the ball here, where the ball is.
+    function remotePlayer(pl, dt) {
+      pl.cd -= dt;
+      pl.stun -= dt;
+      pl.tackleCd -= dt;
+      pl.receiving -= dt;
+      pl.callFor -= dt;
+      const sm = link.sample();
+      if (sm) {
+        const { a, b, k } = sm;
+        const Lp = (q) => (a[q] ?? 0) + ((b[q] ?? 0) - (a[q] ?? 0)) * k;
+        const prev = pl.yaw;
+        pl.p.set(Lp('x'), 0, Lp('z'));
+        pl.v.set(Lp('vx'), 0, Lp('vz'));
+        pl.y = Math.max(0, Lp('y'));
+        pl.yaw = lerpA(a.yw || 0, b.yw || 0, k);
+        pl.hold = b.h || 0;
+        let tr = pl.yaw - prev;
+        tr = Math.atan2(Math.sin(tr), Math.cos(tr));
+        pl.turn = tr / Math.max(dt, 1e-3);
+      }
+      if (pl.dash > 0) {
+        pl.dash -= dt;
+        const o = ball.owner;
+        if (o && o.team !== pl.team && o.role === 'field' && dist(o.p, pl.p) < 0.95) steal(pl, o);
+        else if (!o && dist(ball.p, pl.p) < 0.8 && ball.p.y < 0.6) {
+          ball.owner = pl;
+          ball.last = pl;
+          pl.dash = 0;
+        }
+      }
+    }
+
+    // Every player, the ball and the clock, for the other device
+    function shareHost() {
+      link.share({
+        ph: phase,
+        cl: Math.round(clock * 10) / 10,
+        hf: half,
+        p: players.map((p) => [r2(p.p.x), r2(p.p.z), r2(p.y), r2(p.yaw), r1(p.v.x), r1(p.v.z), (p.stun > 0 ? 1 : 0) | (p.dash > 0 ? 2 : 0) | (p.kickT >= 0 ? 4 : 0) | (p.faceCam ? 8 : 0), p.dive ? p.dive.dir : 0, p.dive ? r2(p.dive.t) : 0, r2(Math.max(0, p.hold))]),
+        b: [r2(ball.p.x), r2(ball.p.y), r2(ball.p.z), r1(ball.v.x), r1(ball.v.y), r1(ball.v.z), ball.owner ? players.indexOf(ball.owner) : -1],
+      });
+    }
+
+    // The other player had to go: the computer runs their kid
+    function partnerLeftHost() {
+      net = false;
+      if (mate) {
+        mate.remote = false;
+        mate.human = false;
+        mate.speed = 5.0;
+        mate.dash = 0;
+      }
+      pop(`${themName} had to go. The computer plays for ${themName}.`, '#ffffff', 2600);
+    }
+
+    // ---------------------------------------------------------------- online: the joiner
+    function applySnap(dt) {
+      const sm = link.sample();
+      if (!sm) return;
+      const { a, b, k } = sm;
+      if (!Array.isArray(a.p) || !Array.isArray(b.p) || !Array.isArray(b.b)) return;
+      const Ln = (x, y) => x + (y - x) * k;
+      players.forEach((pl, i) => {
+        if (pl === me) return;
+        const A = a.p[i];
+        const B = b.p[i];
+        if (!A || !B) return;
+        const prev = pl.yaw;
+        pl.p.set(Ln(A[0], B[0]) / 100, 0, Ln(A[1], B[1]) / 100);
+        pl.y = Math.max(0, Ln(A[2], B[2]) / 100);
+        pl.yaw = lerpA(A[3] / 100, B[3] / 100, k);
+        pl.v.set(B[4] / 10, 0, B[5] / 10);
+        let tr = pl.yaw - prev;
+        tr = Math.atan2(Math.sin(tr), Math.cos(tr));
+        pl.turn = tr / Math.max(dt, 1e-3);
+        const bits = B[6];
+        pl.stun = bits & 1 ? 0.3 : 0;
+        pl.dash = bits & 2 ? 0.1 : 0;
+        if (bits & 4 && !pl.kickOn) pl.kickT = 0;
+        pl.kickOn = !!(bits & 4);
+        pl.faceCam = !!(bits & 8);
+        pl.dive = B[7] ? { dir: B[7], t: B[8] / 100 } : null;
+        pl.hold = B[9] / 100;
+      });
+      const A = a.b || b.b;
+      const B = b.b;
+      const owner = B[6] >= 0 ? players[B[6]] || null : null;
+      ball.owner = owner;
+      ball.v.set(B[3] / 10, B[4] / 10, B[5] / 10);
+      const start = tmp2.copy(ball.p);
+      if (owner === me && !(now() - (me.kickedAt || 0) < 700)) {
+        // our own ball sits at our own feet, where we are now
+        ball.p.x = damp(ball.p.x, me.p.x + Math.sin(me.yaw) * 0.5, 22, dt);
+        ball.p.z = damp(ball.p.z, me.p.z + Math.cos(me.yaw) * 0.5, 22, dt);
+        ball.p.y = damp(ball.p.y, R, 18, dt);
+      } else ball.p.set(Ln(A[0], B[0]) / 100, Math.max(R, Ln(A[1], B[1]) / 100), Ln(A[2], B[2]) / 100);
+      const dx = ball.p.x - start.x;
+      const dz = ball.p.z - start.z;
+      const ds = Math.hypot(dx, dz);
+      if (ds > 1e-4 && ds < 3) ballM.rotateOnWorldAxis(rollAxis.set(dz, 0, -dx).normalize(), (ds / R) * (ball.p.y < 0.6 ? 1 : 0.4));
+      if (Number.isFinite(b.cl)) clock = b.cl;
+      if (b.hf === 1 || b.hf === 2) half = b.hf;
+    }
+
+    // Our own kid runs here; the host sends everyone else, the ball, the clock and the goals
+    function stepGuest(dt, t) {
+      const playing = phase === 'play';
+      me.faceCam = false;
+      if (playing) {
+        if (dbg.auto) {
+          const tx = ball.owner === me ? L : ball.p.x;
+          goTo(me, tx, ball.owner === me ? 0 : ball.p.z, me.speed);
+        } else humanControl(dt);
+      } else if (phase === 'reset' || phase === 'intro' || phase === 'sync') goTo(me, me.spot.x, me.spot.z, me.speed);
+      else {
+        me.want.set(0, 0, 0);
+        const party = ((phase === 'goal' || phase === 'goalEnd') && me.team === scoringTeam) || phase === 'full' || phase === 'done';
+        me.faceCam = party && phaseT > 0.3;
+        if (me.faceCam) me.yaw = dampAngle(me.yaw, 0, 5, dt);
+      }
+      if (!playing) setActionLabel('Shoot');
+      movePlayer(me, dt, t);
+      // keep our kid out of the others (they are where their devices put them)
+      for (const o of players) {
+        if (o === me) continue;
+        const dx = me.p.x - o.p.x;
+        const dz = me.p.z - o.p.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 0.62 && d > 1e-4) {
+          me.p.x = o.p.x + (dx / d) * 0.62;
+          me.p.z = o.p.z + (dz / d) * 0.62;
+        }
+      }
+      if (phase === 'full' && phaseT > 3.6) {
+        phase = 'done';
+        resultCard();
+      }
+      updateHud();
+      link.share({ x: r2(me.p.x) / 100, z: r2(me.p.z) / 100, y: r2(me.y) / 100, yw: r2(me.yaw) / 100, vx: r2(me.v.x) / 100, vz: r2(me.v.z) / 100, h: r2(Math.max(0, me.hold)) / 100 });
+    }
+
+    // The host's goals, kick-offs and whistles
+    link.listen('go', (d) => !link.host && Number.isFinite(d?.at) && (goAt = d.at));
+    link.listen('ph', (d) => {
+      if (link.host || !d || !me) return;
+      if (Array.isArray(d.s)) [score[0], score[1]] = [d.s[0] | 0, d.s[1] | 0];
+      if (d.k === 'goal') {
+        const sc = players[d.sc | 0] || field(d.team ? 1 : 0)[0];
+        goalFx(d.team ? 1 : 0, d.side < 0 ? -1 : 1, sc, !!d.own, (d.bz || 0) / 100, (d.by || 30) / 100, (d.bv || 0) / 100);
+      } else if (d.k === 'reset') {
+        if (d.hf === 2 && half === 1) {
+          half = 2;
+          clock = 0;
+          lastBoardSec = -1;
+        }
+        startReset(d.kt ? 1 : 0);
+      } else if (d.k === 'play') {
+        kickoffSpots(kickTeam);
+        me.p.copy(me.spot);
+        me.v.set(0, 0, 0);
+        me.yaw = Math.PI / 2;
+        me.hold = me.dash = me.stun = 0;
+        blow('short');
+        hud.message(half === 2 && clock < 1 ? 'Second half!' : 'Play!', 800);
+        phase = 'play';
+        phaseT = 0;
+      } else if (d.k === 'half') {
+        phase = 'half';
+        phaseT = 0;
+        blow('long');
+        hud.message('Half time', 2000);
+      } else if (d.k === 'full') finishMatch();
+      updateHud();
+      lastBoardSec = -1;
+    });
+    link.listen('stun', () => {
+      if (link.host || !me) return;
+      me.stun = 0.75;
+      me.kid.squash = 0.72;
+      me.hold = 0;
+    });
+    link.listen('ev', (d) => !link.host && Array.isArray(d?.e) && d.e.forEach((e) => Array.isArray(e) && e[0] === 'p' && pop(String(e[1]).slice(0, 60), String(e[2] || '#fff').slice(0, 9), +e[3] || 800)));
+    // The joiner's kicks, passes, calls and tackles (host)
+    const theirBall = () => link.host && mate?.remote && phase === 'play' && ball.owner === mate;
+    link.listen('kick', (d) => {
+      if (!theirBall() || !d) return;
+      mate.yaw = Number.isFinite(d.yw) ? d.yw : mate.yaw;
+      shoot(mate, clamp(+d.k || 0.5, 0.25, 1), Number.isFinite(d.aim) ? clamp(d.aim, -GW, GW) : null);
+    });
+    link.listen('pass', (d) => {
+      if (!theirBall()) return;
+      if (Number.isFinite(d?.yw)) mate.yaw = d.yw;
+      pass(mate, me);
+    });
+    link.listen('call', () => {
+      if (!link.host || !mate?.remote || ball.owner !== me) return;
+      mate.callFor = 0.9;
+      chipText('Pass!', mate);
+    });
+    link.listen('tackle', (d) => {
+      if (!link.host || !mate?.remote || phase !== 'play') return;
+      mate.dash = 0.45; // a little longer than theirs: their kid shows here a moment later
+      mate.dashDir.set(+d?.x / 100 || 0, 0, +d?.z / 100 || 0);
+      mate.tackleCd = 0.7;
+    });
+
+    // The host had to go: this device runs the match from here, the computer runs their kid
+    function takeOver() {
+      net = false;
+      if (mate) {
+        mate.human = false;
+        mate.speed = 5.0;
+      }
+      for (const p of players) {
+        p.dash = 0;
+        p.kickOn = false;
+      }
+      pop(`${themName} had to go. The computer plays for ${themName}.`, '#ffffff', 2600);
+      if (!me) return askMode();
+      if (phase === 'sync') {
+        phase = 'intro';
+        phaseT = 0;
+      }
     }
 
     function refStep(dt, t) {
@@ -1218,12 +1535,20 @@ export default {
       }
     }
 
-    function update(dt, t) {
+    function update(dt0, t) {
       if (disposed) return;
+      // a match that started together keeps real time (in steps of at most 34 ms), whatever the frame rate
+      const rdt = link.dt();
+      if (link.check()) (link.host ? partnerLeftHost : takeOver)();
+      const n = played ? Math.max(1, Math.ceil(rdt / 0.034)) : 1;
+      const dt = played ? rdt / n : dt0;
       if (phase !== 'choose' && me) {
-        step(dt, t);
-        for (const p of players) syncKid(p, dt, t);
-        refStep(dt, t);
+        if (net && !link.host) applySnap(dt * n);
+        for (let i = 0; i < n; i++) step(dt, t);
+        if (net && link.host) shareHost();
+        link.flush();
+        for (const p of players) syncKid(p, dt * n, t);
+        refStep(dt * n, t);
         marker.position.set(me.p.x, me.y + 1.95 + Math.sin(t * 5) * 0.06, me.p.z);
         marker.rotation.y = t * 2;
         labels();
@@ -1254,6 +1579,19 @@ export default {
       ball.owner = me;
       ball.p.set(x + 0.5, R, z);
     };
+    // Online test hooks
+    dbg.net = () => ({ net, host: link.host, phase, score: [...score], half, clock: +clock.toFixed(1), owner: ball.owner?.name || null, me: me && [+me.p.x.toFixed(2), +me.p.z.toFixed(2)], mate: mate && [+mate.p.x.toFixed(2), +mate.p.z.toFixed(2)], names: players.map((p) => p.name), human: players.filter((p) => p.human).map((p) => p.name) });
+    dbg.kick = (k = 1) => {
+      if (ball.owner !== me) return false;
+      if (net && !link.host) guestKick('kick', { k, aim: null });
+      else shoot(me, k, null);
+      return true;
+    };
+    dbg.goal = (team = 0) => {
+      if (!auth() || phase !== 'play') return false;
+      goal(team, team === 0 ? 1 : -1);
+      return true;
+    };
     dbg.choose = (id) => {
       const el = document.querySelector('.choose [data-c="' + id + '"]');
       if (el) el.click();
@@ -1263,6 +1601,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        link.dispose();
         ui?.remove();
         if (window.__football === dbg) delete window.__football;
       },

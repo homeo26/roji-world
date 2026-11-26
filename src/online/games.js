@@ -48,6 +48,7 @@ const unitText = (n, unit) => (unit === '%' ? `${n}%` : `${n} ${n === 1 ? unit.r
 export function cleanResult(r = {}) {
   const out = {};
   if (r.quit) out.quit = true;
+  if (r.team === true) out.team = true; // both on one team: one shared result
   if (r.win === true || r.win === false || r.win === null) out.win = r.win;
   for (const k of ['score', 'opp', 'time', 'place', 'stars', 'of']) {
     const v = num(r[k]);
@@ -104,6 +105,7 @@ export function compare(K, mine, theirs, names) {
   if (mine.quit && theirs.quit) return { text: '', who: null };
   if (theirs.quit) return { text: `${names.them} left the game`, who: 'me' };
   if (mine.quit) return { text: `${names.me} left the game`, who: 'them' };
+  if (mine.team && theirs.team) return { text: mine.win === true ? 'You won together!' : mine.win === null ? 'A draw, together!' : 'Well played, team!', who: 'both' };
   if (K.kind === 'coop') {
     const a = mine.score ?? mine.stars;
     const b = theirs.score ?? theirs.stars;
