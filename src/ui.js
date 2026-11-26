@@ -732,7 +732,6 @@ export class Minimap {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, c.width, c.height);
     const P = (x, z) => [(x - x0) * s, (z - z0) * s];
-    const W = (x1 - x0) * s;
     ctx.fillStyle = '#9ad06a';
     ctx.strokeStyle = '#d9a066';
     ctx.lineWidth = 3;
@@ -745,14 +744,19 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
-    // Snow at the north end
-    const [, snowY] = P(0, -88);
-    if (snowY > 0) {
-      const g = ctx.createLinearGradient(0, snowY, 0, snowY - 10);
+    // Snow at the north end: the ski hill's snow field (world.snow, world metres)
+    const sn = this.world.snow;
+    if (sn) {
+      const [sx0, sy0] = P(sn.x0, sn.z0);
+      const [sx1, sy1] = P(sn.x1, sn.z1);
+      const g = ctx.createLinearGradient(0, sy1, 0, sy1 - 10);
       g.addColorStop(0, 'rgba(242,246,251,0)');
       g.addColorStop(1, 'rgba(242,246,251,0.95)');
+      ctx.save();
+      ctx.clip(); // inside the island outline drawn just above
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, snowY);
+      ctx.fillRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
+      ctx.restore();
     }
     for (const pl of this.places) {
       const [x, y] = P(pl.x - pl.w / 2, pl.z - pl.d / 2);
@@ -776,9 +780,9 @@ export class Minimap {
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    for (const road of this.world.cityRoads || []) line(road, '#d8d2e2', 5);
-    line(this.world.samples, '#f6e4bd', 5);
-    line(this.world.townSamples, '#f6e4bd', 5);
+    for (const road of this.world.cityRoads || []) line(road, '#d8d2e2', 8);
+    line(this.world.samples, '#f6e4bd', 6);
+    line(this.world.townSamples, '#f6e4bd', 6);
     line(this.world.futureSamples, 'rgba(255,255,255,0.8)', 2, [3, 5]);
     if (trail > 0) line(this.world.samples.slice(0, trail + 1), '#ffb347', 3);
     this.layer = c;

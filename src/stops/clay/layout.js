@@ -1,7 +1,9 @@
-// Where the Clay Café stop sits, in metres relative to st.origin (world (4, -4.9)); the front faces +Z.
+import { PADS, DIORAMA_OFFSET } from '../../world.js';
+
+// Where the Clay Café stop sits, in metres relative to st.origin (6.2 m behind its pad); the front faces +Z.
 // Footprint: x -5.5 .. 4, z -4 .. 3. The pad is at z 6.2 and the weekend sign at (-3.3, 4.2).
 
-export const ORIGIN = [4, -4.9];
+export const ORIGIN = [PADS.clay[0], PADS.clay[1] + DIORAMA_OFFSET];
 export const B = { x0: -4.4, x1: 2.1, z0: -3.8, z1: -0.8, h: 3.3 }; // the café walls
 export const RIDGE = { z: -2.3, y: 4.75 }; // the roof ridge, along x
 export const EAVE = 0.42; // roof overhang at the front and back

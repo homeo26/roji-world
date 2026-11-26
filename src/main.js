@@ -244,13 +244,16 @@ for (const s of stations) {
 }
 for (const [fx_, fz] of FUTURE) keepOut.push({ x: fx_, z: fz - 5.5, r: 3.2 }, { x: fx_, z: fz, r: 2.6 });
 keepOut.push({ x: CAR.x, z: CAR.z, r: 3.4 }, { x: PADS.plaza[0] + 3.2, z: PADS.plaza[1] - 1.8, r: 1.6 });
-keepOut.push({ x: -40, z: 8.2, r: 6.4 }); // the bigger YumYum building
-if (stopMods.fencing) keepOut.push({ x: 10.5, z: 14.6, r: 1.6 }); // the fencing club yard's front corner
+keepOut.push({ x: byId.yumyum.origin.x, z: byId.yumyum.origin.z - 1.6, r: 6.4 }); // the bigger YumYum building
+if (stopMods.fencing) keepOut.push({ x: byId.fencing.origin.x - 4.5, z: byId.fencing.origin.z + 2.5, r: 1.6 }); // the fencing club yard's front corner
 const rects = spaces.places.map((s) => ({ x: s.origin.x, z: s.origin.z, hw: s.size.w / 2 + 1.2, hd: s.size.d / 2 + 1.2 }));
-// Rebuilt weekend stops fill the free ground between the paths: no trees or bushes inside them
-// (world boxes [x0, x1, z0, z1], measured from the paths and the other stops)
-const STOP_GROUND = { horse: [-5, 8, 5.6, 13.6], fencing: [8.5, 18, 6.6, 14.1], clay: [-1.5, 8, -8.9, -1.9], boardgames: [13.5, 26.5, -8.2, -1.2], drawing: [-13.5, -2, -7.2, -0.7], plaza: [-47.5, -27, -19.7, -6.7] };
-for (const [id, [x0, x1, z0, z1]] of Object.entries(STOP_GROUND)) if (stopMods[id]) rects.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: (x1 - x0) / 2 + 0.6, hd: (z1 - z0) / 2 + 0.6 });
+// Rebuilt weekend stops: no trees or bushes on their buildings and yards (boxes [x0, x1, z0, z1] relative to
+// each stop's origin, 6.2 m behind its pad); the rest of each stop's plot keeps its trees and flowers
+const STOP_GROUND = { horse: [-6.5, 6.5, -5, 3], fencing: [-6.5, 3, -5.5, 2], clay: [-5.5, 4, -4, 3], boardgames: [-4.5, 8.5, -5, 2], drawing: [-3.5, 8, -4, 2.5], plaza: [-7.5, 13, -10, 3] };
+for (const [id, [x0, x1, z0, z1]] of Object.entries(STOP_GROUND)) {
+  const o = stopMods[id] && byId[id]?.origin;
+  if (o) rects.push({ x: o.x + (x0 + x1) / 2, z: o.z + (z0 + z1) / 2, hw: (x1 - x0) / 2 + 0.6, hd: (z1 - z0) / 2 + 0.6 });
+}
 await bootStep(0.89, 'Planting trees and flowers');
 world.scatterNature(keepOut, rects);
 bakeStatic(world.statics, [], mergeGeometries);
@@ -1143,7 +1146,7 @@ const camLook = new THREE.Vector3(P().pos.x, 0.9, P().pos.z);
 const camPos = new THREE.Vector3();
 const followPos = new THREE.Vector3();
 const introPos = new THREE.Vector3();
-const introLook = new THREE.Vector3(-9, 0, -2);
+const introLook = new THREE.Vector3(4, 0, 2); // the middle of the island, round Roji's home
 const desiredLook = new THREE.Vector3();
 const lookTmp = new THREE.Vector3();
 const offset = new THREE.Vector3(0, 12, 13.5);
