@@ -463,6 +463,7 @@ export default {
       const palLine = ctx.partner === 'homama' ? `Homama says his lumpy pot is a sculpture.` : `Roji says her lumpy pot is a very special shape.`;
       ctx.finish({
         win,
+        score: pct,
         title: win ? 'Beautiful pot!' : 'A wobbly treasure',
         text: `${pct}% match with the ${target.name.toLowerCase()}. Your ${look} pot is on the shelf in the Clay Café.${win ? '' : ` ${WIN_AT}% wins.`}${isBest && win ? ' New best!' : ''}<br>${palLine}`,
       });

@@ -626,7 +626,7 @@ export default {
       } else {
         text = `${winner.me ? meName : winner.name} won this time. You came ${K.ord(place)} in ${time} s with ${me.clean} of ${total} clean jumps. Sprint on the straights and jump at the yellow arrows.`;
       }
-      ctx.finish({ win: place === 1, title: place === 1 ? `${meName} wins the Meadow Cup!` : `${K.ord(place)} place`, text });
+      ctx.finish({ win: place === 1, title: place === 1 ? `${meName} wins the Meadow Cup!` : `${K.ord(place)} place`, text, place, time: me.time });
     }
 
     // ---------------------------------------------------------------- visuals

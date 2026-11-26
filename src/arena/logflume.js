@@ -485,6 +485,8 @@ function runRide(ctx, course, { prog, flow, dbg, rider, keep }) {
     hud.score('');
     ctx.finish({
       win: stars > 0,
+      score: st.score,
+      stars,
       title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a splash!',
       text: `${photo}${st.score} ${st.score === 1 ? 'point' : 'points'}${newBest ? ' (a new best!)' : `, best ${rec.best}`}. ${st.got} of ${items.length} caught.${dry}<br>${line}${opened.length ? `<br><b>${opened.join(' and ')}</b> ${opened.length > 1 ? 'are' : 'is'} open now.` : ''}`,
     });

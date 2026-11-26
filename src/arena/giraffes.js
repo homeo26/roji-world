@@ -652,6 +652,8 @@ export default {
       const title = starsWon === 3 ? 'Jodi is impressed!' : starsWon === 2 ? 'Very neat!' : starsWon === 1 ? 'A good start!' : 'Jouri is still hungry!';
       ctx.finish({
         win: starsWon >= 2 ? true : starsWon === 1 ? null : false,
+        score: S.score,
+        stars: starsWon,
         title,
         text: `${meName} and Jouri caught <b>${S.score}</b> points${newBest ? ' (a new best)' : best ? ` (best ${best})` : ''}.<br>Jodi's marks: ${S.grades.join(', ')}. That is ${total} out of 50: <b>${starText}</b>.<br>${partnerName} threw every carrot with love.${unlock}`,
       });

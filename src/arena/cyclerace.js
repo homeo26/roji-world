@@ -843,6 +843,8 @@ export default {
       const sweet = place === 1 ? `${partnerName} rings the bell for you.` : Cp.finish !== null && times[0].o === Cp ? `${partnerName} waits for you at the finish with a hug.` : `${partnerName} says you rode brilliantly.`;
       ctx.finish({
         win: place === 1,
+        place,
+        time: myT,
         title: place === 1 ? 'You win the race!' : place === 2 ? 'Second place!' : place === 3 ? 'Third place!' : 'Well ridden!',
         text: `${lines.join('<br>')}<br>${Pl.coins} of ${coins.length} coins &middot; ${newBest ? 'New best time!' : `Best ${fmt(prev)}`}<br>${sweet}`,
       });

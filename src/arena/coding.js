@@ -668,7 +668,7 @@ export default {
               st.over = true;
               setTimeout(() => {
                 if (disposed) return;
-                ctx.finish({ win: false, title: 'The bugs got in', text: `Homama reached ${Math.floor(st.progress * 100)}%. Squash them before they reach Deploy. You squashed ${st.squashed} bugs.` });
+                ctx.finish({ win: false, score: st.squashed, title: 'The bugs got in', text: `Homama reached ${Math.floor(st.progress * 100)}%. Squash them before they reach Deploy. You squashed ${st.squashed} bugs.` });
               }, 1400);
             }
             continue;
@@ -718,6 +718,7 @@ export default {
           if (newBest) ctx.save('best', st.squashed);
           ctx.finish({
             win: true,
+            score: st.squashed,
             title: 'Feature shipped!',
             text: `Reminders for Roji's clinic are live and the pipeline is green. You squashed <b>${st.squashed}</b> bugs${newBest && best > 0 ? ', a new best!' : best > 0 ? ` (best ${best})` : ''}.`,
           });

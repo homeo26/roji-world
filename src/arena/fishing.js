@@ -483,7 +483,7 @@ export default {
       let text = `You earned <b>${total} of 9 stars</b> today (best ${stats.best}). Fish book: ${bookCount()} of ${FISH.length}.`;
       if (fresh.length) text += `<br>Unlocked: <b>${fresh.map((u) => u.name).join(', ')}</b>!`;
       else if (next) text += `<br>${next.at - stats.total} more stars for the ${next.name.replace(/ \(.*\)/, '')}.`;
-      ctx.finish({ win: allDone, title: allDone ? (total >= 8 ? 'What a catch!' : 'A lovely day out!') : total > 0 ? 'So close!' : 'Back to the harbour', text });
+      ctx.finish({ win: allDone, stars: total, title: allDone ? (total >= 8 ? 'What a catch!' : 'A lovely day out!') : total > 0 ? 'So close!' : 'Back to the harbour', text });
     };
 
     // ---------------------------------------------------------------- catching

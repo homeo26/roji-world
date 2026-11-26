@@ -248,6 +248,7 @@ export default {
       const title = total >= 13 ? 'Gala champions!' : total >= 9 ? 'What a splashy day!' : 'A lovely swim together';
       ctx.finish({
         win: total >= 9,
+        stars: total,
         title,
         text: `<b>${total} of 15 stars</b>${newBest ? ' (new best!)' : best.total ? ` (best ${best.total})` : ''}<br><span style="font-size:.86em">${rows}</span>`,
       });

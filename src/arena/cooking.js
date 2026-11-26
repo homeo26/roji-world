@@ -500,6 +500,9 @@ export default {
     let lastResult = null;
     async function begin(i, { skipCount = false } = {}) {
       ui.closeCard();
+      ctx.online.setting('level', i); // online: the other player cooks the same kitchen
+      ctx.online.next();
+      ctx.online.progress(LEVELS[i].name);
       if (!L || L.i !== i || L.sim.clock > 0.5 || L.mode !== progress.mode) build(i, progress.mode);
       if (auto) setAuto(true);
       phase = 'count';
@@ -533,6 +536,7 @@ export default {
       saveProgress(ctx.save, progress);
       const newly = LEVELS.findIndex((_, k) => !wasOpen[k] && isOpen(progress, k));
       lastResult = { win: stars > 0, coins: score, stars, level: LEVELS[i].id };
+      ctx.online.finished({ win: stars > 0, score, stars, title: LEVELS[i].name }); // online: the result for the other player
       later(900, () => {
         for (const c of S.chefs) {
           c.kid.carry(null);
@@ -711,6 +715,10 @@ export default {
 
     // ---------------------------------------------------------------- start on the kitchen map
     showMap();
+    // Online: joining the other player's game opens the kitchen they are cooking in
+    const follow = (lv) => phase === 'menu' && Number.isInteger(lv) && lv >= 0 && lv < LEVELS.length && showIntro(lv);
+    if (!ctx.online.isHost) follow(ctx.online.setting('level'));
+    ctx.online.on('setting', (k, v) => k === 'level' && !ctx.online.isHost && follow(v));
 
     // ---------------------------------------------------------------- per frame
     const chopBeat = new Map();
@@ -905,6 +913,7 @@ export default {
           if (phase === 'play' || phase === 'count') {
             ui.setClock(S.time, L.lv.time);
             ui.setScore(S.score, L.lv.stars);
+            ctx.online.score(S.score);
             ui.tickOrders(S.orders);
             warnings();
             labels();

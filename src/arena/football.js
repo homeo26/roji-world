@@ -984,7 +984,7 @@ export default {
         }
       }
       if (win) ctx.save('wins', (ctx.load('wins', 0) || 0) + 1);
-      ctx.finish({ win, title, text });
+      ctx.finish({ win, title, text, score: a, opp: b });
     }
 
     // ---------------------------------------------------------------- poses on top of Kid.update

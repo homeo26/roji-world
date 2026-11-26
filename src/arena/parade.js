@@ -495,6 +495,8 @@ export default {
         const c = st.counts;
         ctx.finish({
           win: stars > 0,
+          score: st.score,
+          stars,
           title: stars ? `${stars === 1 ? 'One star' : stars === 2 ? 'Two stars' : 'Three stars'}!` : 'What a parade!',
           text: `${st.score.toLocaleString('en')} points${newBest ? ' (a new best!)' : ''}, best ${rec.best.toLocaleString('en')}.<br>Perfect ${c.perfect}, great ${c.great}, good ${c.good}, missed ${c.miss}. Longest combo ${st.maxCombo}.<br>${line}${next}`,
         });

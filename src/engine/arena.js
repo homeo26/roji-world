@@ -10,6 +10,34 @@ import { choose, closeChoices } from './choose.js';
 // A game module (src/arena/<id>.js) default-exports:
 //   { id, title, tagline, async start(ctx) -> { update(dt, t), dispose?() } }
 // See ARENA-CONTRACT in the brief for every field of ctx.
+// ctx.online: playing together in an online room (src/online/together.js). While the other player plays
+// the same game on their device it is that game's session; otherwise OFFLINE below, so a game can always
+// call it. A game that does nothing special still shares its score badge (hud.score) and its result
+// (finish or end) with the other player. The fields are listed in the stage B notes (v10).
+const OFFLINE = (me, partner) => ({
+  inRoom: false,
+  me,
+  partner,
+  isHost: true,
+  sid: null,
+  seed: (Math.random() * 2 ** 31) >>> 0,
+  kind: null,
+  partnerHere: false,
+  partnerState: null,
+  partnerLive: null,
+  partnerResult: null,
+  send: async () => false,
+  on: () => () => {},
+  share() {},
+  score() {},
+  progress() {},
+  finished() {},
+  next() {},
+  setting: (key, value) => value,
+  now: () => Date.now(),
+  waitPartner: async () => false,
+  cheer() {},
+});
 
 const CSS = `
 #arena { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-family: var(--font, 'Fredoka', system-ui, sans-serif); color: #3b2b3f; }
@@ -61,9 +89,11 @@ body.arena-on #hud, body.arena-on #minimap, body.arena-on #card, body.arena-on #
 `;
 
 export class ArenaHost {
-  // o: { renderer, sound, input, looks, onOpen(), onClose(result) }
+  // o: { renderer, sound, input, looks, onOpen(), onClose(result) }. together: set by online play, it
+  // gives a game its session with the other player: begin(id, opts, '3d') -> session | null.
   constructor(o) {
     Object.assign(this, o);
+    this.together = null;
     this.current = null;
     this.mods = {};
     this.pressedSet = new Set();
@@ -147,7 +177,7 @@ export class ArenaHost {
       const b = e.target.closest('[data-r]');
       if (!b) return;
       this.sound?.ui('tap');
-      if (b.dataset.r === 'again') this.restart();
+      if (b.dataset.r === 'again') this.again();
       else this.end(this.lastResult || {});
     });
   }
@@ -221,6 +251,11 @@ export class ArenaHost {
     const mod = this.mods[id];
     if (!mod) return null;
     this.current = { id, mod, opts, starting: true };
+    try {
+      this.current.sess = this.together?.begin(id, opts, '3d') || null;
+    } catch (e) {
+      console.warn('online game:', e?.message);
+    }
     document.body.classList.add('arena-on');
     this.el.classList.remove('hidden');
     this.$('.a-title b').textContent = mod.title || id;
@@ -244,6 +279,7 @@ export class ArenaHost {
     this.$('.a-score').innerHTML = '';
     this.$('.a-hint').textContent = '';
     this.$('.a-result').classList.add('hidden');
+    this.$('.a-card .ol-vs')?.remove();
     document.body.classList.remove('arena-result');
     c.viewShift = 0;
     c.viewShiftNow = 0;
@@ -281,6 +317,7 @@ export class ArenaHost {
     }
     c.game = game;
     c.starting = false;
+    c.sess?.started();
   }
 
   makeCtx(c) {
@@ -288,6 +325,8 @@ export class ArenaHost {
     const looks = this.looks;
     const me = c.opts.me || 'roji';
     const partner = me === 'roji' ? 'homama' : 'roji';
+    const sess = c.sess;
+    const ask = (spec) => choose({ exit: () => host.end({ quit: true }), ...spec });
     return {
       THREE,
       util,
@@ -301,6 +340,7 @@ export class ArenaHost {
       partner,
       looks,
       opts: c.opts,
+      online: sess ? sess.api() : OFFLINE(me, partner),
       makeKid: (who) => new Kid(typeof who === 'string' ? looks[who] : who),
       models: {
         pony: (coat) => this.models?.pony?.(coat),
@@ -360,11 +400,16 @@ export class ArenaHost {
           host.$('.a-title b').textContent = t;
           host.$('.a-title span').textContent = sub;
         },
-        score: (html) => (host.$('.a-score').innerHTML = html),
+        score: (html) => {
+          host.$('.a-score').innerHTML = html;
+          sess?.badge(html);
+        },
         message: (html, ms) => host.message(html, ms),
         hint: (text) => (host.$('.a-hint').textContent = text || ''),
         buttons: (spec) => host.setButtons(spec),
-        choose: (spec) => choose({ exit: () => host.end({ quit: true }), ...spec }), // { title, text, options: [{ id, label, sub }] } -> Promise<id | null>
+        // { title, text, options: [{ id, label, sub }] } -> Promise<id | null>. Played together, the other
+        // player gets the starter's answer without the card.
+        choose: (spec) => (sess ? sess.choose(spec, ask) : ask(spec)),
         async countdown(n = 3) {
           for (let i = n; i > 0; i--) {
             host.message(String(i), 700);
@@ -376,10 +421,18 @@ export class ArenaHost {
         },
       },
       // Show the result card. { win: true|false|null, title, text }. "Play again" restarts the game.
+      // Played together, the card also shows the other player's result. A result may carry numbers to
+      // compare: { score, opp, time, place, stars }.
       finish(result = {}) {
         host.lastResult = result;
         host.$('.a-card h2').textContent = result.title || (result.win ? 'You win!' : result.win === false ? 'So close!' : 'Well played!');
         host.$('.a-card p').innerHTML = result.text || '';
+        const again = host.$('[data-r="again"]');
+        again.textContent = again.dataset.label || again.textContent;
+        if (c.sess) {
+          c.sess.finished(result);
+          c.sess.cardShown(host.$('.a-card'));
+        }
         host.$('.a-result').classList.remove('hidden');
         document.body.classList.add('arena-result');
         // Short landscape screens: the card sits on the right, so slide the scene left to keep the celebration in view
@@ -397,12 +450,14 @@ export class ArenaHost {
         }
       },
       load(key, fallback = null) {
+        let v;
         try {
-          const v = localStorage.getItem(`roji-arena-${c.id}-${key}`);
-          return v === null ? fallback : JSON.parse(v);
+          const s = localStorage.getItem(`roji-arena-${c.id}-${key}`);
+          v = s === null ? fallback : JSON.parse(s);
         } catch {
-          return fallback;
+          v = fallback;
         }
+        return sess ? sess.load(key, v) : v; // played together: the starter's round or course at the start
       },
     };
   }
@@ -437,9 +492,32 @@ export class ArenaHost {
     await this.boot();
   }
 
+  // Play again (or Rematch): played together, a new session that invites the other player again.
+  // rejoin: we said yes to the other player's rematch, so take their session.
+  again(rejoin = false) {
+    const c = this.current;
+    if (!c) return;
+    try {
+      if (rejoin || !c.sess) {
+        c.sess?.close({ quit: true }, true);
+        c.sess = this.together?.begin(c.id, c.opts, '3d') || null;
+      } else c.sess = c.sess.again();
+    } catch (e) {
+      console.warn('online game:', e?.message);
+      c.sess = null;
+    }
+    return this.restart();
+  }
+
   end(result = {}) {
     const c = this.current;
     if (!c) return;
+    try {
+      c.sess?.close(result);
+    } catch (e) {
+      console.warn('online game:', e?.message);
+    }
+    c.sess = null;
     this.dispose(c);
     this.current = null;
     closeChoices();

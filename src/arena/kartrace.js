@@ -1074,7 +1074,7 @@ export default {
       } else {
         text = `${winner.name} won this time. You came ${K.ord(place)} in ${time} s. Drift round the bends for mini boosts and grab the item boxes.`;
       }
-      ctx.finish({ win: place === 1, title: place === 1 ? `${meName} wins the Kart Race!` : `${K.ord(place)} place`, text });
+      ctx.finish({ win: place === 1, title: place === 1 ? `${meName} wins the Kart Race!` : `${K.ord(place)} place`, text, place, time: me.time });
     }
 
     // ---------------------------------------------------------------- visuals
