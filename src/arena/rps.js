@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import { damp, clamp, lerp, easeOutBack } from '../util.js';
-import { mat, umat, mesh, canvasTexture, roundRect, FONT, playerColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, esc, PURPLE } from './board/kit.js';
+import { mat, umat, mesh, canvasTexture, roundRect, FONT, playerColors, roomColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, esc, PURPLE } from './board/kit.js';
 import { buildRoom } from './board/room.js';
 import { Player } from './board/players.js';
 import { SIGNS, SIGN_NAMES, BEATS, VERBS, handSet, handGeo, resetHands } from './board/hands.js';
+import { together, seal, salt } from './board/online.js';
 
 // Rock Paper Scissors: Roji and Homama face each other on the rug in the Game Night room, shake
 // their fists for "rock, paper, scissors, go!" and show big chunky hands. Best of five.
+// In an online room "Play together" plays it for real: both pick at the same time on their own device.
+// Each sends a fingerprint of its pick first and the pick itself only once both fingerprints are in, then
+// both devices shake and show the two hands together at one shared moment.
 
 const TARGET = 3;
 const KX = 0.8;
@@ -43,7 +47,8 @@ export default {
 
     const meId = ctx.me;
     const paId = ctx.partner;
-    const [colMe, colPa] = playerColors(looks[meId].top, looks[paId].top);
+    const duo = together(ctx);
+    const [colMe, colPa] = duo.can ? roomColors(ctx) : playerColors(looks[meId].top, looks[paId].top);
     const room = buildRoom(ctx, { table: false });
     const gt = room.glowTex;
 
@@ -172,7 +177,7 @@ export default {
     // ---------------------------------------------------------------- HUD and state
     const ui = boardUi();
     const tally = ctx.load('tally', { me: 0, partner: 0 });
-    const st = { phase: 'choose', mode: 'cpu', picker: 'me', choice: { me: null, pa: null }, score: { me: 0, pa: 0 }, round: 0, focus: 0, lock: 0, showTokens: 0 };
+    const st = { phase: 'choose', mode: 'cpu', picker: 'me', choice: { me: null, pa: null }, score: { me: 0, pa: 0 }, round: 0, focus: 0, lock: 0, showTokens: 0, throwN: 0 };
     const name = { me: looks[meId].name, pa: looks[paId].name };
     const showScore = () => {
       hud.score(`<span style="color:${colMe}">${name.me}</span> ${st.score.me} - ${st.score.pa} <span style="color:${colPa}">${name.pa}</span>`);
@@ -181,13 +186,14 @@ export default {
     showScore();
     hud.buttons({ action: null, jump: null, stick: false });
     hud.hint('Click a hand, or press 1 2 3 (R P S). Arrows and E work too');
-    dbg.state = () => ({ phase: st.phase, picker: st.picker, mode: st.mode, score: `${st.score.me}-${st.score.pa}`, round: st.round });
+    dbg.state = () => ({ phase: st.phase, picker: st.picker, mode: st.mode, score: `${st.score.me}-${st.score.pa}`, round: st.round, throwN: st.throwN, picks: `${st.choice.me || '-'}:${st.choice.pa || '-'}`, kids: `${meId}:${st.score.me},${paId}:${st.score.pa}` });
     dbg.pick = (s) => {
       if (st.phase === 'pick') onPick(s);
     };
 
     function startRound() {
       st.round++;
+      st.throwN++;
       st.choice = { me: null, pa: null };
       st.picker = 'me';
       st.phase = 'pick';
@@ -212,7 +218,13 @@ export default {
         t.hand.material = mat(P[k].look.skin, { rough: 0.6 });
       }
       if (st.mode === 'cpu') ui.turn(markSvg.face(color.me), color.me, st.round === 1 ? `Pick your hand, ${name.me}` : `Round ${st.round}: pick your hand`);
-      else {
+      else if (st.mode === 'online') {
+        // They pick at the same time on their device
+        const done = !!net.commit[st.throwN];
+        ui.turn(markSvg.face(color.me), color.me, done ? `${name.pa} has picked. Pick your hand!` : st.round === 1 ? `Pick your hand, ${name.me}` : `Round ${st.round}: pick your hand`);
+        P.pa.arm.mode = 'ready';
+        P.pa.think(!done);
+      } else {
         ui.turn(markSvg.face(color[k]), color[k], `${name[k]}, pick in secret`);
         const o = k === 'me' ? 'pa' : 'me';
         P[o].arm.mode = 'free';
@@ -231,6 +243,17 @@ export default {
       st.choice[k] = s;
       const tok = tokens.find((t) => t.s === s);
       tok.lift = 1;
+      if (st.mode === 'online') {
+        st.phase = 'wait';
+        st.showTokens = 0;
+        const n = st.throwN;
+        net.salt[n] = salt();
+        duo.send('commit', { r: n, h: seal(`${s}:${net.salt[n]}`) });
+        if (!net.commit[n]) ui.turn(markSvg.face(color.pa), color.pa, `Waiting for ${name.pa} to pick`, true);
+        else ui.hideTurn();
+        reveal();
+        return;
+      }
       if (st.mode === 'cpu') {
         st.choice.pa = pick(SIGNS);
         shoot();
@@ -253,6 +276,7 @@ export default {
 
     async function shoot() {
       st.phase = 'shoot';
+      dbg.shootAt = duo.now();
       st.showTokens = 0;
       ui.hideTurn();
       for (const k of ['me', 'pa']) {
@@ -309,7 +333,7 @@ export default {
       bubbles[l].dim = 1;
       ui.turn(markSvg.face(color[w]), color[w], `${name[w]} wins the round`);
       ui.say(`${VERBS[st.choice[w]]}!`, 2000);
-      sound.ui(st.mode === 'cpu' && w === 'pa' ? 'bad' : 'good');
+      sound.ui(st.mode !== 'duo' && w === 'pa' ? 'bad' : 'good');
       snd.sparkle();
       P[w].arm.mode = 'free';
       P[w].kid.emote('cheer');
@@ -324,6 +348,7 @@ export default {
         return startRound();
       }
       st.phase = 'over';
+      duo.end();
       hud.hint('');
       if (w === 'me') tally.me++;
       else tally.partner++;
@@ -331,7 +356,8 @@ export default {
       await S.wait(1.1);
       if (disposed) return;
       fx.burst(new THREE.Vector3(P[w].kid.root.position.x, 1.8, 0.2), [color[w], '#ffd166', '#ffffff', '#ff9eb5'], 100);
-      ui.turn(markSvg.face(color[w]), color[w], `${name[w]} wins the match!`);
+      const champ = duo.winner(name[w], w === 'pa');
+      ui.turn(markSvg.face(color[w]), color[w], `${champ} wins the match!`);
       P[w].kid.emote('dance');
       P[l].arm.mode = 'free';
       P[l].kid.emote(P[l].id === 'homama' ? 'heart' : 'bow');
@@ -340,15 +366,78 @@ export default {
       st.phase = 'done';
       ctx.finish({
         win: st.mode === 'duo' ? true : w === 'me',
-        title: `${name[w]} wins!`,
-        text: `${name[w]} beat ${name[l]} ${st.score[w]} - ${st.score[l]}. Matches so far: ${name.me} ${tally.me}, ${name.pa} ${tally.partner}.`,
+        title: `${champ} wins!`,
+        text: `${champ} beat ${name[l]} ${st.score[w]} - ${st.score[l]}. Matches so far: ${name.me} ${tally.me}, ${name.pa} ${tally.partner}.`,
       });
     }
 
+    // ---------------------------------------------------------------- played together
+    // Per throw n: their fingerprint, their pick with its salt, our salt and when each side showed its pick
+    const net = { commit: {}, reveal: {}, salt: {}, sent: {}, shot: {} };
+    duo.on('commit', (d) => {
+      if (!Number.isInteger(d?.r) || typeof d.h !== 'string' || net.commit[d.r]) return;
+      net.commit[d.r] = d.h;
+      if (d.r !== st.throwN || st.mode !== 'online') return;
+      P.pa.think(false);
+      P.pa.gesture('nod');
+      if (st.phase === 'pick') ui.turn(markSvg.face(color.me), color.me, `${name.pa} has picked. Pick your hand!`);
+      else if (st.phase === 'wait') ui.hideTurn();
+      reveal();
+    });
+    duo.on('reveal', (d) => {
+      if (!Number.isInteger(d?.r) || net.reveal[d.r]) return;
+      net.reveal[d.r] = d;
+      go();
+    });
+    // Both fingerprints are in: show ours
+    function reveal() {
+      const n = st.throwN;
+      if (st.mode !== 'online' || st.phase !== 'wait' || !net.commit[n] || net.sent[n]) return;
+      net.sent[n] = duo.now();
+      duo.send('reveal', { r: n, s: st.choice.me, k: net.salt[n], t: net.sent[n] });
+      go();
+    }
+    // Both picks are in: check theirs against its fingerprint, then shake together at one shared moment
+    async function go() {
+      const n = st.throwN;
+      const d = net.reveal[n];
+      if (st.mode !== 'online' || st.phase !== 'wait' || !net.sent[n] || !d || net.shot[n]) return;
+      net.shot[n] = true;
+      const fair = SIGNS.includes(d.s) && typeof d.k === 'string' && seal(`${d.s}:${d.k}`) === net.commit[n];
+      if (!fair) console.warn('Rock Paper Scissors: the pick does not match its fingerprint', d);
+      st.choice.pa = SIGNS.includes(d.s) ? d.s : pick(SIGNS);
+      const at = Math.max(net.sent[n], Number.isFinite(d.t) ? d.t : 0) + 900;
+      await new Promise((r) => setTimeout(r, clamp(at - duo.now(), 0, 1500)));
+      if (disposed || st.phase !== 'wait') return;
+      shoot();
+    }
+    duo.onGone(() => {
+      if (st.mode !== 'online' || st.phase === 'over' || st.phase === 'done') return;
+      st.mode = 'cpu';
+      P.pa.think(false);
+      ui.say(`${name.pa} left, so the computer plays for ${duo.him}`, 3600);
+      if (st.phase === 'wait') {
+        st.choice.pa ||= pick(SIGNS); // their pick if it came before they left
+        shoot();
+      }
+    });
+
     (async () => {
-      const mode = await chooseMode(ctx, { title: 'Rock Paper Scissors', text: 'Best of five: the first to win three rounds takes the match.' });
+      let mode = await chooseMode(ctx, { title: 'Rock Paper Scissors', text: 'Best of five: the first to win three rounds takes the match.' }, duo);
       if (disposed) return;
       if (!mode) return ctx.end({ quit: true });
+      if (mode === 'online') {
+        ui.turn(markSvg.face(PURPLE), PURPLE, `Waiting for ${name.pa}`, true);
+        P.pa.think(true);
+        const r = await duo.link('online');
+        if (disposed) return;
+        P.pa.think(false);
+        ui.hideTurn();
+        if (!r.ok) {
+          mode = 'cpu';
+          ui.say(duo.why(r), 3600);
+        }
+      } else duo.link(mode);
       st.mode = mode;
       for (const k of ['me', 'pa']) {
         P[k].arm.mode = 'free';
@@ -408,6 +497,7 @@ export default {
       const dt = rawDt * dbg.fast;
       S.update(dt);
       st.lock = Math.max(0, st.lock - dt);
+      if (st.mode === 'online') duo.tick();
 
       if (st.phase === 'pick' && st.lock <= 0) {
         const k = (n) => input.pressed(n);
@@ -488,6 +578,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        duo.dispose();
         closeChoices();
         ui.remove();
         if (window.__board === dbg) delete window.__board;

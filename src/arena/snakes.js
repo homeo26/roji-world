@@ -1,10 +1,13 @@
 // Snakes and Ladders: a garden board where Roji and Homama are the tokens. Hit the big die,
 // hop square to square, climb the arching ladders and slide down the snakes. Exact roll for 100.
+// In an online room "Play together" plays it for real on the two devices: each player rolls on their own
+// device, and every roll comes from the shared seed the host made, so the die shows the same number on both.
 import * as THREE from 'three';
-import { damp, dampAngle, clamp, easeOutBack, easeInOut } from '../util.js';
+import { damp, dampAngle, clamp, easeOutBack, easeInOut, rng } from '../util.js';
 import * as K from './board2/kit.js';
 import { buildGarden, cellPos, Y, HALF } from './board2/garden.js';
 import { makeDie } from './board2/die.js';
+import { together } from './board/online.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const HOP = 0.26;
@@ -22,6 +25,7 @@ export default {
     let alive = true;
 
     // ---------------------------------------------------------------- players
+    const duo = together(ctx);
     const ids = [ctx.me, ctx.partner];
     const colors = K.playerColors(looks, ids);
     const P = ids.map((id, i) => {
@@ -57,11 +61,26 @@ export default {
     const ui = K.overlay('', '<div class="b2-say"></div>');
     const sayEl = ui.$('.b2-say');
     const floats = K.floaters(ui.el, 4);
-    const say = (html) => (sayEl.innerHTML = html);
+    // A line can be held for a moment (news from the other device), the next one waits for it
+    let holdUntil = 0;
+    let held = null;
+    let holdTimer = 0;
+    const say = (html) => {
+      if (performance.now() < holdUntil) held = html;
+      else sayEl.innerHTML = html;
+    };
+    const sayHold = (html, ms) => {
+      sayEl.innerHTML = html;
+      holdUntil = performance.now() + ms;
+      held = null;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => held !== null && alive && (sayEl.innerHTML = held), ms);
+    };
     const dot = (p) => `<i style="background:${p.color}"></i>`;
     const touch = () => document.body.classList.contains('touch');
     let turn = 0;
     let mode = ctx.load('mode', 'cpu');
+    if (mode === 'online') mode = 'cpu';
     let phase = 'intro'; // intro | await | busy | over
     const showScore = () =>
       hud.score(
@@ -71,6 +90,9 @@ export default {
     hud.buttons({ action: 'Roll', jump: null, stick: false });
     hud.hint('E, Enter or Space to roll the die');
     const isCpu = (p) => mode === 'cpu' && p.i === 1;
+    const isRemote = (p) => mode === 'online' && p.i === 1; // rolls on the other device
+    // Played together: every roll is the next number from the shared seed (n: rolls so far, both players)
+    const dice = { rng: null, n: 0, force: null };
     const dbg = {
       fast: 1,
       next: [],
@@ -83,6 +105,9 @@ export default {
       get turn() {
         return turn;
       },
+      // Both devices see the same: whose turn, the squares by kid, the rolls so far
+      state: () => ({ phase, mode, who: P[turn].id, key: P.map((p) => `${p.id[0]}${p.sq}`).sort().join(','), rolls: dice.n, mine: phase === 'await' && !!rollReq }),
+      roll: () => (rollReq ? (rollReq(), true) : false),
       // Test helper: put a player on a square
       place(i, sq) {
         P[i].sq = sq;
@@ -271,6 +296,11 @@ export default {
 
     async function roll(p) {
       phase = 'busy';
+      if (mode === 'online') {
+        if (!isRemote(p)) duo.send('roll', { n: dice.n });
+        dice.force = 1 + Math.floor(dice.rng() * 6);
+        dice.n++;
+      } else dice.force = null;
       K.hotButton('action', false);
       p.rolls++;
       say(`${dot(p)}${p.name} rolls the die...`);
@@ -323,7 +353,12 @@ export default {
         const p = P[turn];
         showDieFor(p);
         showScore();
-        if (isCpu(p)) {
+        if (isRemote(p)) {
+          phase = 'await';
+          say(`${dot(p)}${p.name}'s turn`);
+          // Their roll comes from their device; if they leave, the computer rolls for them
+          if (!(await remoteRoll()) && alive) await clock.sleep(0.65);
+        } else if (isCpu(p)) {
           phase = 'busy';
           say(`${dot(p)}${p.name} is rolling...`);
           await clock.sleep(0.65);
@@ -347,12 +382,14 @@ export default {
 
     async function win(p) {
       phase = 'over';
+      duo.end();
       showScore();
       hideDie();
       hud.hint('');
       const o = other(p);
       say(`${dot(p)}${p.name} reached square 100!`);
-      ctx.hud.message(`${p.name} wins!`, 1600);
+      const champ = duo.winner(p.name, p.i === 1);
+      ctx.hud.message(`${champ} wins!`, 1600);
       fx.burst(p.pos.clone().add(new THREE.Vector3(0, 1.6, 0)), [p.color, '#ffd166', '#ffffff', '#ff9eb5', '#7fd3a7'], 90);
       K.sfx.cheer(sound, 0.06, 1.6);
       p.kid.emote('cheer');
@@ -390,10 +427,46 @@ export default {
       }
       ctx.finish({
         win: mode === 'duo' ? true : p.i === 0,
-        title: `${p.name} wins!`,
+        title: `${champ} wins!`,
         text: `${p.name} reached 100 in ${p.rolls} ${p.rolls === 1 ? 'roll' : 'rolls'}, ${o.name} was on ${o.sq}.${bestText}`,
       });
     }
+
+    // ---------------------------------------------------------------- played together
+    const inbox = []; // their rolls: { n: rolls so far }
+    let remoteWake = null;
+    duo.on('roll', (d) => {
+      inbox.push(d);
+      remoteWake?.();
+    });
+    // Resolves true when their roll is in, false when the computer rolls for them instead
+    function remoteRoll() {
+      return new Promise((resolve) => {
+        const look = () => {
+          while (inbox.length) {
+            const d = inbox.shift();
+            if (d?.n === dice.n) {
+              remoteWake = null;
+              return resolve(true);
+            }
+            console.warn('Snakes and Ladders: a roll out of turn', d, dice.n);
+          }
+          if (mode !== 'online' || !alive) {
+            remoteWake = null;
+            return resolve(false);
+          }
+          remoteWake = look;
+        };
+        look();
+      });
+    }
+    duo.onGone(() => {
+      if (mode !== 'online' || phase === 'over') return;
+      mode = 'cpu';
+      inbox.length = 0;
+      sayHold(`${dot(P[1])}${P[1].name} left, so the computer plays for ${duo.him}`, 3600);
+      remoteWake?.();
+    });
 
     // ---------------------------------------------------------------- intro
     async function intro() {
@@ -402,16 +475,30 @@ export default {
         title: 'Snakes and Ladders',
         text: `Race ${looks[ids[1]].name} to square 100. Ladders take you up, snakes slide you down.`,
         options: [
+          ...(duo.can ? [duo.option()] : []),
           { id: 'cpu', label: `Play with ${looks[ids[1]].name}`, sub: 'The computer rolls for them' },
           { id: 'duo', label: 'Two players', sub: 'Take turns on this device' },
         ],
       });
       if (!alive) return;
       mode = pick || mode;
-      ctx.save('mode', mode);
+      if (mode !== 'online') ctx.save('mode', mode);
       const games = ctx.load('games', 0);
       ctx.save('games', games + 1);
       turn = games % 2;
+      if (mode === 'online') {
+        say(`${dot(P[1])}Waiting for ${P[1].name}...`);
+        const r = await duo.link('online', { start: () => ({ f: P[turn].id }) });
+        if (!alive) return;
+        if (r.ok) {
+          turn = r.go.f === ctx.me ? 0 : 1;
+          dice.rng = rng(ctx.online.seed);
+          say('');
+        } else {
+          mode = 'cpu';
+          sayHold(duo.why(r), 3600);
+        }
+      } else duo.link(mode);
       camMode = 'follow';
       phase = 'busy';
       hud.message(`${P[turn].name} goes first`, 1300);
@@ -511,9 +598,10 @@ export default {
         die.root.scale.setScalar(Math.max(0.001, easeOutBack(dieShow) * (waiting ? 1 + Math.sin(t * 6) * 0.05 : 1)));
         die.spin.rotateOnWorldAxis(UP, dt * (waiting ? 1.3 : 0.7));
       } else if (die.state === 'fly' || die.state === 'snap') {
-        die.step(dt, Y, BOUNDS, dbg.next.length ? dbg.next[0] : null);
+        die.step(dt, Y, BOUNDS, dice.force ?? (dbg.next.length ? dbg.next[0] : null));
         if (die.state === 'done') {
-          if (dbg.next.length) dbg.next.shift();
+          if (dice.force == null && dbg.next.length) dbg.next.shift();
+          dice.force = null;
           dieWait?.();
           dieWait = null;
         }
@@ -541,6 +629,7 @@ export default {
     return {
       update(rdt, t) {
         const dt = rdt * clamp(dbg.fast, 1, 40);
+        if (mode === 'online') duo.tick();
         handleInput();
         clock.update(dt);
         stepDie(dt, t);
@@ -551,6 +640,9 @@ export default {
       },
       dispose() {
         alive = false;
+        duo.dispose();
+        clearTimeout(holdTimer);
+        remoteWake?.();
         clock.clear();
         ui.remove();
         hud.hint('');

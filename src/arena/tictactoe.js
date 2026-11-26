@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { damp, clamp, lerp, easeOutBack, easeOutCubic } from '../util.js';
-import { rbox, at, mat, umat, mesh, playerColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, PURPLE } from './board/kit.js';
+import { rbox, at, mat, umat, mesh, playerColors, roomColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, PURPLE } from './board/kit.js';
 import { buildRoom, TABLE } from './board/room.js';
 import { Player } from './board/players.js';
+import { together } from './board/online.js';
 
 // X O: Roji and Homama sit at the round table in the Game Night room and take turns dropping chunky
 // X and O pieces onto a wooden board. Tap a square (or arrows and E). Three in a row lights up.
+// In an online room "Play together" plays it for real on the two devices: each move travels to the
+// other copy, Roji always plays the X pieces, and the host says who goes first.
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const CELL = 0.33;
@@ -79,7 +82,8 @@ export default {
 
     const meId = ctx.me;
     const paId = ctx.partner;
-    const [colX, colO] = playerColors(looks[meId].top, looks[paId].top);
+    const duo = together(ctx);
+    const [colX, colO] = duo.can ? roomColors(ctx) : playerColors(looks[meId].top, looks[paId].top);
     const colorOf = { X: colX, O: colO };
     const room = buildRoom(ctx, { seats: [{ x: -SEAT.x, z: SEAT.z, color: colX }, { x: SEAT.x, z: SEAT.z, color: colO }] });
 
@@ -92,6 +96,9 @@ export default {
       });
     const players = { X: mk(meId, -1), O: mk(paId, 1) };
     const other = (p) => (p === 'X' ? 'O' : 'X');
+    // My pieces are 'X' in the code (the left seat); shape is what they look like. In an online room Roji
+    // has the X shape on both devices, so Homama's own pieces are O-shaped there.
+    const shape = duo.can && meId !== 'roji' ? { X: 'O', O: 'X' } : { X: 'X', O: 'O' };
 
     // ---------------------------------------------------------------- the board
     const board = new THREE.Group();
@@ -158,17 +165,17 @@ export default {
     const gt = room.glowTex;
     const pieces = [];
     for (const p of ['X', 'O']) {
-      ghosts[p] = mesh(G[p], umat(colorOf[p], { rough: 0.4, transparent: true, opacity: 0.45, emissive: colorOf[p], ei: 0.25 }), { cast: false });
+      ghosts[p] = mesh(G[shape[p]], umat(colorOf[p], { rough: 0.4, transparent: true, opacity: 0.45, emissive: colorOf[p], ei: 0.25 }), { cast: false });
       ghosts[p].visible = false;
       scene.add(ghosts[p]);
     }
     const makePiece = (p) => {
-      const m = mesh(G[p], pieceMat[p]);
+      const m = mesh(G[shape[p]], pieceMat[p]);
       scene.add(m);
       return m;
     };
     for (const p of ['X', 'O']) {
-      const b = mesh(G[p], pieceMat[p]);
+      const b = mesh(G[shape[p]], pieceMat[p]);
       b.rotation.x = Math.PI / 2;
       b.scale.setScalar(0.62);
       b.position.z = 0.03;
@@ -180,6 +187,7 @@ export default {
       grp.add(halo, disc, rim, b);
       players[p].setBadge(grp);
     }
+    const mark = (p) => markSvg[shape[p]](colorOf[p]);
     // Landing ripple
     const rippleMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
     const ripple = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.13, 32).rotateX(-Math.PI / 2), rippleMat);
@@ -211,8 +219,12 @@ export default {
     // ---------------------------------------------------------------- state
     const st = { phase: 'choose', mode: 'cpu', board: Array(9).fill(null), turn: 'X', cursor: 4, mouse: false, lock: 0, win: null, drops: [], winT: -1, idle: 0 };
     const isCpu = (p) => st.mode === 'cpu' && p === 'O';
-    const humanTurn = () => st.phase === 'play' && !isCpu(st.turn) && st.drops.length === 0;
-    dbg.state = () => ({ phase: st.phase, turn: st.turn, board: st.board.join(','), mode: st.mode });
+    const isRemote = (p) => st.mode === 'online' && p === 'O'; // played on the other device
+    const humanTurn = () => st.phase === 'play' && !isCpu(st.turn) && !isRemote(st.turn) && st.drops.length === 0;
+    const moveNo = () => st.board.filter(Boolean).length;
+    // The board by kid, the same on both devices: 'r' Roji, 'h' Homama
+    const byKid = () => st.board.map((v) => (v ? players[v].id[0] : '.')).join('');
+    dbg.state = () => ({ phase: st.phase, turn: st.turn, who: players[st.turn].id, board: st.board.join(','), kids: byKid(), mode: st.mode, shape: shape.X });
     dbg.place = (i) => humanTurn() && place(i);
 
     function setTurn() {
@@ -220,11 +232,12 @@ export default {
       const pl = players[p];
       for (const q of ['X', 'O']) {
         players[q].showBadge(q === p);
-        players[q].think(q === p && isCpu(q));
+        players[q].think(q === p && (isCpu(q) || isRemote(q)));
       }
-      if (isCpu(p)) ui.turn(markSvg[p](colorOf[p]), colorOf[p], `${pl.name} is thinking`, true);
-      else ui.turn(markSvg[p](colorOf[p]), colorOf[p], `${pl.name}'s turn`);
+      if (isCpu(p)) ui.turn(mark(p), colorOf[p], `${pl.name} is thinking`, true);
+      else ui.turn(mark(p), colorOf[p], `${pl.name}'s turn`, isRemote(p));
       st.idle = 0;
+      if (isRemote(p)) pump();
       if (isCpu(p)) {
         S.wait(0.9 + Math.random() * 0.7).then(() => {
           if (disposed || st.phase !== 'play' || st.turn !== p) return;
@@ -236,8 +249,9 @@ export default {
     }
 
     function place(i) {
-      if (st.phase !== 'play' || st.board[i]) return;
+      if (st.phase !== 'play' || !(i >= 0 && i < 9) || st.board[i]) return;
       const p = st.turn;
+      if (st.mode === 'online' && !isRemote(p)) duo.send('mv', { i, n: moveNo() });
       const pl = players[p];
       const rival = players[other(p)];
       const blocked = winningCell(st.board, other(p)) === i;
@@ -281,6 +295,7 @@ export default {
     function end(w) {
       st.phase = 'over';
       st.win = w;
+      duo.end();
       hover.visible = false;
       ui.say('');
       hud.hint('');
@@ -291,7 +306,7 @@ export default {
       if (w) {
         const winner = players[w.p];
         const loser = players[other(w.p)];
-        ui.turn(markSvg[w.p](colorOf[w.p]), colorOf[w.p], `${winner.name} wins!`);
+        ui.turn(mark(w.p), colorOf[w.p], `${duo.winner(winner.name, w.p === 'O')} wins!`);
         for (const i of w.line) pieces[i].material = glowMat[w.p];
         const a = cellPos(w.line[0]);
         const b = cellPos(w.line[2]);
@@ -340,21 +355,68 @@ export default {
         if (disposed) return;
         st.phase = 'done';
         if (!w) return ctx.finish({ win: null, title: "It's a draw", text: `Nobody got three in a row. ${overall}` });
-        const winner = players[w.p].name;
+        const winner = duo.winner(players[w.p].name, w.p === 'O');
         const loser = players[other(w.p)].name;
         ctx.finish({ win: st.mode === 'duo' ? true : w.p === 'X', title: `${winner} wins!`, text: `Three in a row against ${loser}. ${overall}` });
       });
     }
 
+    // ---------------------------------------------------------------- played together
+    // The other device's moves, in order: { i: square, n: pieces on the board before it }
+    const inbox = [];
+    duo.on('mv', (d) => {
+      inbox.push(d);
+      pump();
+    });
+    function pump() {
+      while (inbox.length && st.mode === 'online' && st.phase === 'play' && isRemote(st.turn) && st.drops.length === 0) {
+        const d = inbox[0];
+        if (d?.n > moveNo()) return; // ours has not landed here yet
+        inbox.shift();
+        if (!d || d.n !== moveNo() || !Number.isInteger(d.i) || d.i < 0 || d.i > 8 || st.board[d.i]) {
+          console.warn('X O: a move that does not fit the board', d);
+          continue;
+        }
+        st.cursor = d.i;
+        place(d.i);
+        return;
+      }
+    }
+    // They closed the game or lost the connection: the computer finishes their side
+    duo.onGone(() => {
+      if (st.phase !== 'play' || st.mode !== 'online') return;
+      st.mode = 'cpu';
+      inbox.length = 0;
+      ui.say(`${duo.name} left, so the computer plays for ${duo.him}`, 3600);
+      if (st.turn === 'O' && !st.drops.length) setTurn();
+    });
+    let shared = '';
+
     // ---------------------------------------------------------------- start
     (async () => {
-      const mode = await chooseMode(ctx, { title: 'X O', text: `${looks[meId].name} plays X, ${looks[paId].name} plays O. Three in a row wins.` });
+      const intro = duo.can ? `${looks.roji.name} plays X, ${looks.homama.name} plays O. Three in a row wins.` : `${looks[meId].name} plays X, ${looks[paId].name} plays O. Three in a row wins.`;
+      let mode = await chooseMode(ctx, { title: 'X O', text: intro }, duo);
       if (disposed) return;
       if (!mode) return ctx.end({ quit: true });
-      st.mode = mode;
       const games = ctx.load('games', 0);
       ctx.save('games', games + 1);
-      st.turn = games % 2 === 0 ? 'X' : 'O';
+      let first = games % 2 === 0 ? 'X' : 'O';
+      if (mode === 'online') {
+        ui.turn(markSvg.face(PURPLE), PURPLE, `Waiting for ${duo.name}`, true);
+        players.O.think(true);
+        const r = await duo.link('online', { start: () => ({ f: players[first].id }) });
+        if (disposed) return;
+        players.O.think(false);
+        ui.hideTurn();
+        if (r.ok) {
+          first = r.go.f === meId ? 'X' : 'O';
+        } else {
+          mode = 'cpu';
+          ui.say(duo.why(r), 3600);
+        }
+      } else duo.link(mode);
+      st.mode = mode;
+      st.turn = first;
       st.lock = 0.35;
       st.phase = 'play';
       for (const q of ['X', 'O']) players[q].gesture('wave');
@@ -458,12 +520,24 @@ export default {
         }
       }
 
+      // Played together: our cursor goes to the other device, and theirs shows here on their turn
+      let remoteC = -1;
+      if (st.mode === 'online') {
+        duo.tick();
+        if (humanTurn() && `${st.cursor}|${moveNo()}` !== shared) {
+          shared = `${st.cursor}|${moveNo()}`;
+          duo.share({ c: st.cursor, n: moveNo() });
+        }
+        const ps = isRemote(st.turn) && st.phase === 'play' && !st.drops.length ? duo.state() : null;
+        if (ps && ps.n === moveNo() && Number.isInteger(ps.c) && ps.c >= 0 && ps.c < 9 && !st.board[ps.c]) remoteC = ps.c;
+      }
+
       // Hover tile
-      const showHover = humanTurn() && !st.board[st.cursor] && st.lock <= 0;
+      const showHover = (humanTurn() && !st.board[st.cursor] && st.lock <= 0) || remoteC >= 0;
       hover.visible = showHover;
       for (const p of ['X', 'O']) ghosts[p].visible = showHover && p === st.turn;
       if (showHover) {
-        const c = cellPos(st.cursor);
+        const c = cellPos(remoteC >= 0 ? remoteC : st.cursor);
         hover.position.set(c.x, BT + 0.012, c.z);
         const gh = ghosts[st.turn];
         gh.position.set(c.x, BT + 0.16 + Math.sin(t * 4) * 0.025, c.z);
@@ -545,6 +619,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        duo.dispose();
         closeChoices();
         ui.remove();
         if (window.__board === dbg) delete window.__board;

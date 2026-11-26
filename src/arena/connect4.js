@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { damp, clamp, lerp, easeOutCubic, easeInOut } from '../util.js';
-import { rbox, cyl, at, mat, umat, mesh, playerColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, PURPLE } from './board/kit.js';
+import { rbox, cyl, at, mat, umat, mesh, playerColors, roomColors, scheduler, frame, boardUi, markSvg, chooseMode, closeChoices, glow, sounds, PURPLE } from './board/kit.js';
 import { buildRoom, TABLE } from './board/room.js';
 import { Player } from './board/players.js';
+import { together } from './board/online.js';
 
 // Four in a Row: an upright frame on the games table. Roji and Homama take turns dropping
 // discs into the columns; they fall, bounce and clack into place. Four in a line glows.
+// In an online room "Play together" plays it for real on the two devices: each drop travels to the
+// other copy, the other player's disc glides over the column they aim at, and the host says who starts.
 
 const COLS = 7;
 const ROWS = 6;
@@ -130,7 +133,8 @@ export default {
 
     const meId = ctx.me;
     const paId = ctx.partner;
-    const [colA, colB] = playerColors(looks[meId].top, looks[paId].top);
+    const duo = together(ctx);
+    const [colA, colB] = duo.can ? roomColors(ctx) : playerColors(looks[meId].top, looks[paId].top);
     const colorOf = { A: colA, B: colB };
     const room = buildRoom(ctx, { seats: [{ x: -SEAT.x, z: SEAT.z, color: colA }, { x: SEAT.x, z: SEAT.z, color: colB }] });
     const gt = room.glowTex;
@@ -261,8 +265,12 @@ export default {
     const st = { phase: 'choose', mode: 'cpu', grid: emptyGrid(), turn: 'A', col: 3, gx: 0, lock: 0, drop: null, win: null, winT: -1, idle: 0, aim: null, shake: 0 };
     const slots = { A: [], B: [] }; // instance index -> { r, c }
     const isCpu = (p) => st.mode === 'cpu' && p === 'B';
-    const humanTurn = () => st.phase === 'play' && !isCpu(st.turn) && !st.drop && !st.aim;
-    dbg.state = () => ({ phase: st.phase, turn: st.turn, mode: st.mode, grid: st.grid.map((r) => r.map((v) => v || '.').join('')).join('/') });
+    const isRemote = (p) => st.mode === 'online' && p === 'B'; // played on the other device
+    const humanTurn = () => st.phase === 'play' && !isCpu(st.turn) && !isRemote(st.turn) && !st.drop && !st.aim;
+    const moveNo = () => inst.A.count + inst.B.count;
+    // The grid by kid, the same on both devices: 'r' Roji, 'h' Homama
+    const byKid = () => st.grid.map((r) => r.map((v) => (v ? players[v].id[0] : '.')).join('')).join('/');
+    dbg.state = () => ({ phase: st.phase, turn: st.turn, who: players[st.turn].id, mode: st.mode, grid: st.grid.map((r) => r.map((v) => v || '.').join('')).join('/'), kids: byKid() });
     dbg.drop = (c) => humanTurn() && tryDrop(c);
 
     function setTurn() {
@@ -270,10 +278,11 @@ export default {
       const pl = players[p];
       for (const k of ['A', 'B']) {
         players[k].showBadge(k === p);
-        players[k].think(k === p && isCpu(k));
+        players[k].think(k === p && (isCpu(k) || isRemote(k)));
       }
-      ui.turn(markSvg.disc(colorOf[p]), colorOf[p], isCpu(p) ? `${pl.name} is thinking` : `${pl.name}'s turn`, isCpu(p));
+      ui.turn(markSvg.disc(colorOf[p]), colorOf[p], isCpu(p) ? `${pl.name} is thinking` : `${pl.name}'s turn`, isCpu(p) || isRemote(p));
       st.idle = 0;
+      if (isRemote(p)) pump();
       if (isCpu(p)) {
         S.wait(0.8 + Math.random() * 0.6).then(() => {
           if (disposed || st.phase !== 'play' || st.turn !== p) return;
@@ -286,6 +295,7 @@ export default {
     }
 
     function tryDrop(c) {
+      if (!(c >= 0 && c < COLS)) return false;
       if (st.grid[0][c]) {
         sound.ui('bad');
         st.shake = 0.35;
@@ -300,6 +310,7 @@ export default {
       const r = landingRow(st.grid, c);
       if (r < 0) return;
       const p = st.turn;
+      if (st.mode === 'online' && !isRemote(p)) duo.send('mv', { c, n: moveNo() });
       const pl = players[p];
       const rival = players[other(p)];
       const blocked = winsWith(st.grid, other(p), c);
@@ -349,6 +360,7 @@ export default {
 
     function end(p, line) {
       st.phase = 'over';
+      duo.end();
       ghost.visible = false;
       colMat.opacity = 0;
       hud.hint('');
@@ -361,7 +373,7 @@ export default {
         const loser = players[other(p)];
         st.win = { p, line };
         st.winT = 0;
-        ui.turn(markSvg.disc(colorOf[p]), colorOf[p], `${winner.name} wins!`);
+        ui.turn(markSvg.disc(colorOf[p]), colorOf[p], `${duo.winner(winner.name, p === 'B')} wins!`);
         const [r1, c1] = line[0];
         const [r2, c2] = line[line.length - 1];
         const a = new THREE.Vector3(colX(c1), rowY(r1), 0.08);
@@ -404,21 +416,67 @@ export default {
         if (disposed) return;
         st.phase = 'done';
         if (!p) return ctx.finish({ win: null, title: "It's a draw", text: `The board is full. ${overall}` });
-        const w = players[p].name;
+        const w = duo.winner(players[p].name, p === 'B');
         const l = players[other(p)].name;
         ctx.finish({ win: st.mode === 'duo' ? true : p === 'A', title: `${w} wins!`, text: `Four in a row against ${l}. ${overall}` });
       });
     }
 
+    // ---------------------------------------------------------------- played together
+    // The other device's drops, in order: { c: column, n: discs in the frame before it }
+    const inbox = [];
+    duo.on('mv', (d) => {
+      inbox.push(d);
+      pump();
+    });
+    function pump() {
+      while (inbox.length && st.mode === 'online' && st.phase === 'play' && isRemote(st.turn) && !st.drop && !st.aim) {
+        const d = inbox[0];
+        if (d?.n > moveNo()) return;
+        inbox.shift();
+        if (!d || d.n !== moveNo() || !Number.isInteger(d.c) || d.c < 0 || d.c >= COLS || st.grid[0][d.c]) {
+          console.warn('Four in a Row: a drop that does not fit the frame', d);
+          continue;
+        }
+        // Their disc glides over to the column (it is usually there already), then drops
+        st.col = d.c;
+        if (Math.abs(st.gx - colX(d.c)) < 0.02) drop(d.c);
+        else st.aim = { from: st.gx, to: colX(d.c), t: 0, c: d.c, dur: 0.3, end: 1.05 };
+        return;
+      }
+    }
+    duo.onGone(() => {
+      if (st.phase !== 'play' || st.mode !== 'online') return;
+      st.mode = 'cpu';
+      inbox.length = 0;
+      ui.say(`${duo.name} left, so the computer plays for ${duo.him}`, 3600);
+      if (st.turn === 'B' && !st.drop && !st.aim) setTurn();
+    });
+    let shared = '';
+
     // ---------------------------------------------------------------- start
     (async () => {
-      const mode = await chooseMode(ctx, { title: 'Four in a Row', text: `Drop your discs and line up four: across, up or slanted.` });
+      let mode = await chooseMode(ctx, { title: 'Four in a Row', text: `Drop your discs and line up four: across, up or slanted.` }, duo);
       if (disposed) return;
       if (!mode) return ctx.end({ quit: true });
-      st.mode = mode;
       const games = ctx.load('games', 0);
       ctx.save('games', games + 1);
-      st.turn = games % 2 === 0 ? 'A' : 'B';
+      let first = games % 2 === 0 ? 'A' : 'B';
+      if (mode === 'online') {
+        ui.turn(markSvg.face(PURPLE), PURPLE, `Waiting for ${duo.name}`, true);
+        players.B.think(true);
+        const r = await duo.link('online', { start: () => ({ f: players[first].id }) });
+        if (disposed) return;
+        players.B.think(false);
+        ui.hideTurn();
+        if (r.ok) first = r.go.f === meId ? 'A' : 'B';
+        else {
+          mode = 'cpu';
+          ui.say(duo.why(r), 3600);
+        }
+      } else duo.link(mode);
+      st.mode = mode;
+      st.turn = first;
       st.lock = 0.35;
       st.phase = 'play';
       for (const k of ['A', 'B']) players[k].gesture('wave');
@@ -512,12 +570,23 @@ export default {
         }
       }
 
+      // Played together: our aim goes to the other device, and theirs moves the disc here on their turn
+      if (st.mode === 'online') {
+        duo.tick();
+        if (humanTurn() && `${st.col}|${moveNo()}` !== shared) {
+          shared = `${st.col}|${moveNo()}`;
+          duo.share({ c: st.col, n: moveNo() });
+        }
+        const ps = isRemote(st.turn) && st.phase === 'play' && !st.drop && !st.aim ? duo.state() : null;
+        if (ps && ps.n === moveNo() && Number.isInteger(ps.c) && ps.c >= 0 && ps.c < COLS) st.col = ps.c;
+      }
+
       // Computer aiming: the disc glides over to its column
       if (st.aim) {
         const a = st.aim;
-        a.t += dt / 0.55;
+        a.t += dt / (a.dur || 0.55);
         st.gx = lerp(a.from, a.to, easeInOut(clamp(a.t, 0, 1)));
-        if (a.t >= 1.25) {
+        if (a.t >= (a.end || 1.25)) {
           st.aim = null;
           drop(a.c);
         }
@@ -589,6 +658,7 @@ export default {
       update,
       dispose() {
         disposed = true;
+        duo.dispose();
         closeChoices();
         ui.remove();
         if (window.__board === dbg) delete window.__board;

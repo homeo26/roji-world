@@ -173,17 +173,25 @@ export function boardUi() {
   };
 }
 
-// "Play the computer" or "Two players". Resolves 'cpu' | 'duo' | null (closed).
-export async function chooseMode(ctx, { title, text, cpuSub, duoSub }) {
+// "Play the computer" or "Two players", and "Play together" first in an online room (duo: the
+// together() link from ./online.js). Resolves 'online' | 'cpu' | 'duo' | null (closed).
+export async function chooseMode(ctx, { title, text, cpuSub, duoSub }, duo = null) {
   const p = ctx.looks[ctx.partner].name;
   return ctx.hud.choose({
     title,
     text,
     options: [
+      ...(duo?.can ? [duo.option()] : []),
       { id: 'cpu', label: 'Play the computer', sub: cpuSub || `${p} is played by the computer` },
       { id: 'duo', label: 'Two players', sub: duoSub || 'Pass the device between turns' },
     ],
   });
+}
+
+// Piece colours by kid in an online room, so Roji has the same colour on both devices: [mine, partner's]
+export function roomColors(ctx) {
+  const [r, h] = playerColors(ctx.looks.roji.top, ctx.looks.homama.top);
+  return ctx.me === 'roji' ? [r, h] : [h, r];
 }
 
 // Close any choice card the game left open (it resolves to null).
