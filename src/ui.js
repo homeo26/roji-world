@@ -39,6 +39,12 @@ const DANCE_ICONS = {
   'dance-more': 'M5 5h4v4H5z M15 5h4v4h-4z M5 15h4v4H5z M15 15h4v4h-4z',
 };
 Object.assign(ICONS, DANCE_ICONS);
+// Play together: two phones and a heart, sharing and copying the room link
+Object.assign(ICONS, {
+  together: 'M4 4.5h4.5A1.5 1.5 0 0 1 10 6v12a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18V6A1.5 1.5 0 0 1 4 4.5z M15.5 4.5H20A1.5 1.5 0 0 1 21.5 6v12a1.5 1.5 0 0 1-1.5 1.5h-4.5A1.5 1.5 0 0 1 14 18V6a1.5 1.5 0 0 1 1.5-1.5z M5.6 16.5h1.3 M17.1 16.5h1.3 M12 13.6s-1.7-1.1-1.7-2.3a.85.85 0 0 1 1.7-.4.85.85 0 0 1 1.7.4c0 1.2-1.7 2.3-1.7 2.3z',
+  share: 'M12 3.5v11 M8 7.5l4-4 4 4 M5.5 12v6.5A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5V12',
+  copy: 'M9 8.5h9a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 19v-9A1.5 1.5 0 0 1 9 8.5z M15.5 8.5V5A1.5 1.5 0 0 0 14 3.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h2.5',
+});
 const EMOTE_ICONS = { wave: 'hand', dance: 'music', spin: 'spin', cheer: 'star', heart: 'heart', bow: 'smile', ...Object.fromEntries(Object.keys(DANCE_ICONS).map((k) => [k, k])) };
 const EMOTE_KEY = (i) => (i < 9 ? String(i + 1) : i === 9 ? '0' : '');
 const DOCK_MOVES = 6; // the first moves sit on the dock; the More button opens every move
@@ -86,6 +92,8 @@ export class UI {
     $('btn-journal').innerHTML = svgIcon('book', 20);
     $('btn-journal').addEventListener('click', () => this.toggleJournal());
     $('btn-swap').addEventListener('click', () => h.onSwap());
+    $('btn-online').innerHTML = svgIcon('together', 22);
+    $('btn-online').addEventListener('click', () => h.onOnline());
     $('help-close').addEventListener('click', () => this.toggleHelp(false));
     $('btn-reset').addEventListener('click', () => {
       h.onReset();
@@ -209,7 +217,7 @@ export class UI {
   }
 
   get panelOpen() {
-    return ['journal', 'wardrobe', 'notes', 'games-menu', 'help'].some((id) => !$(id).classList.contains('hidden'));
+    return ['journal', 'wardrobe', 'notes', 'games-menu', 'help', 'online'].some((id) => !$(id).classList.contains('hidden'));
   }
 
   closePanels() {
@@ -217,6 +225,7 @@ export class UI {
     this.closeNotes();
     this.closeGames();
     this.toggleHelp(false);
+    $('online').classList.add('hidden');
     $('emote-wheel').classList.add('hidden');
   }
 
