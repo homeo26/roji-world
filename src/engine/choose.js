@@ -26,6 +26,10 @@ const CSS = `
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const open = new Set();
 
+// Online play (src/online/play.js): picked(spec, id) hears every answer; auto(spec) may answer a card at
+// once (joining the other player's activity answers the way they did) by returning an option id.
+export const chooseHook = { picked: null, auto: null };
+
 // Close every open choice card as if dismissed (a game that ends mid-question).
 export function closeChoices() {
   for (const done of [...open]) done(null);
@@ -35,6 +39,8 @@ export function choose({ title = '', text = '', options = [], exit = null } = {}
   // Only one card at a time: pressing the action key again while a card is up must not stack a second
   // card on top. The second call is answered as dismissed (null), which every caller treats as "never mind".
   if (open.size) return Promise.resolve(null);
+  const auto = chooseHook.auto?.({ title, options });
+  if (auto !== undefined) return Promise.resolve(auto);
   if (!document.getElementById('choose-style')) {
     const s = document.createElement('style');
     s.id = 'choose-style';
@@ -52,6 +58,7 @@ export function choose({ title = '', text = '', options = [], exit = null } = {}
       if (!open.size) document.body.classList.remove('choosing');
       el.remove();
       window.removeEventListener('keydown', key, true);
+      chooseHook.picked?.({ title, options }, v);
       resolve(v);
     };
     open.add(done);

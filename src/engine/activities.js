@@ -22,6 +22,9 @@ export class Activities {
   constructor(g) {
     this.g = g; // { actors, playerId(), sound, setNight(k), setFocus(spec|null) }
     this.current = null;
+    // Online play (src/online/play.js): start(spec) -> spec may change the seats (the other player's kid is
+    // theirs to move), end(current, silent, replacing) hears every end
+    this.hook = null;
   }
 
   get active() {
@@ -76,7 +79,12 @@ export class Activities {
   }
 
   start(spec) {
-    if (this.current) this.end(true);
+    if (this.current) {
+      this.replacing = true;
+      this.end(true);
+      this.replacing = false;
+    }
+    if (this.hook) spec = this.hook.start(spec) || spec;
     const g = this.g;
     const seated = [];
     for (const s of spec.seats || []) {
@@ -114,6 +122,7 @@ export class Activities {
     if (c.night !== undefined) g.setNight(0);
     if (c.music !== undefined) g.sound.setMusicLevel(1);
     c.onEnd?.(silent);
+    this.hook?.end(c, silent, !!this.replacing);
     g.life?.emit('activity-end', c);
   }
 }

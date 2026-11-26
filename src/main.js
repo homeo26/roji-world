@@ -122,6 +122,10 @@ let wardrobeTarget = null;
 let nightTarget = 0;
 let focus = null;
 let elapsed = 0;
+// Play together (src/online/play.js), loaded when the player opens it or follows a ?room= link. While the
+// other player is in the room, they move the other kid: remoteLive() is true and the computer partner rests.
+let online = null;
+const remoteLive = () => !!online?.live();
 
 const game = {
   scene,
@@ -144,7 +148,7 @@ const game = {
   playArena: (id, opts) => playArena(id, opts),
   openWardrobe: () => openWardrobe(),
   precompile: (root) => precompile(root, 2500),
-  setHolding: (on) => (!!on !== holding ? toggleHands() : null),
+  setHolding: (on) => (remoteLive() ? null : !!on !== holding ? toggleHands() : null),
   phase: () => daylight.label().phase,
 };
 game.life = new Life();
@@ -538,6 +542,7 @@ const ui = new UI({
   onJump: () => jump(),
   onPlay: (id) => playGame(id),
   onFullscreen: () => toggleFullscreen(),
+  onOnline: () => openOnline(),
   journalData: () => ({ stations, stamps, gamesAt: gamesFor, looks }),
 });
 ui.setSound(sound.muted);
@@ -558,14 +563,16 @@ const hot = (pos, r, label, icon, act, when = () => true) => ({
     return pos();
   },
   r,
-  label,
+  get label() {
+    return typeof label === 'function' ? label() : label;
+  },
   icon,
   act,
   when,
 });
 const danceFloor = new THREE.Vector3(plaza.danceFloor.x, 0, plaza.danceFloor.z);
 const townHotspots = [
-  hot(() => car.root.position, 2.6, 'Drive the car', 'car', () => enterCar()),
+  hot(() => car.root.position, 2.6, () => online?.carLabel() || 'Drive the car', 'car', () => enterCar()),
   hot(() => gate, 1.8, 'Ride the pony', 'horse', () => mountPony()),
   hot(() => homeDoor(), 1.5, 'Go inside', 'door', () => enterPlace('home'), () => !hasHome || !spaces.interiors.home),
   hot(() => plaza.fountain, 2.6, 'Make a wish', 'star', () => makeWish()),
@@ -616,6 +623,7 @@ function action(act = 'auto') {
       const now = performance.now();
       if (now < hotLockUntil) return;
       hotLockUntil = now + 600;
+      online?.pressed(currentHot);
       return currentHot.act();
     }
     if (currentStation) {
@@ -670,7 +678,7 @@ function action(act = 'auto') {
     ui.stampCard();
     ui.popChip(stop.id);
     P().kid.emote('cheer');
-    setTimeout(() => C().kid.emote('cheer'), 250);
+    if (!remoteLive()) setTimeout(() => C().kid.emote('cheer'), 250);
     fx.burst(new THREE.Vector3(st.pad.x, 1.2, st.pad.z), [stop.color, '#ffd166', '#ffffff', '#ff8fb1', '#7fd3ff']);
     setTimeout(() => {
       ui.refreshCard();
@@ -741,6 +749,7 @@ async function playArena(id, opts = {}) {
   currentStation = null;
   sound.setMusicLevel(0.25);
   game.life.emit('arena', id);
+  online?.arena(id, true);
   const result = await arena.open(id, { me: playerId, ...opts });
   gameOpen = false;
   game.life.emit('arena-end', id, result);
@@ -752,7 +761,7 @@ async function playArena(id, opts = {}) {
 function celebrate(result) {
   if (result?.win === true) {
     P().kid.emote('cheer');
-    setTimeout(() => C().kid.emote('heart'), 300);
+    if (!remoteLive()) setTimeout(() => C().kid.emote('heart'), 300);
   } else if (result && !result.quit) P().kid.emote('wave');
 }
 
@@ -762,7 +771,7 @@ function emote(type) {
   waypoints = [];
   P().kid.emote(type);
   const c = C();
-  if (c.pos.distanceTo(P().pos) < 9) setTimeout(() => c.kid.emote(type), 350);
+  if (!remoteLive() && c.pos.distanceTo(P().pos) < 9) setTimeout(() => c.kid.emote(type), 350);
 }
 
 // ------------------------------------------------------------------ scooters
@@ -775,7 +784,7 @@ function startScooting() {
     P().kid.holdSide = C().kid.holdSide = 0;
   }
   scooting = true;
-  for (const a of [P(), C()]) {
+  for (const a of remoteLive() ? [P()] : [P(), C()]) {
     scooters[a.id].root.visible = true;
     a.kid.pose = 'scoot';
     a.kid.cancelEmote();
@@ -788,7 +797,7 @@ function startScooting() {
 function stopScooting(silent = false) {
   if (!scooting) return;
   scooting = false;
-  for (const a of [P(), C()]) {
+  for (const a of remoteLive() ? [P()] : [P(), C()]) {
     scooters[a.id].root.visible = false;
     if (a.kid.pose === 'scoot') a.kid.pose = 'stand';
     a.kid.kickWant = 0;
@@ -801,19 +810,111 @@ const toggleScooting = () => (scooting ? stopScooting() : startScooting());
 function toggleHands() {
   if (!started || mount || game.activities.active) return;
   if (scooting && !holding) return toast('Hands on the handlebars! Hop off the scooters to hold hands.', 2200);
-  holding = !holding;
-  holdSign = 0;
+  if (online?.hands()) return; // the other player is in the room: ask them
+  setHolding(!holding);
+  if (holding) toast(`${looks[playerId].name} and ${looks[otherId(playerId)].name} are holding hands`, 2200);
+}
+// sign: the side the partner walks on (1 left, -1 right, 0 pick the nearer side)
+function setHolding(on, sign = 0) {
+  holding = on;
+  holdSign = sign;
   holdGrip = false;
   ui.setHands(holding);
-  if (holding) toast(`${looks[playerId].name} and ${looks[otherId(playerId)].name} are holding hands`, 2200);
-  else {
+  if (!holding) {
     P().kid.holdSide = 0;
     C().kid.holdSide = 0;
   }
 }
 
+// Play as id without asking (joining a room as the other kid)
+function becomePlayer(id) {
+  if (id === playerId || !looks[id]) return;
+  if (mount) dismount();
+  if (game.activities.active) game.activities.end(true);
+  stopScooting(true);
+  setHolding(false);
+  playerId = id;
+  waypoints = [];
+  ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
+}
+
+// Stand the player at a world position (the guest arriving next to the host)
+function placePlayer(x, z) {
+  const p = P();
+  p.pos.set(x, 0, z);
+  physics.resolve(p.pos, RADIUS, p.vel);
+  p.y = physics.support(p.pos.x, p.pos.z, RADIUS, 20, 0);
+  p.vy = 0;
+  p.vel.set(0, 0, 0);
+  p.kid.root.position.set(p.pos.x, p.y, p.pos.z);
+  camLook.set(p.pos.x, 0.9 + p.y, p.pos.z);
+  waypoints = [];
+}
+
+// What src/online/play.js may see and do in the town
+function onlineHooks() {
+  return {
+    game,
+    looks,
+    actors,
+    scene,
+    car,
+    physics,
+    spaces,
+    fx,
+    sound,
+    scooters,
+    activities: game.activities,
+    townOrigin: new THREE.Vector3(),
+    makePony: (coat) => makePony(coat),
+    playerId: () => playerId,
+    becomePlayer,
+    placePlayer,
+    toast: (html, ms) => ui.toast(html, ms),
+    mount: () => mount,
+    scooting: () => scooting,
+    holding: () => holding,
+    setHolding,
+    setHandsUi: (on) => ui.setHands(on),
+    dismount,
+    rideAlong,
+    stopScooting: () => stopScooting(true),
+    spaceId: () => spaces.inside?.id || 'town',
+    hotspots: () => (spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()]),
+    moveCarCollider: (x, z) => {
+      carCollider.x = x;
+      carCollider.z = z;
+      physics.dirty = true;
+    },
+    refreshLooks: (save = false) => {
+      ui.setPlayer(looks[playerId], looks[otherId(playerId)]);
+      if (save) saveLooks(looks);
+    },
+    arenaActive: () => arena.active || gameOpen,
+    gameTitle: (id) => (arena.has(id) ? arena.meta(id)?.title : GAMES.find((g) => g.id === id)?.title) || 'a game',
+  };
+}
+
+let onlineLoad = null;
+async function openOnline(opts) {
+  if (!started) return;
+  try {
+    onlineLoad ||= import('./online/play.js').then((m) => (online = m.createOnline(onlineHooks())));
+    await onlineLoad;
+    await online.open(opts);
+  } catch (e) {
+    onlineLoad = null;
+    console.warn('online play could not start:', e?.message);
+    toast('Playing together is not available right now. You can keep playing here.', 3600);
+  }
+}
+
 function swapPlayer() {
   if (!started) return;
+  if (online?.inRoom()) {
+    toast(`You are ${looks[playerId].name} in this room. Leave the room to switch.`, 2600);
+    return;
+  }
   if (mount || game.activities.active) {
     toast('Get out first, then switch.');
     return;
@@ -855,7 +956,7 @@ function jump() {
   hop(p, r);
   // The partner hops too when holding hands or close by
   const c = C();
-  if (c.pos.distanceTo(p.pos) < 3.2 && !c.seated) {
+  if (!remoteLive() && c.pos.distanceTo(p.pos) < 3.2 && !c.seated) {
     setTimeout(() => {
       const rc = tryJump(c);
       if (rc) hop(c, rc, true);
@@ -910,7 +1011,7 @@ function startDance() {
   });
   plaza.dancing = true;
   sound.setParty(true);
-  for (const a of [p, c]) {
+  for (const a of remoteLive() ? [p] : [p, c]) {
     a.kid.danceLoop = true;
     a.kid.emote('dance');
   }
@@ -941,15 +1042,18 @@ function unseatKid(a, worldPos, yaw) {
 }
 function enterCar() {
   if (mount || spaces.inside) return;
+  if (online?.carTaken()) return rideAlong();
   stopScooting(true);
   holding = false;
   ui.setHands(false);
   waypoints = [];
   mount = { type: 'car' };
   const c = C();
-  if (c.pos.distanceTo(car.root.position) > 6) fx.poof(c.pos);
   seatKid(P(), car.body, new THREE.Vector3(0.33, 0.66, -0.25), 'drive');
-  seatKid(c, car.body, new THREE.Vector3(-0.33, 0.66, -0.25), 'sit');
+  if (!remoteLive()) {
+    if (c.pos.distanceTo(car.root.position) > 6) fx.poof(c.pos);
+    seatKid(c, car.body, new THREE.Vector3(-0.33, 0.66, -0.25), 'sit');
+  }
   sound.engine(true);
   sound.honk();
   toast('Beep beep! Point the stick or the arrows where you want to go. Space honks.', 3200);
@@ -957,11 +1061,29 @@ function enterCar() {
 function exitCar() {
   const y = car.yaw;
   const cp = car.root.position;
+  if (mount.ride) {
+    unseatKid(P(), cp.clone().add(leftOf(y, -1.6)), y);
+    mount = null;
+    sound.engine(false);
+    return;
+  }
   unseatKid(P(), cp.clone().add(leftOf(y, 1.6)), y);
-  unseatKid(C(), cp.clone().add(leftOf(y, -1.6)), y);
+  if (!remoteLive()) unseatKid(C(), cp.clone().add(leftOf(y, -1.6)), y);
   car.speed = 0;
   mount = null;
   sound.engine(false);
+}
+// The other player is driving: sit next to them (the car follows their states)
+function rideAlong() {
+  if (mount || spaces.inside || !online?.carTaken()) return;
+  stopScooting(true);
+  setHolding(false);
+  waypoints = [];
+  mount = { type: 'car', ride: true };
+  fx.poof(P().pos);
+  seatKid(P(), car.body, new THREE.Vector3(-0.33, 0.66, -0.25), 'sit');
+  sound.engine(true);
+  toast(`Buckle up! ${looks[otherId(playerId)].name} is driving.`, 2600);
 }
 function mountPony() {
   if (mount || spaces.inside) return;
@@ -1315,6 +1437,7 @@ function start() {
   if (started) return;
   started = true;
   sound.start();
+  if (params.get('room')) setTimeout(() => openOnline({ join: params.get('room') }), 400); // a Play together link
   if (ui.touch) goFullscreen();
   introEl.classList.add('gone');
   document.body.classList.add('playing');
@@ -1365,6 +1488,12 @@ function updatePlayer(dt, ax) {
     return;
   }
 
+  if (mount?.type === 'car' && mount.ride) {
+    p.pos.copy(car.root.position);
+    p.speed = Math.abs(car.speed);
+    sound.engineSpeed(car.speed);
+    return;
+  }
   if (mount?.type === 'car') {
     const want = intent > 0.05 ? Math.atan2(dirX, dirZ) : null;
     car.steerToward(dt, want, intent, input.running);
@@ -1412,6 +1541,11 @@ function updatePlayer(dt, ax) {
     return;
   }
 
+  // Hand in hand with the other player, who leads: walk at their side
+  if (online?.following() && online.follow(dt, waypoints.length ? 0 : intent)) {
+    waypoints = [];
+    return;
+  }
   const run = input.running || waypoints.length > 6;
   p.surface = spaces.zoneAt(p.pos.x, p.pos.z);
   const top = scooting ? (run ? 18 : 12) : run ? 7.2 : 4.6;
@@ -1441,7 +1575,7 @@ const tmpV = new THREE.Vector3();
 function updateCompanion(dt) {
   const p = P();
   const c = C();
-  if (game.activities.active || mount?.type === 'car' || c.seated || game.partnerBusy) return;
+  if (game.activities.active || mount?.type === 'car' || c.seated || (game.partnerBusy && !online?.leading())) return;
   const leader = mount?.type === 'pony' ? mount.ctl.pony.root.position : p.pos;
   c.surface = spaces.zoneAt(c.pos.x, c.pos.z);
   if (holding && !mount && p.mode !== 'swim' && c.mode !== 'swim') {
@@ -1632,7 +1766,9 @@ window.__roji = {
   jump,
   setZoom: (z) => (zoom = z),
   hotspots: () => (spaces.inside ? spaces.hotspots() : [...townHotspots, ...spaces.hotspots()]).map((h) => ({ label: h.label, x: +h.pos.x.toFixed(1), z: +h.pos.z.toFixed(1) })),
-  state: () => ({ playerId, holding, mount: mount?.type, activity: game.activities.active, inside: spaces.inside?.id || null, speed: P().speed, yaw: P().yaw, y: P().y, mode: P().mode }),
+  online: () => online,
+  openOnline,
+  state: () => ({ playerId, holding, mount: mount?.type, ride: !!mount?.ride, activity: game.activities.active, inside: spaces.inside?.id || null, speed: P().speed, yaw: P().yaw, y: P().y, mode: P().mode }),
   teleport: (id) => {
     const p = byId[id]?.pad;
     if (!p) return false;
@@ -1674,6 +1810,7 @@ window.__roji = {
     if (!h) return false;
     const hp = h.pos;
     P().pos.set(hp.x, 0, hp.z + 0.3);
+    online?.pressed(h);
     h.act();
     return h.label;
   },
@@ -1690,9 +1827,10 @@ function frame() {
     renderer.toneMappingExposure = 1;
     setSkyTint(null);
     arena.frame(dt, t);
+    online?.background();
     return;
   }
-  if (gameOpen) return; // a 2D minigame owns the screen
+  if (gameOpen) return void online?.background(); // a 2D minigame owns the screen
 
   camera.getWorldDirection(camFwd);
   camFwd.y = 0;
@@ -1701,6 +1839,7 @@ function frame() {
   const ax = started && !ui.panelOpen ? input.axis() : { x: 0, y: 0 };
   updatePlayer(dt, ax);
   updateCompanion(dt);
+  online?.frame(dt, t);
   if (!game.activities.active && !mount) {
     pushOffPeople(P());
     pushOffPeople(C());
@@ -1709,7 +1848,7 @@ function frame() {
   for (const a of Object.values(actors)) {
     syncKid(a, dt, t);
     footsteps(a);
-    if (scooting) scooters[a.id].spin(dt, a.speed);
+    if (scooting && (a === P() || !remoteLive())) scooters[a.id].spin(dt, a.speed);
   }
 
   // Beach balls
@@ -1821,6 +1960,7 @@ function frame() {
   fx.update(dt, t);
   updateCamera(dt, t);
   cullPlaces();
+  online?.late();
   if (started && !spaces.inside && frameCount % 2 === 0) minimap.draw(mount?.type === 'car' ? car.root.position : P().pos, mount?.type === 'car' ? car.yaw : P().yaw, stamps, t, C().pos, car.root.position);
   renderer.render(scene, camera);
 
