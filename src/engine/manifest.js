@@ -76,6 +76,7 @@ export const ARENAS = [
   { id: 'giraffes', module: '../arena/giraffes.js', place: 'zoo' },
   { id: 'coaster', module: '../arena/coaster.js', place: 'park' },
   { id: 'parkgames', module: '../arena/parkgames.js', place: 'park' },
+  { id: 'swimrace', module: '../arena/swimrace.js', place: 'pool' },
   { id: 'bumpercars', module: '../arena/bumpercars.js', place: 'park' },
   { id: 'logflume', module: '../arena/logflume.js', place: 'park' },
   { id: 'ghosttrain', module: '../arena/ghosttrain.js', place: 'park' },
