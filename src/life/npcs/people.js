@@ -150,7 +150,8 @@ const PROFILES = [
     match: (n) => n.space.id === 'yumyum',
     role: 'Having lunch at YumYum',
     accent: '#ff8fb1',
-    actions: () => ['talk', 'flower', 'selfie'],
+    // No flowers for the customers at Roji's YumYum: Homama would get jealous, and so would Roji
+    actions: () => ['talk', 'wave', 'selfie'],
     talk: T('Ask about the food', 'Is it good?', ['The burger is the best on the island!', 'I come here every weekend.', 'Have you tried the pecan cake?', 'This mansaf is just like home.', 'Do not tell anyone, I ordered two desserts.']),
   },
   {
