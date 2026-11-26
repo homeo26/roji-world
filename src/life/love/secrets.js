@@ -531,7 +531,7 @@ export class Secrets {
   // R + H carved in a heart on a tree trunk, on the side facing the camera
   bTree() {
     const N = this.L.nature;
-    const t = N.treeNear(-57, 13.5, 18) || N.treeNear(-30, 4, 30);
+    const t = N.treeNear(-42, 10, 14) || N.treeNear(-15, 32, 30); // by the west street, just outside the journey loop
     if (!t) return null;
     const seg = (Math.PI * 2) / 7;
     let phi = 0;
@@ -557,7 +557,7 @@ export class Secrets {
 
   // Two ducks in love on a little pond, with a tiny heart
   bDucks() {
-    const spot = this.L.nature.findSpot(-42, -51, 1.5, { reach: 7 });
+    const spot = this.L.nature.findSpot(-14, 40, 1.5, { reach: 7 }); // the meadow by the south road
     if (!spot) return null;
     const g = new THREE.Group();
     g.position.set(spot.x, 0, spot.z);
@@ -618,10 +618,10 @@ export class Secrets {
   // A chalk drawing of the two of them on the quiet street up to the snow
   bChalk() {
     const p = groundDecal(chalkTex(), 2.3, 1.62, { y: 0.045 });
-    p.position.x = -13.15;
-    p.position.z = -79.5;
+    p.position.x = 6.5;
+    p.position.z = -30;
     this.root.add(p);
-    return { line: 'A chalk drawing of Roji and Homama, holding hands.', x: -13.05, z: -79.2, r: 1.9, look: { x: -13.05, z: -79.5, y: 0.1, zoom: 0.48 } };
+    return { line: 'A chalk drawing of Roji and Homama, holding hands.', x: 6.6, z: -29.7, r: 1.9, look: { x: 6.6, z: -30, y: 0.1, zoom: 0.48 } };
   }
 
   // A heart love lock on the picnic garden's bridge rail
@@ -652,7 +652,7 @@ export class Secrets {
 
   // A message in a bottle in a tiny sandy cove on the west shore
   bBottle() {
-    const spot = this.L.nature.findSpot(-84.0, -20.5, 1.2, { reach: 5, edge: 0.95, plants: false });
+    const spot = this.L.nature.findSpot(-98.3, 30, 1.2, { reach: 5, edge: 0.95, plants: false });
     if (!spot) return null;
     const g = new THREE.Group();
     g.position.set(spot.x, 0, spot.z);
@@ -696,7 +696,7 @@ export class Secrets {
 
   // A bench with a little plaque, facing the sea on the south-west shore
   bBench() {
-    const spot = this.L.nature.findSpot(-66, 20.2, 1.1, { reach: 5, edge: 1.15, plants: false });
+    const spot = this.L.nature.findSpot(-91, 64, 1.1, { reach: 5, edge: 1.15, plants: false });
     if (!spot) return null;
     const b = bench();
     b.position.set(spot.x, 0, spot.z);
@@ -735,9 +735,9 @@ export class Secrets {
     return { line: 'A tiny plaque on the bench: Roji + Homama.', x: spot.x, z: spot.z + 0.8, r: 1.8, look: { x: spot.x, z: spot.z - 0.1, y: 0.7, zoom: 0.48 } };
   }
 
-  // A paper boat in a puddle by the quiet road between the pool and the tech studio
+  // A paper boat in a puddle by the first street, at the quiet north-east end
   bBoat() {
-    const spot = this.L.nature.findSpot(4.9, -50, 0.8, { reach: 5 });
+    const spot = this.L.nature.findSpot(88, -47, 0.8, { reach: 5 });
     if (!spot) return null;
     const g = new THREE.Group();
     g.position.set(spot.x, 0, spot.z);
@@ -806,9 +806,9 @@ export class Secrets {
     return { line: 'Two mugs on a high windowsill, side by side.', x: wx, z: O.z + 1.4, r: 2.6, look: { x: wx, z: wz, y: 2.6, zoom: 0.55 } };
   }
 
-  // A heart of pebbles on the south shore, past the seaside promenade
+  // A heart of pebbles on the east shore, past the end of the east lane
   bPebbles() {
-    const spot = this.L.nature.findSpot(60, 21.75, 0.55, { reach: 3, edge: 0.75, plants: false });
+    const spot = this.L.nature.findSpot(106, 22, 0.55, { reach: 3, edge: 0.75, plants: false });
     if (!spot) return null;
     const g = new THREE.Group();
     g.position.set(spot.x, 0, spot.z);

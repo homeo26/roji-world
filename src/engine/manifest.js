@@ -2,34 +2,39 @@
 //
 // slot: centre of the place's footprint in world metres [x, z]. size: [width, depth].
 // Every place faces +Z (south, toward the camera and its street). Its pad, where the card
-// opens, sits on the street just in front: [x, z + depth / 2 + 1.2].
+// opens, sits just in front: [x, z + depth / 2 + 1.2], on the 2 m verge between the front and the curb.
 // A module that does not exist yet is skipped, so the game runs while places are being built.
 
 export const PLACES = [
-  { id: 'home', module: '../places/home.js', slot: [-25, 10.8], size: [16, 10], replaces: 'home' },
-  { id: 'zoo', module: '../places/zoo.js', slot: [-68, -4], size: [24, 20] },
-  { id: 'hospital', module: '../places/hospital.js', slot: [-44, -34], size: [22, 16] },
-  { id: 'pool', module: '../places/pool.js', slot: [-14, -40], size: [24, 22] },
-  { id: 'tech', module: '../places/tech.js', slot: [14, -34], size: [20, 16] },
-  { id: 'football', module: '../places/football.js', slot: [40, -35], size: [28, 18] },
-  { id: 'karting', module: '../places/karting.js', slot: [-50, -77], size: [32, 26] },
-  { id: 'driving', module: '../places/driving.js', slot: [16, -76], size: [30, 24] },
-  { id: 'school', module: '../places/school.js', slot: [44, -73], size: [22, 18] },
-  { id: 'ski', module: '../places/ski.js', slot: [-14, -106], size: [56, 30] },
-  { id: 'cycling', module: '../places/cycling.js', slot: [46, 10], size: [24, 16] },
-  { id: 'picnic', module: '../places/picnic.js', slot: [46, -14], size: [22, 18] },
-  { id: 'odeh', module: '../places/odeh.js', slot: [-71, -45], size: [24, 30] },
-  { id: 'harbour', module: '../places/harbour.js', slot: [84, 8], size: [30, 12] },
-  { id: 'park', module: '../places/park.js', slot: [86, -34], size: [34, 54] },
+  // Roji's home is in the middle of the island, with the weekend journey round it (PADS in src/world.js).
+  // The city round it: the north row on the first street (z -38.2) with the ski hill at the north end,
+  // Odeh's hill by the west shore and the pool on the west street (z 2), football and Tech Hub on the east
+  // street (z 2), the school on the east lane (z 32), and the south row on the seaside promenade (z 66.75),
+  // where the harbour's pier reaches into the sea.
+  { id: 'home', module: '../places/home.js', slot: [0, -4.2], size: [16, 10], replaces: 'home' },
+  { id: 'zoo', module: '../places/zoo.js', slot: [18.1, 51.65], size: [24, 20] },
+  { id: 'hospital', module: '../places/hospital.js', slot: [-81.85, -51.3], size: [22, 16] },
+  { id: 'pool', module: '../places/pool.js', slot: [-50.5, -14.1], size: [24, 22] },
+  { id: 'tech', module: '../places/tech.js', slot: [95.5, -11.1], size: [20, 16] },
+  { id: 'football', module: '../places/football.js', slot: [63.5, -12.1], size: [28, 18] },
+  { id: 'karting', module: '../places/karting.js', slot: [-46.85, -56.3], size: [32, 26] },
+  { id: 'driving', module: '../places/driving.js', slot: [56.15, -55.3], size: [30, 24] },
+  { id: 'school', module: '../places/school.js', slot: [87, 17.9], size: [22, 18] },
+  { id: 'ski', module: '../places/ski.js', slot: [5.15, -58.3], size: [56, 30] },
+  { id: 'cycling', module: '../places/cycling.js', slot: [50.4, 53.65], size: [24, 16] },
+  { id: 'picnic', module: '../places/picnic.js', slot: [-38.4, 52.65], size: [22, 18] },
+  { id: 'odeh', module: '../places/odeh.js', slot: [-85, -18.1], size: [24, 30] },
+  { id: 'harbour', module: '../places/harbour.js', slot: [88, 56.55], size: [30, 12] },
+  { id: 'park', module: '../places/park.js', slot: [-77, 34.65], size: [34, 54] },
   { id: 'example', module: '../places/example.js', slot: [0, 0], size: [14, 10], dev: true },
 ];
 
 // Interiors for buildings that already stand on the map (built in stations.js / places.js).
 // door: world [x, z] of the front door. The module default-exports { title, build(ctx) }.
 export const INTERIORS = [
-  { id: 'cinema', module: '../interiors/cinema.js', door: [-12, 14.1] },
-  { id: 'yumyum', module: '../interiors/yumyum.js', door: [-40, 11.6] },
-  { id: 'clay', module: '../interiors/clay.js', door: [5.65, -3.5] },
+  { id: 'cinema', module: '../interiors/cinema.js', door: [-12, 15.5] },
+  { id: 'yumyum', module: '../interiors/yumyum.js', door: [-21, -2.4] },
+  { id: 'clay', module: '../interiors/clay.js', door: [38.95, -24.8] },
 ];
 
 // Town life modules (src/engine/life.js): small moments layered on the whole game.

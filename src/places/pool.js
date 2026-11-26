@@ -79,7 +79,7 @@ export default {
     tag: 'Swim and splash',
     icon: 'poolWave',
     color: '#2bb6d6',
-    text: 'A sunny pool in the middle of town. Swim, float on the rings, zoom down the slide and dive off the big board.',
+    text: 'A sunny pool on the west street. Swim, float on the rings, zoom down the slide and dive off the big board.',
   },
   icons: {
     poolWave: 'M3 12c1.5 0 1.5-1.5 3-1.5S7.5 12 9 12s1.5-1.5 3-1.5S13.5 12 15 12s1.5-1.5 3-1.5S19.5 12 21 12 M3 17c1.5 0 1.5-1.5 3-1.5S7.5 17 9 17s1.5-1.5 3-1.5S13.5 17 15 17s1.5-1.5 3-1.5S19.5 17 21 17 M8 7.5a4 4 0 0 1 8 0',

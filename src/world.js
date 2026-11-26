@@ -19,51 +19,82 @@ function layered(m, order) {
 }
 
 // World frame: y up, ground at y = 0, the camera looks toward -Z.
-// The journey runs in three rows from the front (+Z) to the back (-Z).
+// Roji's home stands in the middle of the island, with the weekend journey as a loop round it: the path
+// leaves the home's pad south, runs west past Weekend 1, up the west side, east along the north row
+// (Weekends 2 to 5), down the east side and back west past Weekend 6 and the Coming soon stop. A town path
+// crosses the loop through the home's pad (YumYum to the west, the Play Park to the east) and carries on
+// as the west and east streets. The city sits all round: the first street to the north (the ski hill at
+// the north end), the seaside promenade on the south shore, and streets and lanes in between.
 
-export const ISLAND = { cx: 9, cz: -51, hx: 95, hz: 74, r: 16 };
+export const ISLAND = { cx: 4, cz: -2.7, hx: 104, hz: 74.25, r: 18 };
 
-// City streets, as straight polylines [x, z]. Places from src/engine/manifest.js sit along them.
+// Widths in metres: city road asphalt and asphalt plus curbs, the sand path and its darker border.
+export const ROAD = { asphalt: 5, curb: 6.2 };
+export const PATH = { sand: 3, border: 3.6 };
+
+// City streets, as straight polylines [x, z]. Places from src/engine/manifest.js sit along them, each with
+// its front at least 2 m back from the curb.
 export const CITY_ROADS = [
-  [[-14, -11.5], [-14, -24], [-14, -27.8]], // from the journey's last stop up into the city
-  [[-52, -24], [54, -24]], // first street
-  [[-50, -62], [44, -62]], // second street
-  [[-30, -24], [-30, -62]],
-  [[2, -24], [2, -62]],
-  [[-14, -62], [-14, -89.6]], // up to the snow
-  [[-46.3, 8.5], [-58, 7.8], [-68, 7.2]], // town to the zoo
-  [[-52, 8.2], [-52, -24]],
-  [[25.5, 11], [31, 11]], // journey to the east side
-  [[31, 19.2], [31, -24]],
-  [[31, 19.2], [46, 19.2]],
-  [[31, -3.8], [100, -3.8]], // east side, out to the theme park
-  [[54, -24], [66, -24], [66, -3.8]],
-  [[46, 19.2], [92, 19.2]], // seaside promenade to the harbour
-  [[-52, -24], [-73, -24], [-73, -29.4]], // west, up to the desert hill
+  [[-96, -38.2], [104, -38.2]], // first street, behind the north row of the journey
+  [[5.65, -21.6], [5.65, -38.2]], // the quiet street up to the snow
+  [[-34.8, 2], [-96, 2]], // west street: the town path carried on to Odeh's hill
+  [[46.8, 2], [104, 2]], // east street, out to the football pitch and Tech Hub
+  [[-67.6, -38.2], [-67.6, 2]], // west avenue
+  [[0, 21.6], [0, 66.75]], // south road: from the end of the journey down to the sea
+  [[-54.8, 2], [-54.8, 66.75]], // west avenue, south part
+  [[67.6, 2], [67.6, 66.75]], // east avenue, south part
+  [[67.6, 32], [100, 32]], // east lane to the school
+  [[-86, 66.75], [100, 66.75]], // seaside promenade, past the park and the harbour
 ];
-export const SNOW_LINE = -88; // north of this (more negative z) the ground turns to snow
+
+// The snowy north end: the ski hill (src/engine/manifest.js) and a margin round it, out to the north shore.
+const SKI = PLACES.find((p) => p.id === 'ski');
+export const SNOW = { x0: SKI.slot[0] - SKI.size[0] / 2 - 4, x1: SKI.slot[0] + SKI.size[0] / 2 + 4, z0: ISLAND.cz - ISLAND.hz - 12, z1: SKI.slot[1] + SKI.size[1] / 2 + 1.5 };
+export const SNOW_LINE = SNOW.z1; // the snow field's front edge (toward +Z)
+// Is (x, z) in the snow? margin grows the field (a margin of 4 keeps flowers 4 m away).
+export const snowAt = (x, z, margin = 0) => x > SNOW.x0 - margin && x < SNOW.x1 + margin && z < SNOW.z1 + margin;
 
 export const PADS = {
-  home: [-25, 17],
-  cinema: [-12, 18.6],
-  horse: [1.5, 16.8],
-  fencing: [15, 18.3],
-  boardgames: [18, 3],
-  clay: [4, 1.3],
-  drawing: [-10, 3],
-  next: [-14, -11],
-  yumyum: [-40, 16],
-  plaza: [-40, -3.5], // well clear of the back of Roji's YumYum
+  home: [0, 2],
+  cinema: [-12, 20],
+  horse: [-24, -20],
+  fencing: [-3, -20],
+  boardgames: [15.3, -20],
+  clay: [37.3, -20],
+  drawing: [22, 20],
+  next: [7, 20],
+  yumyum: [-21, 2],
+  plaza: [23.5, 2],
 };
-export const CAR_SPOT = [-32.5, 20.2];
-const TURN1 = [25.5, 11];
-const TURN2 = [-24.5, -3.5];
+// Only used when the home place has no garage of its own
+export const CAR_SPOT = [-6.5, 4.8];
+// The loop's corners between the pads (the journey path is a Catmull-Rom curve through all of them)
+const SPUR = [[0, 10], [-3, 18.8]]; // from the home's pad down to the south side
+const WEST = [[-26, 20.6], [-33, 14], [-33.4, 2], [-32.6, -13], [-27, -19.6]];
+const EAST = [[42.5, -18.8], [45.6, -11], [45, 6], [43.6, 15], [37, 20.4]];
+const LOOP_END = [1.2, 20.2]; // back where the spur came down
 export const FUTURE = [
-  [0.5, -12.6],
-  [14.5, -11.4],
+  [15, 34.5],
+  [29, 35],
 ];
-const FUTURE_END = [24.5, -15];
+const FUTURE_END = [38, 32];
 export const DIORAMA_OFFSET = -6.2; // dioramas sit behind their pad (toward -Z)
+
+// Distance from (x, z) to the nearest city road's centre line.
+export function roadLineDistance(x, z) {
+  let best = Infinity;
+  for (const line of CITY_ROADS) {
+    for (let i = 0; i < line.length - 1; i++) {
+      const [ax, az] = line[i];
+      const [bx, bz] = line[i + 1];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+    }
+  }
+  return best;
+}
 
 export function islandSdf(x, z) {
   const { cx, cz, hx, hz, r } = ISLAND;
@@ -87,7 +118,8 @@ function islandOutline(n = 220, wobble = true) {
       if (islandSdf(ISLAND.cx + dx * mid, ISLAND.cz + dz * mid) < 0) lo = mid;
       else hi = mid;
     }
-    const w = wobble ? Math.sin(a * 7) * 0.45 + Math.sin(a * 13 + 1.3) * 0.25 + Math.sin(a * 3 + 0.5) * 0.3 : 0;
+    // The shore only ever bulges out of the rounded box (0 .. 1 m), so roads near it never hang over the sea
+    const w = wobble ? 0.5 + (Math.sin(a * 7) * 0.45 + Math.sin(a * 13 + 1.3) * 0.25 + Math.sin(a * 3 + 0.5) * 0.3) * 0.5 : 0;
     const rr = lo + w;
     pts.push(new THREE.Vector2(ISLAND.cx + dx * rr, ISLAND.cz + dz * rr));
   }
@@ -116,6 +148,7 @@ export class World {
     this.colliders = []; // { type: 'circle', x, z, r } or { type: 'box', x, z, hw, hd }
     this.animated = [];
     this.statics = new THREE.Group(); // static props, merged once everything is placed
+    this.snow = SNOW; // the snow field round the ski hill, for the minimap
     scene.add(this.statics);
     this.outline = islandOutline();
     this.buildPath();
@@ -134,12 +167,13 @@ export class World {
   // ---------------------------------------------------------------- path
   buildPath() {
     const P = (p) => new THREE.Vector3(p[0], 0, p[1]);
-    const main = [PADS.home, PADS.cinema, PADS.horse, PADS.fencing, TURN1, PADS.boardgames, PADS.clay, PADS.drawing, TURN2, PADS.next].map(P);
+    const main = [PADS.home, ...SPUR, PADS.cinema, ...WEST, PADS.horse, PADS.fencing, PADS.boardgames, PADS.clay, ...EAST, PADS.drawing, PADS.next, LOOP_END].map(P);
     this.curve = new THREE.CatmullRomCurve3(main, false, 'centripetal');
-    this.futureCurve = new THREE.CatmullRomCurve3([P(PADS.next), P(FUTURE[0]), P(FUTURE[1]), P(FUTURE_END)], false, 'centripetal');
-    // Town road: home -> Roji's YumYum -> Play Park -> back onto the journey path
+    this.futureCurve = new THREE.CatmullRomCurve3([P(PADS.next), P([8.5, 28]), P(FUTURE[0]), P(FUTURE[1]), P(FUTURE_END)], false, 'centripetal');
+    // Town path across the loop: the west side -> Roji's YumYum -> home -> Play Park -> the east side
     this.townCurve = new THREE.CatmullRomCurve3(
-      [P(PADS.home), P([-32, 17.6]), P(PADS.yumyum), P([-46.3, 12.5]), P([-46.3, 4.5]), P(PADS.plaza), P([-32, -1.5]), P(TURN2)],
+      // it crosses the home's pad a little south of its middle, clear of the mailbox by the gate
+      [P(WEST[2]), P([-27, 2.4]), P(PADS.yumyum), P([-11, 2.7]), P([0, 2.6]), P([11, 2.7]), P(PADS.plaza), P([36, 2.4]), P([45.3, 2])],
       false,
       'centripetal',
     );
@@ -164,9 +198,10 @@ export class World {
     }
   }
 
-  distanceToPath(x, z, includeFuture = true) {
+  // Distance to the nearest centre line of the sand paths (and, with roads, of the city roads too).
+  distanceToPath(x, z, includeFuture = true, roads = true) {
     let best = Infinity;
-    const all = [this.samples, this.townSamples, ...(includeFuture ? [this.futureSamples] : []), ...(this.cityRoads || [])];
+    const all = [this.samples, this.townSamples, ...(includeFuture ? [this.futureSamples] : []), ...(roads ? this.cityRoads || [] : [])];
     for (const list of all) {
       for (let i = 0; i < list.length; i += 2) {
         const s = list[i];
@@ -212,17 +247,17 @@ export class World {
     // Soft darker border, then the sand path on top
     const borderMat = groundLayer(mat('#cfb27e', { rough: 1 }));
     const sandMat = groundLayer(mat('#f3dfb4', { rough: 1 }));
-    const border = layered(mesh(this.ribbon(this.samples, 2.9, 0.02), borderMat, { cast: false }), LAYER.border);
-    const path = layered(mesh(this.ribbon(this.samples, 2.35, 0.035), sandMat, { cast: false }), LAYER.path);
+    const border = layered(mesh(this.ribbon(this.samples, PATH.border, 0.02), borderMat, { cast: false }), LAYER.border);
+    const path = layered(mesh(this.ribbon(this.samples, PATH.sand, 0.035), sandMat, { cast: false }), LAYER.path);
     this.scene.add(border, path);
-    const townBorder = layered(mesh(this.ribbon(this.townSamples, 2.9, 0.02), borderMat, { cast: false }), LAYER.border);
-    const townPath = layered(mesh(this.ribbon(this.townSamples, 2.35, 0.035), sandMat, { cast: false }), LAYER.path);
+    const townBorder = layered(mesh(this.ribbon(this.townSamples, PATH.border, 0.02), borderMat, { cast: false }), LAYER.border);
+    const townPath = layered(mesh(this.ribbon(this.townSamples, PATH.sand, 0.035), sandMat, { cast: false }), LAYER.path);
     this.scene.add(townBorder, townPath);
 
     // Golden trail that grows as weekends are stamped
     this.trailMat = new THREE.MeshStandardMaterial({ color: '#ffd166', emissive: '#ffb347', emissiveIntensity: 0.55, roughness: 0.5 });
     groundLayer(this.trailMat);
-    this.trail = layered(mesh(this.ribbon(this.samples, 0.55, 0.05), this.trailMat, { cast: false }), LAYER.trail);
+    this.trail = layered(mesh(this.ribbon(this.samples, 0.7, 0.05), this.trailMat, { cast: false }), LAYER.trail);
     this.trail.geometry.setDrawRange(0, 0);
     this.trailShown = 0;
     this.trailTarget = 0;
@@ -240,7 +275,13 @@ export class World {
       const tl = Math.hypot(tx, tz) || 1;
       for (const side of [1, -1]) {
         if (r() < 0.25) continue;
-        pebbles.push([p.x + (-tz / tl) * 1.42 * side, p.z + (tx / tl) * 1.42 * side, 0.7 + r() * 0.6]);
+        const x = p.x + (-tz / tl) * (PATH.border / 2) * side;
+        const z = p.z + (tx / tl) * (PATH.border / 2) * side;
+        // None on a crossing: where the town path, a road or another stretch of the loop meets this one
+        if (roadLineDistance(x, z) < ROAD.curb / 2 + 0.3) continue;
+        if (this.townSamples.some((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < 1.7 ** 2)) continue;
+        if (this.samples.some((t, j) => Math.abs(j - i) > 12 && (t.x - x) ** 2 + (t.z - z) ** 2 < 1.7 ** 2)) continue;
+        pebbles.push([x, z, 0.7 + r() * 0.6]);
       }
     }
     const pim = new THREE.InstancedMesh(pebbleGeo, mat('#e6dccb', { rough: 0.9 }), pebbles.length);
@@ -370,7 +411,7 @@ export class World {
     this.ground = topMesh;
     // Places can cut holes (a sunken pool) and paint the ground (snow, a pitch)
     this.groundFx = decorateGround([topMat, lipMat, body.material]);
-    this.groundFx.addTint(ISLAND.cx, SNOW_LINE - 30, ISLAND.hx + 10, 30, '#f2f6fb', 9);
+    this.groundFx.addTint((SNOW.x0 + SNOW.x1) / 2, (SNOW.z0 + SNOW.z1) / 2, (SNOW.x1 - SNOW.x0) / 2, (SNOW.z1 - SNOW.z0) / 2, '#f2f6fb', 3);
   }
 
   buildWater() {
@@ -454,11 +495,13 @@ export class World {
         ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(80,70,100,0.06)';
         ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
       }
+      // A dashed centre line about 0.3 m wide whatever the road's width
+      const line = Math.max(2, Math.round((h * 0.3) / ROAD.asphalt));
       ctx.fillStyle = '#fffaf0';
-      ctx.fillRect(0, h / 2 - 3, w * 0.45, 6);
+      ctx.fillRect(0, h / 2 - line / 2, w * 0.45, line);
     });
     roadTex.wrapS = THREE.RepeatWrapping;
-    roadTex.repeat.set(0.25, 1);
+    roadTex.repeat.set(0.25 * (3.1 / ROAD.asphalt), 1); // dashes and speckles grow with the road
     roadTex.anisotropy = 8; // the centre line and speckles stay steady when seen at a shallow angle
     const roadMat = groundLayer(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.9 }));
     const curbMat = groundLayer(mat('#efe6da', { rough: 0.9 }));
@@ -473,8 +516,8 @@ export class World {
       }
       this.cityRoads.push(pts);
       // All curbs go down first and all asphalt on top, so crossings join cleanly
-      this.scene.add(layered(mesh(this.ribbon(pts, 3.9, 0.03), curbMat, { cast: false }), LAYER.curb));
-      this.scene.add(layered(mesh(this.ribbon(pts, 3.1, 0.032), roadMat, { cast: false }), LAYER.road));
+      this.scene.add(layered(mesh(this.ribbon(pts, ROAD.curb, 0.03), curbMat, { cast: false }), LAYER.curb));
+      this.scene.add(layered(mesh(this.ribbon(pts, ROAD.asphalt, 0.032), roadMat, { cast: false }), LAYER.road));
     });
   }
 
@@ -490,15 +533,19 @@ export class World {
     const step = 27; // samples between lamps (about 9 units)
     for (let i = 14; i < this.samples.length - 6; i += step) {
       const p = this.samples[i];
-      const nearPad = Object.values(PADS).some(([x, z]) => Math.hypot(p.x - x, p.z - z) < 3.6);
+      const nearPad = Object.values(PADS).some(([x, z]) => Math.hypot(p.x - x, p.z - z) < 5); // the pad, its sign and the stop's front
       if (nearPad) continue;
       const q = this.samples[i + 1];
       const tx = q.x - p.x;
       const tz = q.z - p.z;
       const tl = Math.hypot(tx, tz) || 1;
-      const x = p.x + (-tz / tl) * 1.85 * side;
-      const z = p.z + (tx / tl) * 1.85 * side;
+      const x = p.x + (-tz / tl) * (PATH.border / 2 + 0.45) * side;
+      const z = p.z + (tx / tl) * (PATH.border / 2 + 0.45) * side;
       side *= -1;
+      // Not on a road, the town path or another stretch of the loop
+      if (roadLineDistance(x, z) < ROAD.curb / 2 + 0.4) continue;
+      if (this.townSamples.some((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < 2.1 ** 2)) continue;
+      if (this.samples.some((t, j) => Math.abs(j - i) > 12 && (t.x - x) ** 2 + (t.z - z) ** 2 < 2.1 ** 2)) continue;
       const g = new THREE.Group();
       const post = mesh(postGeo, postMat);
       post.position.y = 1.1;
@@ -520,10 +567,11 @@ export class World {
         const p = pts[i];
         const q = pts[i + 1];
         const tl = Math.hypot(q.x - p.x, q.z - p.z) || 1;
-        const x = p.x + (-(q.z - p.z) / tl) * 2.4 * side;
-        const z = p.z + ((q.x - p.x) / tl) * 2.4 * side;
+        const x = p.x + (-(q.z - p.z) / tl) * (ROAD.curb / 2 + 0.5) * side;
+        const z = p.z + ((q.x - p.x) / tl) * (ROAD.curb / 2 + 0.5) * side;
         side *= -1;
-        if (this.distanceToPath(x, z, false) < 2.2) continue;
+        if (this.distanceToPath(x, z, false, false) < PATH.border / 2 + 0.5) continue;
+        if (roadLineDistance(x, z) < ROAD.curb / 2 + 0.4) continue; // on a crossing road
         if (PLACES.some((pl) => !pl.dev && Math.abs(x - pl.slot[0]) < pl.size[0] / 2 + 0.8 && Math.abs(z - pl.slot[1]) < pl.size[1] / 2 + 0.8)) continue;
         if (PLACES.some((pl) => !pl.dev && Math.hypot(x - padOf(pl)[0], z - padOf(pl)[1]) < 3.2)) continue;
         const g = new THREE.Group();
@@ -547,14 +595,16 @@ export class World {
   // rects: list of { x, z, hw, hd } footprints of places, kept clear too.
   scatterNature(keepOut, rects = []) {
     const r = rng(11);
-    const free = (x, z, pathGap, edge = 1.6) => {
+    // gap: open ground kept between the plant and the edge of a sand path or a road's curb
+    const free = (x, z, gap, edge = 1.6) => {
       if (islandSdf(x, z) > -edge) return false;
       for (const k of keepOut) if (Math.hypot(x - k.x, z - k.z) < k.r) return false;
       for (const k of rects) if (Math.abs(x - k.x) < k.hw && Math.abs(z - k.z) < k.hd) return false;
-      if (this.distanceToPath(x, z) < pathGap) return false;
+      if (roadLineDistance(x, z) < ROAD.curb / 2 + gap + 0.3) return false;
+      if (this.distanceToPath(x, z, true, false) < PATH.sand / 2 + gap) return false;
       return true;
     };
-    const snowy = (z) => z < SNOW_LINE - 4;
+    const snowy = (x, z) => snowAt(x, z);
     // Instanced meshes split into 32 m map tiles, so tiles off screen (and out of the shadow box) are skipped.
     const chunked = (geo, material, list, write, { cast = true, receive = true, cell = 32 } = {}) => {
       const cells = new Map();
@@ -587,10 +637,10 @@ export class World {
     const trees = [];
     for (let tries = 0; tries < 16000 && trees.length < 330; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 3.1, 2.2)) continue;
+      if (!free(x, z, 1.9, 2.2)) continue;
       if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 2.3)) continue;
       const roll = r();
-      trees.push({ x, z, s: 0.8 + r() * 0.5, kind: snowy(z) ? 'pine' : roll < 0.55 ? 'round' : roll < 0.85 ? 'pine' : 'blossom', rot: r() * 6.28, snow: snowy(z) });
+      trees.push({ x, z, s: 0.8 + r() * 0.5, kind: snowy(x, z) ? 'pine' : roll < 0.55 ? 'round' : roll < 0.85 ? 'pine' : 'blossom', rot: r() * 6.28, snow: snowy(x, z) });
     }
     const trunkGeo = new THREE.CylinderGeometry(0.12, 0.18, 1.3, 7);
     trunkGeo.translate(0, 0.65, 0);
@@ -650,7 +700,7 @@ export class World {
     const bushes = [];
     for (let tries = 0; tries < 12000 && bushes.length < 230; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 2.1, 1.4) || snowy(z)) continue;
+      if (!free(x, z, 0.9, 1.4) || snowy(x, z)) continue;
       bushes.push({ x, z, s: 0.35 + r() * 0.3 });
     }
     const bushParts = [];
@@ -671,7 +721,7 @@ export class World {
     const flowers = [];
     for (let tries = 0; tries < 36000 && flowers.length < 2200; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 1.75, 0.9) || z < SNOW_LINE + 4) continue;
+      if (!free(x, z, 0.6, 0.9) || snowAt(x, z, 4)) continue;
       // Cluster around a few patches
       const cluster = Math.sin(x * 0.35) * Math.cos(z * 0.4) + Math.sin(x * 0.11 + z * 0.17);
       if (cluster < 0.2 && r() > 0.25) continue;
@@ -697,7 +747,7 @@ export class World {
     const tufts = [];
     for (let tries = 0; tries < 20000 && tufts.length < 2600; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 1.5, 0.7) || z < SNOW_LINE + 2) continue;
+      if (!free(x, z, 0.3, 0.7) || snowAt(x, z, 2)) continue;
       tufts.push([x, z]);
     }
     const blades = [];
@@ -715,12 +765,12 @@ export class World {
     const rocks = [];
     for (let tries = 0; tries < 8000 && rocks.length < 110; tries++) {
       const [x, z] = randPoint();
-      if (!free(x, z, 2.2, 1.0)) continue;
+      if (!free(x, z, 1.0, 1.0)) continue;
       rocks.push({ x, z, s: 0.35 + r() * 0.7 });
     }
     for (const k of rocks) {
       k.rot = [r(), r(), r()];
-      k.col = snowy(k.z) ? '#eef4f8' : r() < 0.5 ? '#c9c2b3' : '#b5ae9f';
+      k.col = snowy(k.x, k.z) ? '#eef4f8' : r() < 0.5 ? '#c9c2b3' : '#b5ae9f';
       // Small rocks are stepped onto, big ones are jumped onto
       this.addCollider({ type: 'circle', x: k.x, z: k.z, r: k.s * 0.45, h: k.s * 0.55 });
     }
@@ -730,6 +780,9 @@ export class World {
       im.setColorAt(i, new THREE.Color(k.col));
     });
 
+    this.trees = trees; // kept for the map and layout checks
+    this.rocks = rocks;
+    this.bushes = bushes;
     this.buildClouds(r);
     this.buildButterflies(r);
     this.buildSparkles(r);
@@ -740,7 +793,7 @@ export class World {
     this.cloudMat = cloudMat;
     const geo = new THREE.IcosahedronGeometry(1, 1);
     const spots = [
-      [-98, 2.5, 8], [-96, 4, -40], [118, 3, 16], [118, 4.5, -30], [-18, 3.5, 35], [14, 4, 34], [-40, 5, -138], [20, 5.5, -138], [40, 3.5, 34], [-62, 3.5, 32], [-98, 4, -100], [118, 4, -96],
+      [-112, 2.5, 40], [-110, 4, -10], [122, 3, 50], [122, 4.5, 0], [-18, 3.5, 83], [14, 4, 82], [-40, 5, -90], [20, 5.5, -90], [40, 3.5, 82], [-62, 3.5, 80], [-112, 4, -55], [122, 4, -52],
     ];
     for (const [x, y, z] of spots) {
       const g = new THREE.Group();
