@@ -1222,7 +1222,7 @@ function updateCamera(dt, t) {
   let z = zoom * aspectZoom();
   const inside = spaces.inside;
   offset.lerp(inside ? OFFSET_IN : OFFSET_OUT, 1 - Math.exp(-4 * dt));
-  if (mount?.type === 'car') z *= 1.3;
+  if (mount?.type === 'car') z *= 1.3 + clamp(Math.abs(car.speed) / 24, 0, 1) * 0.25; // a wider view at speed
   if (mount?.type === 'pony') z *= 1.1;
   if (scooting) z *= 1.08;
   if (currentStation && !mount && !spaces.byId[currentStation.stop.id]) {
@@ -1368,16 +1368,21 @@ function updatePlayer(dt, ax) {
     const cp = car.root.position;
     const before = car.speed;
     const v = new THREE.Vector3(Math.sin(car.yaw) * car.speed, 0, Math.cos(car.yaw) * car.speed);
-    cp.x += v.x * dt;
-    cp.z += v.z * dt;
-    physics.resolve(cp, car.radius, v, { skip: (c) => c.isCar, feet: 0 });
+    // Small steps (at most 0.3 m each), so a fast car on a slow phone cannot jump through a thin fence
+    const steps = Math.max(1, Math.ceil((Math.abs(car.speed) * dt) / 0.3));
+    for (let i = 0; i < steps; i++) {
+      cp.x += (v.x * dt) / steps;
+      cp.z += (v.z * dt) / steps;
+      physics.resolve(cp, car.radius, v, { skip: (c) => c.isCar, feet: 0 });
+    }
     const fwd = v.x * Math.sin(car.yaw) + v.z * Math.cos(car.yaw);
-    if (Math.abs(fwd) < Math.abs(before) - 2.5) {
+    if (Math.abs(fwd) < Math.abs(before) - 3) {
       car.speed = fwd * 0.7;
       sound.kick();
     } else car.speed = fwd;
     carCollider.x = cp.x;
     carCollider.z = cp.z;
+    physics.dirty = true; // the car's own collider moves faster than the grid's margin
     car.update(dt, elapsed);
     sound.engineSpeed(car.speed);
     p.pos.copy(cp);
@@ -1406,7 +1411,7 @@ function updatePlayer(dt, ax) {
 
   const run = input.running || waypoints.length > 6;
   p.surface = spaces.zoneAt(p.pos.x, p.pos.z);
-  const top = scooting ? (run ? 15 : 10.5) : run ? 7.2 : 4.6;
+  const top = scooting ? (run ? 18 : 12) : run ? 7.2 : 4.6;
   stepWalker(p, physics, dirX, dirZ, intent, top, scooting ? 6.5 : 12, dt);
   if (scooting) p.kid.kickWant = intent > 0.15 && p.speed < top * 0.86 ? 1 : 0; // kick while speeding up
   const water = spaces.waterAt(p.pos.x, p.pos.z);
@@ -1515,7 +1520,7 @@ function updateCompanion(dt) {
       fx.poof(c.pos);
     }
     const near = d < 0.5;
-    const maxS = scooting ? (d > 3 ? 16 : 11) : mount ? 9 : d > 4 ? 7.2 : 4.6;
+    const maxS = scooting ? (d > 3 ? 19.5 : 12.5) : mount ? 9 : d > 4 ? 7.2 : 4.6;
     stepWalker(c, physics, dx, dz, near ? 0 : clamp((d - 0.4) * 1.5, 0, 1), maxS, scooting ? 8 : 10, dt);
     if (scooting) c.kid.kickWant = d > 1.2 && c.speed < maxS * 0.8 ? 1 : 0;
     c.idle = c.speed > 0.25 ? 0 : c.idle + dt;
