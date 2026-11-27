@@ -78,6 +78,7 @@
   color: var(--ink);
   background: #fffdf8;
   user-select: text;
+  -webkit-user-select: text;
 }
 .ol-code:focus {
   outline: none;
@@ -159,6 +160,7 @@
   color: var(--ink-soft);
   background: #fffdf8;
   user-select: text;
+  -webkit-user-select: text;
 }
 .ol-link .btn {
   min-height: 44px;

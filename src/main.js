@@ -54,6 +54,12 @@ const bootStep = (k, label) => {
 await Promise.race([document.fonts.load('600 40px Fredoka'), new Promise((r) => setTimeout(r, 1500))]);
 await bootStep(0.02, 'Shaping the island');
 
+// A long press is a hold in this game, never a text selection or a copy menu (iPhone Safari offers both
+// outside full screen). Text fields stay selectable.
+const typing = (t) => t?.closest?.('input, textarea, select, [contenteditable]');
+document.addEventListener('selectstart', (e) => !typing(e.target) && e.preventDefault());
+document.addEventListener('contextmenu', (e) => !typing(e.target) && e.preventDefault());
+
 // ------------------------------------------------------------------ renderer and scene
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('capture') });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
