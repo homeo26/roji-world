@@ -25,7 +25,7 @@ export default {
     tag: 'Where Dr. Roji works',
     icon: 'medic',
     color: '#3fbf9f',
-    text: 'Roji is a doctor here. Visit her patients, peek into her office and help with Patient Rounds.',
+    text: 'Roji is a doctor here. Visit her patients, peek into her office and work a shift with Dr. Roji: exams, surgeries and lots of smiles.',
   },
   icons: { medic: MEDIC },
 

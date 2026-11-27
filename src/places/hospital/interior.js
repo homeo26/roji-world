@@ -939,7 +939,7 @@ export function buildInterior(ctx) {
       title: `Visit ${p.name}`,
       text: `<b>${p.name}:</b> "${s.line}"`,
       options: [
-        { id: 'help', label: 'Help Dr. Roji', sub: 'Play Patient Rounds together' },
+        { id: 'help', label: 'Help Dr. Roji', sub: "Play Dr. Roji's Shift together" },
         { id: 'cheer', label: `Cheer ${p.name} up`, sub: 'A big wave and a smile' },
       ],
     });

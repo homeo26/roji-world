@@ -1,868 +1,1187 @@
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { kit, C, emblem, makeTool, plant, skyTexture, windowMesh, colorBake } from '../places/hospital/models.js';
-import { TOOLS, SYMPTOMS, PATIENTS, patientById } from '../places/hospital/roster.js';
-import { makePerson, dress } from '../places/hospital/people.js';
+import * as THREE from 'three';
+import { kit, C, heartMug } from '../places/hospital/models.js';
+import { STAFF } from '../places/hospital/roster.js';
+import { makePerson } from '../places/hospital/people.js';
+import { buildRooms } from './patients/rooms.js';
+import { createUI, starsHtml } from './patients/ui.js';
+import { Monitor, Board, surgeryPic } from './patients/art.js';
+import { STEPS, NURSE_STEPS, Cursor } from './patients/steps.js';
+import { PEOPLE, CASES, makeShift, caseStars, shiftStars, unlocked, UNLOCKS, HANDOFF, TREATS } from './patients/cases.js';
+import * as M from './patients/models.js';
+import { probe } from './patients/probe.js';
 
-// Patient Rounds: a 3D exam room at Sunny Hill. A patient sits on the bed and says what is wrong;
-// pick the right tool from the tray (tap it, or press 1 to 8). Five patients per shift, a calm clock and stars.
+// Dr. Roji's Shift: a day at Sunny Hill Hospital in four rooms. Patients wait in reception and Dr. Roji picks
+// who needs her first (triage); in the exam room she listens, looks, taps and reads X-rays, then treats
+// (a plaster cast, stitches, a plaster, the right dose of medicine, a vaccine); the hardest cases go to the
+// surgery theatre (scrub in, gown on, a sleepy countdown, a steady incision, tweezers that must not touch
+// the edges, a heart monitor to keep steady, stitches and a heart sticker); everyone ends in the recovery
+// room with balloons and their family. Shifts mix the cases and get busier, with twists. Played as Homama,
+// he is Dr. Roji's nurse: he hands her the tools and does the simple steps while she does the doctor's work.
 
-const SHIFT = 5;
-const TIME = 150;
-const SLOT = 0.55;
-const STAR = 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z';
-const starsHtml = (n) =>
-  `<span style="display:inline-flex;gap:6px;margin:4px 0 10px">${[0, 1, 2]
-    .map((i) => `<svg width="38" height="38" viewBox="0 0 24 24"><path d="${STAR}" fill="${i < n ? '#ffd166' : '#eadfd6'}" stroke="${i < n ? '#e0a800' : '#cdbfb4'}" stroke-width="1.3" stroke-linejoin="round"/></svg>`)
-    .join('')}</span>`;
+const AGES = { lina: 7, yousef: 9, nour: 6, adam: 8, mira: 5, zaid: 9, leo: 4, salma: 7, omar: 10, rana: 8, karim: 9, dana: 6, tala: 3 };
+const DIR = new THREE.Vector3(0.12, 0.38, 1).normalize();
+const STEP_LINE = { thermo: 'Exam: checking the temperature', steth: 'Exam: listening with the stethoscope', light: 'Exam: shining the little light', reflex: 'Exam: checking reflexes', xray: 'Exam: reading the X-ray', clean: 'Exam: cleaning a scrape', choice: 'Exam: picking the treatment', cast: 'Treatment: a plaster cast', stitches: 'Treatment: stitches', bandage: 'Treatment: a plaster', dose: 'Treatment: the right dose', calm: 'Calming a nervous patient', vaccine: 'Treatment: a vaccine', scrub: 'Surgery: scrubbing in', gown: 'Surgery: gown and mask on', sleep: 'Surgery: sleepy countdown', incise: 'Surgery: the incision', remove: 'Surgery: taking it out', vitals: 'Surgery: keeping the heart steady', close: 'Surgery: closing up', sticker: 'Surgery: a heart sticker', triage: 'Triage: who is next' };
 
 export default {
   id: 'patients',
-  title: 'Patient Rounds',
-  tagline: 'Help Dr. Roji make five patients feel better',
+  title: "Dr. Roji's Shift",
+  tagline: 'Exams, surgeries and lots of smiles',
 
   async start(ctx) {
-    const { THREE, scene, camera, util, hud, input, sound, fx } = ctx;
-    const { canvasTexture, roundRect, FONT, damp, easeOutBack, easeOutCubic, clamp } = util;
-    const k = kit();
-    const { box, rbox, cyl, sph, at } = k;
-    const env = ctx.env.indoor({ color: '#f3dccd' });
-    env.sun.position.set(-3, 8, 6);
-    env.hemi.intensity = 1.75;
-    const room = new THREE.Group();
-    scene.add(room);
-    const add = (...o) => (room.add(...o), o[0]);
+    const { scene, camera, util, hud, input, sound, fx } = ctx;
+    const { damp, lerp } = util;
     const me = ctx.me;
+    const nurse = me === 'homama';
+    const k = kit();
+    const env = ctx.env.indoor({ color: '#f6e3d6' });
+    env.hemi.intensity = 1.7;
+    env.sun.shadow.mapSize.set(1024, 1024);
+    let alive = true;
+    const timers = [];
+    const later = (ms, fn) => timers.push(setTimeout(() => alive && fn(), ms));
 
-    // ---------------------------------------------------------------- room
-    const tiles = canvasTexture(256, 256, (c, w) => {
-      c.fillStyle = '#f2fbf7';
-      c.fillRect(0, 0, w, w);
-      c.fillStyle = '#d3f1e5';
-      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if ((i + j) % 2) c.fillRect((i * w) / 4, (j * w) / 4, w / 4, w / 4);
-    });
-    tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
-    tiles.repeat.set(6, 5);
-    const floor = util.mesh(new THREE.BoxGeometry(10, 0.1, 8), new THREE.MeshStandardMaterial({ map: tiles, roughness: 0.85 }), { cast: false });
-    add(at(floor, 0, -0.05, -0.6));
-    const paper = canvasTexture(128, 128, (c, w) => {
-      c.fillStyle = '#e6f6f0';
-      c.fillRect(0, 0, w, w);
-      c.fillStyle = '#cbeee0';
-      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-        const x = (i + 0.5 + (j % 2) * 0.5) * (w / 3);
-        const y = (j + 0.5) * (w / 3);
-        c.fillRect(x - 9, y - 3, 18, 6);
-        c.fillRect(x - 3, y - 9, 6, 18);
-      }
-    });
-    paper.wrapS = paper.wrapT = THREE.RepeatWrapping;
-    paper.repeat.set(6, 2.5);
-    const back = util.mesh(new THREE.BoxGeometry(10, 3.6, 0.2), new THREE.MeshStandardMaterial({ map: paper, roughness: 0.9 }));
-    add(at(back, 0, 1.8, -3.7));
-    add(at(box(10, 0.2, 0.06, C.white), 0, 0.1, -3.58));
-    add(at(box(10, 0.08, 0.05, C.white), 0, 1.1, -3.58));
-    for (const s of [-1, 1]) add(at(box(0.2, 3.6, 7, '#f7ece0'), s * 5, 1.8, -0.2));
-    const skyMat = new THREE.MeshBasicMaterial({ map: skyTexture() });
-    add(at(windowMesh(k, skyMat, { w: 1.2, h: 1.0, curtain: C.pink }), 2.6, 2.05, -3.55));
-    // Emblem plaque over the bed
-    const plaque = emblem(k, 0.6);
-    add(at(plaque, -0.7, 2.45, -3.52));
-    // Eye chart
-    const chart = k.panel(0.7, 1.0, 256, (c, w, h) => {
-      c.fillStyle = '#ffffff';
-      c.fillRect(0, 0, w, h);
-      c.strokeStyle = C.mintDeep;
-      c.lineWidth = 10;
-      c.strokeRect(5, 5, w - 10, h - 10);
-      c.fillStyle = C.ink;
-      c.textAlign = 'center';
-      const rows = ['E', 'F P', 'T O Z', 'L P E D', 'P E C F D'];
-      rows.forEach((r, i) => {
-        c.font = `700 ${70 - i * 11}px ${FONT}`;
-        c.fillText(r, w / 2, 80 + i * 66);
-      });
-    });
-    add(at(rbox(0.78, 1.08, 0.04, C.mintDeep, 0.03), -2.7, 1.95, -3.58));
-    add(at(chart, -2.7, 1.95, -3.55));
-    // Giraffe height chart
-    const giraffe = k.panel(0.5, 1.7, 256, (c, w, h) => {
-      c.fillStyle = '#fff3d6';
-      c.fillRect(0, 0, w, h);
-      c.fillStyle = '#ffc94d';
-      roundRect(c, w * 0.32, h * 0.12, w * 0.36, h * 0.86, 30);
-      c.fill();
-      c.beginPath();
-      c.ellipse(w * 0.55, h * 0.1, w * 0.28, h * 0.06, 0.2, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = '#d98b2b';
-      for (let i = 0; i < 9; i++) {
-        c.beginPath();
-        c.arc(w * (0.42 + (i % 2) * 0.16), h * (0.22 + i * 0.085), 10, 0, Math.PI * 2);
-        c.fill();
-      }
-      c.fillStyle = C.ink;
-      c.beginPath();
-      c.arc(w * 0.68, h * 0.09, 6, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = C.mintDeep;
-      for (let i = 0; i < 8; i++) c.fillRect(0, h * (0.1 + i * 0.11), w * 0.2, 5);
-    });
-    add(at(giraffe, -4.0, 1.3, -3.58));
-    // Cabinet with jars, a counter with a sink, a plant
-    add(at(rbox(1.2, 2.0, 0.5, C.white, 0.05), -3.4, 1.0, -3.3));
-    add(at(box(1.04, 0.04, 0.42, C.mint), -3.4, 1.3, -3.25));
-    add(at(box(1.04, 0.04, 0.42, C.mint), -3.4, 1.7, -3.25));
-    [C.rose, C.sun, C.sky, C.lilac, C.mint].forEach((cc, i) => {
-      add(at(cyl(0.07, 0.07, 0.18, cc, 12), -3.8 + i * 0.2, 1.42, -3.22));
-      add(at(cyl(0.075, 0.075, 0.04, C.white, 12), -3.8 + i * 0.2, 1.53, -3.22));
-    });
-    add(at(rbox(0.5, 0.36, 0.06, C.pink, 0.04), -3.4, 0.55, -3.04));
-    add(at(rbox(1.8, 0.9, 0.6, C.mint, 0.05), 3.3, 0.45, -3.25));
-    add(at(rbox(1.9, 0.07, 0.66, C.white, 0.03), 3.3, 0.93, -3.25));
-    add(at(rbox(0.6, 0.05, 0.4, C.steel, 0.02, { metal: 0.4, rough: 0.3 }), 3.0, 0.95, -3.25));
-    const tap = k.tor(0.12, 0.022, C.steel, Math.PI, { metal: 0.6, rough: 0.25 });
-    tap.rotation.y = Math.PI / 2;
-    add(at(tap, 3.0, 1.0, -3.45));
-    add(at(plant(k, { scale: 0.7, pot: C.sun }), 3.85, 0.96, -3.3));
-    add(at(plant(k, { scale: 1.3 }), 4.4, 0, -2.4));
-    // Exam bed
-    const BX = -0.7;
-    const BZ = -1.8;
-    add(at(rbox(1.9, 0.5, 0.72, C.white, 0.06), BX, 0.25, BZ));
-    add(at(rbox(2.06, 0.16, 0.84, C.mintDeep, 0.07), BX, 0.56, BZ));
-    add(at(box(1.5, 0.012, 0.56, '#ffffff'), BX + 0.1, 0.645, BZ));
-    add(at(rbox(0.5, 0.14, 0.62, C.white, 0.07), BX - 0.75, 0.7, BZ));
-    for (const dx of [-0.45, 0.45]) {
-      add(at(rbox(0.7, 0.16, 0.04, C.mint, 0.02), BX + dx, 0.3, BZ + 0.37));
-      add(at(sph(0.025, C.sun, undefined, 8), BX + dx, 0.3, BZ + 0.4));
-    }
-    // Exam lamp arching over the bed
-    add(at(cyl(0.22, 0.25, 0.06, C.ink, 16), BX - 1.5, 0.03, BZ - 0.55));
-    add(at(cyl(0.03, 0.03, 2.0, C.steel, 8), BX - 1.5, 1.0, BZ - 0.55));
-    const lampArm = cyl(0.025, 0.025, 0.9, C.steel, 8);
-    lampArm.rotation.z = -1.0;
-    add(at(lampArm, BX - 1.13, 2.1, BZ - 0.45));
-    const lampHead = cyl(0.08, 0.2, 0.18, C.pink, 16);
-    add(at(lampHead, BX - 0.75, 2.28, BZ - 0.35));
-    add(at(sph(0.08, '#fff6d8', { emissive: '#ffe9a8', ei: 0.9 }, 12), BX - 0.75, 2.2, BZ - 0.35));
-    // Tray on wheels, numbered tools on top
-    const TZ = 0.2;
-    const TY = 0.9;
-    add(at(rbox(4.6, 0.07, 0.7, C.white, 0.03), 0, TY - 0.035, TZ));
-    add(at(rbox(4.66, 0.05, 0.76, C.mint, 0.02), 0, TY - 0.09, TZ));
-    add(at(rbox(4.5, 0.05, 0.6, C.white, 0.02), 0, 0.3, TZ));
-    for (const [x, z] of [[-2.2, -0.3], [2.2, -0.3], [-2.2, 0.3], [2.2, 0.3]]) {
-      add(at(cyl(0.025, 0.025, 0.8, C.steel, 6), x, 0.45, TZ + z));
-      add(at(sph(0.05, C.ink, undefined, 8), x, 0.05, TZ + z));
-    }
-    const strip = k.panel(4.4, 0.22, 2048, (c, w, h) => {
-      c.fillStyle = '#ffffff';
-      c.fillRect(0, 0, w, h);
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.font = `600 ${h * 0.62}px ${FONT}`;
-      TOOLS.forEach((tl, i) => {
-        c.fillStyle = i % 2 ? '#f2fbf7' : '#ffffff';
-        c.fillRect((i * w) / 8, 0, w / 8, h);
-        c.fillStyle = C.ink;
-        c.fillText(tl.name, ((i + 0.5) * w) / 8, h / 2 + 3, w / 8 - 10);
-      });
-    });
-    add(at(strip, 0, TY - 0.17, TZ + 0.36));
-    colorBake(room);
-    util.bakeStatic(room, [], mergeGeometries);
+    // ---------------------------------------------------------------- saved progress
+    const totalStars0 = ctx.load('stars', 0);
+    const shiftN = window.__patientsShift || ctx.load('shifts', 0) + 1; // the test hook may force a shift number
+    const plaques0 = ctx.load('plaque', 0);
+    const have = unlocked(totalStars0);
+    const r = util.rng((ctx.online.seed ^ (shiftN * 7919)) >>> 0 || 1);
+    const love = { note: !nurse && (shiftN === 1 || r() < 0.5), coffee: !nurse && r() < 0.6, sign: !nurse && r() < 0.7, ...(window.__patientsLove || {}) };
+    if (love.note && love.coffee && love.sign) love.sign = false;
 
-    // Tools, number badges, hit boxes and a glow under the hovered one
-    const tools = [];
-    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
-    const ringMat = new THREE.MeshBasicMaterial({ color: '#7fd8bf', transparent: true, opacity: 0, depthWrite: false });
-    const ringGeo = new THREE.RingGeometry(0.17, 0.24, 28);
-    const hits = [];
-    TOOLS.forEach((tl, i) => {
-      const x = (i - 3.5) * SLOT;
-      const model = makeTool(k, tl.id);
-      const holder = new THREE.Group();
-      holder.add(model);
-      holder.scale.setScalar(1.55);
-      holder.position.set(x, TY, TZ);
-      scene.add(holder);
-      const badge = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: canvasTexture(128, 128, (c, w) => {
-            c.fillStyle = '#ffffff';
-            c.beginPath();
-            c.arc(w / 2, w / 2, w / 2 - 6, 0, Math.PI * 2);
-            c.fill();
-            c.lineWidth = 10;
-            c.strokeStyle = C.mintDeep;
-            c.stroke();
-            c.fillStyle = C.ink;
-            c.textAlign = 'center';
-            c.textBaseline = 'middle';
-            c.font = `700 78px ${FONT}`;
-            c.fillText(String(i + 1), w / 2, w / 2 + 5);
-          }),
-          depthTest: false,
-          transparent: true,
-        }),
-      );
-      badge.scale.setScalar(0.2);
-      badge.renderOrder = 4;
-      badge.position.set(x - 0.2, TY + 0.06, TZ + 0.26);
-      scene.add(badge);
-      const hit = new THREE.Mesh(new THREE.BoxGeometry(SLOT * 0.96, 0.55, 0.8), hitMat);
-      hit.position.set(x, TY + 0.2, TZ + 0.05);
-      hit.userData.slot = i;
-      scene.add(hit);
-      hits.push(hit);
-      const ring = new THREE.Mesh(ringGeo, i === 0 ? ringMat : ringMat.clone());
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(x, TY + 0.005, TZ);
-      scene.add(ring);
-      tools.push({ id: tl.id, name: tl.name, holder, model, home: new THREE.Vector3(x, TY, TZ), ring, lift: 0, shake: 0, busy: false, pop: 1 });
+    // ---------------------------------------------------------------- rooms
+    const rooms = buildRooms(ctx, k, { gold: have.has('gold'), heartLamp: have.has('heartlamp'), note: love.note });
+    if (plaques0 > 0) rooms.reception.plaqueSpot.add(M.plaque(k, plaques0));
+    const bin = new THREE.Group();
+    bin.visible = false;
+    scene.add(bin);
+    const monitor = new Monitor(rooms.theatre.monitor.userData.screen);
+    monitor.draw();
+    const softTex = util.canvasTexture(64, 64, (g) => {
+      const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,255,255,1)');
+      gr.addColorStop(0.6, 'rgba(255,255,255,0.7)');
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, 64, 64);
     });
+
+    // ---------------------------------------------------------------- sounds
+    const ac = () => sound.ctx;
+    const tone = (f, at, dur, o) => {
+      const a = ac();
+      if (a) sound.tone(f, a.currentTime + at, dur, o);
+    };
+    const sfx = {
+      good: () => sound.ui('good'),
+      bad: () => (tone(392, 0, 0.16, { type: 'triangle', gain: 0.05 }), tone(330, 0.12, 0.22, { type: 'triangle', gain: 0.05 })),
+      pop: () => sound.ui('pop'),
+      tick: () => tone(1500, 0, 0.03, { gain: 0.02 }),
+      swoosh: () => sound.ui('swoosh'),
+      beep: (n = 1) => {
+        for (let i = 0; i < n; i++) tone(1760, i * 0.16, 0.08, { gain: 0.05 });
+      },
+      listen(spot, near) {
+        const g = 0.03 + near * near * 0.3;
+        if (spot === 'rumble') for (let i = 0; i < 4; i++) tone(160 + Math.random() * 220, i * 0.05, 0.05, { type: 'square', gain: g * 0.12 });
+        else if (spot === 'gurgle') tone(320, 0, 0.3, { gain: g * 0.6, slideTo: 110 });
+        else if (spot === 'whistle') tone(1100, 0, 0.25, { gain: g * 0.25, slideTo: 1500 });
+        tone(80, 0, 0.12, { gain: g, slideTo: 50 });
+        tone(70, 0.18, 0.12, { gain: g * 0.7, slideTo: 45 });
+      },
+      found(spot) {
+        sfx.listen(spot, 1);
+        sfx.chime(3);
+      },
+      chime: (n = 1) => [72, 76, 79, 84].slice(0, Math.max(1, Math.min(4, n + 1))).forEach((m, i) => tone(440 * 2 ** ((m - 69) / 12), i * 0.07, 0.4, { gain: 0.04 })),
+      boing: () => tone(220, 0, 0.3, { type: 'triangle', gain: 0.09, slideTo: 660 }),
+      sparkle: () => [88, 91, 96].forEach((m, i) => tone(440 * 2 ** ((m - 69) / 12), i * 0.05, 0.2, { gain: 0.025 })),
+      stitch: (n) => tone(500 + n * 60, 0, 0.08, { type: 'triangle', gain: 0.05 }),
+      layer: (n) => (sound.ui('swoosh'), tone(523 + n * 130, 0.05, 0.25, { gain: 0.05 })),
+      gulp: () => tone(300, 0, 0.18, { gain: 0.08, slideTo: 150 }),
+      alarm: (up) => (tone(up ? 880 : 520, 0, 0.12, { type: 'square', gain: 0.025 }), tone(up ? 990 : 440, 0.16, 0.12, { type: 'square', gain: 0.025 })),
+      buzz: () => tone(110, 0, 0.22, { type: 'sawtooth', gain: 0.06 }),
+      pick: () => tone(1200, 0, 0.05, { type: 'triangle', gain: 0.05 }),
+      plop: () => tone(700, 0, 0.2, { gain: 0.07, slideTo: 220 }),
+      soft: () => tone(523, 0, 0.18, { gain: 0.04 }),
+      cut: () => tone(2400, 0, 0.03, { gain: 0.012 }),
+      count: (i) => tone(660 - i * 50, 0, 0.35, { gain: 0.05 }),
+      monitor: () => tone(988, 0, 0.07, { gain: 0.025 }),
+      siren: () => {
+        for (let i = 0; i < 6; i++) tone(i % 2 ? 960 : 720, i * 0.32, 0.3, { type: 'triangle', gain: 0.05 });
+      },
+      squeak: () => tone(1300, 0, 0.12, { type: 'triangle', gain: 0.04, slideTo: 1800 }),
+      whistle: () => tone(1500, 0, 0.3, { gain: 0.03, slideTo: 1100 }),
+    };
+    monitor.beat = () => current === 'theatre' && sfx.monitor();
 
     // ---------------------------------------------------------------- people
-    const roji = ctx.makeKid('roji');
-    scene.add(roji.root);
-    const ROJI_AT = new THREE.Vector3(0.95, 0, -1.4);
-    roji.root.position.copy(ROJI_AT);
-    let rojiYaw = -0.45;
-    let homama = null;
-    if (me === 'homama') {
-      homama = ctx.makeKid('homama');
-      homama.root.position.set(1.85, 0, -1.05);
-      homama.root.rotation.y = -0.45;
-      const clip = new THREE.Group();
-      clip.add(rbox(0.26, 0.34, 0.03, C.woodDark, 0.02));
-      clip.add(at(box(0.22, 0.26, 0.01, '#ffffff'), 0, -0.02, 0.02));
-      clip.add(at(box(0.08, 0.04, 0.03, C.steel), 0, 0.16, 0.02));
-      for (let i = 0; i < 3; i++) clip.add(at(box(0.15, 0.015, 0.005, i ? C.steel : C.rose), 0, 0.05 - i * 0.06, 0.03));
-      clip.rotation.x = -0.6;
-      homama.carry(clip);
-      scene.add(homama.root);
-    }
+    const prep = (kid, shadow = false) => {
+      kid.batch?.();
+      if (!shadow) kid.root.traverse((o) => o.isMesh && (o.castShadow = false));
+      scene.add(kid.root);
+      return kid;
+    };
+    const roji = prep(ctx.makeKid('roji'), true);
+    const homama = prep(ctx.makeKid('homama'), true);
+    const maya = prep(makePerson(ctx.makeKid, STAFF.maya));
+    maya.root.position.copy(rooms.reception.spots.maya);
+    const actors = new Map(); // kid -> { kid, room, walk, speed, yaw, air, over }
+    const actor = (kid, room) => {
+      const a = actors.get(kid) || { kid, room, walk: null, yaw: 0, speed: 0 };
+      a.room = room;
+      actors.set(kid, a);
+      kid.root.visible = room === current;
+      return a;
+    };
+    let current = 'reception';
+    actor(roji, 'reception');
+    actor(homama, nurse ? 'reception' : 'none');
+    actor(maya, 'reception');
+    const place = (kid, pos, yaw = 0, room = current) => {
+      const a = actor(kid, room);
+      kid.root.position.copy(pos);
+      a.yaw = yaw;
+      kid.root.rotation.set(0, yaw, 0);
+      a.walk = null;
+      return a;
+    };
+    const walkTo = (kid, to, speed = 2.2) =>
+      new Promise((res) => {
+        const a = actors.get(kid);
+        a.walk = { to: to.clone(), speed, res };
+      });
+    // A kid who leaves: free its own geometry (materials are shared and cached)
+    const disposeKid = (kid) => {
+      actors.delete(kid);
+      kid.root.removeFromParent();
+      kid.root.traverse((o) => {
+        o.geometry?.dispose();
+        if (o.material && !Array.isArray(o.material) && (o.material.isMeshBasicMaterial || o.material.isSpriteMaterial) && !o.material.map) o.material.dispose();
+      });
+    };
 
-    // Speech bubbles: the patient's (left) and Dr. Roji's hints (right)
-    const bubble = (tail) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 640;
-      canvas.height = 300;
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0 }));
-      s.renderOrder = 6;
-      s.scale.set(1.9, 0.89, 1);
-      scene.add(s);
-      const o = {
-        s,
-        k: 0,
-        on: false,
-        set(name, text, color = C.mintDeep) {
-          const c = canvas.getContext('2d');
-          const w = canvas.width;
-          const h = canvas.height;
-          c.clearRect(0, 0, w, h);
-          c.fillStyle = '#ffffff';
-          c.strokeStyle = color;
-          c.lineWidth = 9;
-          roundRect(c, 10, 10, w - 20, h - 70, 46);
-          c.fill();
-          c.stroke();
-          c.beginPath();
-          const tx = tail > 0 ? w - 150 : 150;
-          c.moveTo(tx - 30, h - 64);
-          c.lineTo(tx + tail * 40, h - 8);
-          c.lineTo(tx + 30, h - 64);
-          c.fill();
-          c.stroke();
-          c.fillRect(tx - 26, h - 70, 52, 12);
-          c.fillStyle = color;
-          c.font = `700 40px ${FONT}`;
-          c.textAlign = 'left';
-          c.textBaseline = 'top';
-          c.fillText(name, 40, 30);
-          c.fillStyle = C.ink;
-          c.font = `500 38px ${FONT}`;
-          const words = text.split(' ');
-          let line = '';
-          let y = 84;
-          for (const wd of words) {
-            const test = line ? `${line} ${wd}` : wd;
-            if (c.measureText(test).width > w - 80 && line) {
-              c.fillText(line, 40, y);
-              line = wd;
-              y += 46;
-            } else line = test;
-          }
-          c.fillText(line, 40, y);
-          tex.needsUpdate = true;
-          this.on = true;
-          this.k = 0;
-        },
-        hide() {
-          this.on = false;
-        },
-        update(dt, pos) {
-          this.k = damp(this.k, this.on ? 1 : 0, 10, dt);
-          s.material.opacity = this.k;
-          s.visible = this.k > 0.02;
-          const sc = (0.75 + 0.25 * easeOutBack(clamp(this.k, 0, 1))) * (this.size || 1);
-          s.scale.set(1.9 * sc, 0.89 * sc, 1);
-          s.position.copy(pos);
-        },
-      };
-      return o;
-    };
-    const say = bubble(1);
-    const hint = bubble(-1);
-    let hintT = 0;
-    const SAY_AT = new THREE.Vector3();
-    const HINT_AT = new THREE.Vector3();
-    // Wide phone screens have room at the sides: bigger bubbles, further out and a little lower
-    const layout = () => {
-      const wide = camera.aspect > 1.85;
-      say.size = hint.size = wide ? 1.3 : 1;
-      SAY_AT.set(wide ? -2.75 : -2.0, wide ? 1.78 : 2.3, -1.4);
-      HINT_AT.set(wide ? 2.55 : 1.75, wide ? 1.85 : 2.35, -1.2);
-    };
-    // The town's thumbstick is not needed here (everything is a tap)
+    // ---------------------------------------------------------------- the UI and the camera
+    const ui = createUI({ camera, sound });
+    const bubbles = {};
+    for (const who of ['roji', 'patient', 'homama', 'other']) bubbles[who] = { b: ui.bubble(), ttl: 0, kid: null, side: who === 'roji' ? 'right' : 'left' };
+    for (const [who, b] of Object.entries(bubbles)) b.b.a.side = b.side;
     const style = document.createElement('style');
     style.textContent = 'body.arena-on #stick, body.arena-on #joy { display: none !important; }';
     document.head.appendChild(style);
 
-    // ---------------------------------------------------------------- patients
-    const first = patientById(ctx.opts.patient);
-    const pool = PATIENTS.filter((p) => p !== first).sort(() => Math.random() - 0.5);
-    const queue = first ? [first] : [];
-    for (const p of pool) {
-      if (queue.length >= SHIFT) break;
-      if (!queue.some((q) => q.symptom === p.symptom)) queue.push(p);
-    }
-    for (const p of pool) if (queue.length < SHIFT && !queue.includes(p)) queue.push(p);
+    const cam = {
+      pos: new THREE.Vector3(0, 4, 8),
+      look: new THREE.Vector3(),
+      goalPos: new THREE.Vector3(),
+      goalLook: new THREE.Vector3(),
+      want: null,
+      rate: 3.2,
+      set(look, h, w, dir = DIR) {
+        this.want = { look: look.clone(), h, w, dir: dir.clone().normalize() };
+        return this.solve();
+      },
+      solve() {
+        const { look, h, w, dir } = this.want;
+        const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        const short = window.innerHeight < 520 ? 1.14 : 1.04;
+        const dist = Math.max((h * short) / 2 / tan, w / 2 / (tan * camera.aspect));
+        this.goalLook.copy(look);
+        this.goalPos.copy(look).addScaledVector(dir, dist);
+        return { pos: this.goalPos, dist };
+      },
+      snap() {
+        this.solve();
+        this.pos.copy(this.goalPos);
+        this.look.copy(this.goalLook);
+      },
+      update(dt) {
+        if (!this.want) return;
+        this.solve();
+        const kk = 1 - Math.exp(-this.rate * dt);
+        this.pos.lerp(this.goalPos, kk);
+        this.look.lerp(this.goalLook, kk);
+        camera.position.copy(this.pos);
+        camera.lookAt(this.look);
+      },
+    };
+    const roomView = (id) => {
+      const v = rooms[id].view;
+      const look = v.look.clone();
+      if (id === 'recovery') look.x += camera.aspect > 1.3 ? 0.9 : 0.3;
+      cam.set(look, v.h, v.w);
+    };
 
+    // ---------------------------------------------------------------- the patient
+    let patient = null;
     const tint = (hex, to, amt) => '#' + new THREE.Color(hex).lerp(new THREE.Color(to), amt).getHexString();
-    const sickLook = (p) => ({ ...p.look, skin: p.symptom === 'fever' ? tint(p.look.skin, '#ff9f8f', 0.35) : tint(p.look.skin, '#d9e6c4', 0.45) });
-    const SIT = new THREE.Vector3(BX, 0.32, BZ + 0.08);
-    const FRONT = new THREE.Vector3(BX, 0, BZ + 0.78);
-    const DOOR = new THREE.Vector3(-5.6, 0, -0.75);
-
-    let cur = null; // { p, s, kid, cues, state, t, mistakes, kept: [] }
-    let index = -1;
-    let helped = 0;
-    let mistakes = 0;
-    let time = TIME;
-    let clockOn = false;
-    let over = false;
-    const healed = [];
-
-    function addCues(c) {
-      const kid = c.kid;
-      const sym = c.p.symptom;
-      c.cues = {};
-      kid.mouth.rotation.z = 0;
-      kid.mouth.position.y += 0.02;
-      if (sym === 'fever') {
-        kid.head.traverse((o) => {
-          if (o.isMesh && o.material.isMeshBasicMaterial) {
-            o.material.color.set('#ff5a6a');
-            o.material.opacity = 0.85;
+    function makePatient(entry) {
+      const person = PEOPLE[entry.who];
+      const kid = prep(makePerson(ctx.makeKid, person));
+      if (person.small) kid.root.scale.setScalar(0.88);
+      const P = {
+        entry,
+        person,
+        kid,
+        name: person.name,
+        look: person.look,
+        age: person.grown ? 'grown-up' : AGES[person.id] ?? 7,
+        over: { mouth: 0, kick: 0, armOut: 0, nervous: entry.nervous ? 1 : 0, cradle: 0, ear: 0, tummy: 0 },
+        armK: 0,
+        keep: [],
+        keepTheatre: [],
+        cues: [],
+        castColor: have.has('rainbow') ? '#ffffff' : [person.look.fav, person.look.top, '#8fd3ff'].find((c) => c && c !== '#ffffff') || '#8fd3ff',
+        qs: [],
+        lying: false,
+        part(name) {
+          const kd = this.kid;
+          kd.root.updateMatrixWorld(true);
+          const v = new THREE.Vector3();
+          if (name === 'mouth') return kd.mouth.getWorldPosition(v);
+          if (name === 'head') return kd.head.localToWorld(v.set(0, 0.29, 0));
+          if (name === 'eyes') return kd.head.localToWorld(v.set(0, 0.26, 0.2));
+          if (name === 'ear') return kd.head.localToWorld(v.set(0.28, 0.27, 0.02));
+          if (name === 'forehead') return kd.head.localToWorld(v.set(0.04, 0.47, 0.22));
+          if (name === 'chest') return kd.body.localToWorld(v.set(0, 0.56, 0.18));
+          if (name === 'knee') return kd.legs[0].localToWorld(v.set(0, -0.1, 0.07));
+          if (name === 'scrape') return kd.legs[0].localToWorld(v.set(0, -0.1, 0.066));
+          if (name === 'shin') return kd.legs[0].localToWorld(v.set(0, -0.15, 0));
+          if (name === 'forearm') return kd.arms[0].localToWorld(v.set(0, -0.18, 0));
+          if (name === 'elbow' || name === 'elbowScrape') return kd.arms[0].localToWorld(v.set(0, -0.15, 0.05));
+          if (name === 'upperArm') return kd.arms[0].localToWorld(v.set(0, -0.07, 0.07));
+          return kd.head.getWorldPosition(v);
+        },
+        // Arm and face overrides on top of the kid's own animation
+        update(dt, t = 0) {
+          const kd = this.kid;
+          const o = this.over;
+          this.armK = dt ? damp(this.armK, o.armOut, 7, dt) : o.armOut;
+          const a = this.armK;
+          if (a > 0.001) {
+            const arm = kd.arms[0];
+            arm.rotation.x = lerp(arm.rotation.x, -0.15, a);
+            arm.rotation.y = lerp(arm.rotation.y, 0, a);
+            arm.rotation.z = lerp(arm.rotation.z, 1.42, a);
           }
-        });
-        const heat = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: canvasTexture(128, 64, (g, w, h) => {
-              g.strokeStyle = '#ff7a59';
-              g.lineWidth = 7;
-              g.lineCap = 'round';
-              for (let i = 0; i < 3; i++) {
-                g.beginPath();
-                for (let x = 0; x <= 16; x++) g.lineTo(24 + i * 38 + Math.sin(x * 0.8) * 6, 56 - x * 3);
-                g.stroke();
-              }
-            }),
-            transparent: true,
-            depthWrite: false,
-          }),
-        );
-        heat.scale.set(0.36, 0.18, 1);
-        heat.position.set(0, 0.74, 0);
-        kid.head.add(heat);
-        c.cues.heat = heat;
-      } else if (sym === 'knee') {
-        const scrape = sph(0.05, C.rose, { rough: 0.6 }, 10);
-        scrape.scale.set(1.1, 0.7, 0.45);
-        kid.legs[0].add(at(scrape, 0, -0.11, 0.05));
-        c.cues.scrape = scrape;
-      } else if (sym === 'bump') {
-        const bump = sph(0.07, '#ff9eb5', { rough: 0.5 }, 12);
-        kid.head.add(at(bump, 0.1, 0.52, 0.18));
-        c.cues.bump = bump;
-      } else if (sym === 'throat') {
-        const scarf = k.tor(0.1, 0.045, '#f6907a', Math.PI * 2, { rough: 0.9 }, 18);
-        scarf.rotation.x = Math.PI / 2;
-        kid.body.add(at(scarf, 0, 0.79, 0));
-        c.cues.scarf = scarf;
-      } else if (sym === 'wrist') {
-        const ring = k.tor(0.055, 0.02, C.rose, Math.PI * 2, undefined, 14);
-        ring.rotation.x = Math.PI / 2;
-        kid.arms[1].add(at(ring, 0, -0.22, 0));
-        c.cues.ring = ring;
-      } else if (sym === 'splinter') {
-        const sp = cyl(0.008, 0.008, 0.08, '#8a5a3c', 5);
-        sp.rotation.z = 0.8;
-        kid.arms[0].add(at(sp, 0.03, -0.31, 0.04));
-        c.cues.splinter = sp;
-      } else if (sym === 'tummy') kid.hands = 'carry';
-      if (sym === 'cough' || sym === 'sneeze') c.cues.puffT = 0.5;
-    }
-
-    const puffs = [];
-    const glow = canvasTexture(64, 64, (g) => {
-      const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      r.addColorStop(0, 'rgba(255,255,255,0.95)');
-      r.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = r;
-      g.fillRect(0, 0, 64, 64);
-    });
-    for (let i = 0; i < 6; i++) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, transparent: true, depthWrite: false, opacity: 0 }));
-      s.visible = false;
-      scene.add(s);
-      puffs.push({ s, life: 0, v: new THREE.Vector3() });
-    }
-    const puffAt = (pos, n, big) => {
-      for (let i = 0; i < n; i++) {
-        const q = puffs.find((x) => x.life <= 0) || puffs[0];
-        q.life = 1;
-        q.s.visible = true;
-        q.s.position.copy(pos);
-        q.v.set((Math.random() - 0.3) * 0.5, 0.25 + Math.random() * 0.3, 0.5 + Math.random() * 0.4).multiplyScalar(big ? 1.6 : 1);
-      }
-    };
-
-    const disposeKid = (kid) => {
-      kid.root.removeFromParent();
-      kid.root.traverse((o) => {
-        o.geometry?.dispose();
-        if (o.material?.isMeshBasicMaterial || o.material?.isSpriteMaterial) {
-          o.material.map?.dispose();
-          o.material.dispose();
-        }
-      });
-    };
-
-    function nextPatient() {
-      index++;
-      if (index >= queue.length) return endShift(true);
-      const p = queue[index];
-      const kid = makePerson(ctx.makeKid, p, sickLook(p));
-      kid.root.position.copy(DOOR);
-      scene.add(kid.root);
-      cur = { p, s: SYMPTOMS[p.symptom], kid, state: 'enter', t: 0, mistakes: 0, from: DOOR.clone(), yaw: Math.PI / 2, kept: [] };
-      addCues(cur);
-      say.hide();
-      hud.score(scoreText());
-    }
-
-    const scoreText = () => {
-      const s = Math.max(0, Math.ceil(time));
-      return `Patient ${Math.min(index + 1, SHIFT)} / ${SHIFT} &nbsp; ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    };
-
-    // World position of the body part a tool goes to.
-    const v = new THREE.Vector3();
-    function partPos(c, part, out = new THREE.Vector3()) {
-      const kid = c.kid;
-      kid.root.updateMatrixWorld(true);
-      if (part === 'mouth') return kid.mouth.getWorldPosition(out).add(v.set(0, 0, 0.12));
-      if (part === 'chest') return kid.body.localToWorld(out.set(0, 0.6, 0.24));
-      if (part === 'knee') return kid.legs[0].localToWorld(out.set(0, -0.11, 0.1));
-      if (part === 'head') return kid.head.localToWorld(out.set(0.08, 0.56, 0.2));
-      if (part === 'wrist') return kid.arms[1].localToWorld(out.set(0, -0.22, 0.08));
-      if (part === 'finger') return kid.arms[0].localToWorld(out.set(0.03, -0.31, 0.08));
-      return kid.head.getWorldPosition(out);
-    }
-
-    function pickTool(i) {
-      if (!cur || cur.state !== 'wait' || over) return;
-      const tool = tools[i];
-      if (!tool || tool.busy) return;
-      sound.ui('tap');
-      if (tool.id === cur.s.tool) {
-        tool.busy = true;
-        cur.state = 'treat';
-        cur.t = 0;
-        cur.tool = tool;
-        cur.target = partPos(cur, cur.s.part);
-        cur.start = tool.holder.position.clone();
-        hint.hide();
-        say.hide();
-        rojiYaw = -1.25;
-        roji.hands = 'hold';
-        return;
-      }
-      tool.shake = 0.6;
-      mistakes++;
-      cur.mistakes++;
-      const ac = sound.ctx;
-      if (ac) {
-        sound.tone(392, ac.currentTime, 0.18, { type: 'triangle', gain: 0.05 });
-        sound.tone(330, ac.currentTime + 0.14, 0.26, { type: 'triangle', gain: 0.05 });
-      }
-      const nm = cur.p.name;
-      hint.set('Dr. Roji', `Not the ${tool.name.toLowerCase()}. ${cur.s.hint.replace('{n}', nm)}`, C.rose);
-      hintT = 3.4;
-    }
-
-    // Each right tool's little animation while it does its job (k: 0..1 of the action).
-    function action(c, kk, t) {
-      const tool = c.tool;
-      const h = tool.holder;
-      const id = tool.id;
-      if (id === 'thermometer') {
-        h.rotation.set(0, 0.4, Math.sin(t * 20) * 0.05 * (1 - kk));
-        if (c.cues.heat) c.cues.heat.material.opacity = 1 - kk;
-      } else if (id === 'stethoscope') {
-        h.rotation.set(-1.2, 0, 0);
-        if (Math.floor(kk * 3) !== c.beat) {
-          c.beat = Math.floor(kk * 3);
-          if (c.beat < 3) {
-            fx.heartsAt(c.target.clone().add(v.set(0, 0.1, 0.1)), 1);
-            const ac = sound.ctx;
-            if (ac) {
-              sound.tone(80, ac.currentTime, 0.12, { gain: 0.25, slideTo: 50 });
-              sound.tone(70, ac.currentTime + 0.16, 0.12, { gain: 0.18, slideTo: 45 });
+          if (this.lying) {
+            kd.arms[0].rotation.set(0, 0, 0.08);
+            kd.arms[1].rotation.set(0, 0, -0.08);
+          } else {
+            if (o.cradle && a < 0.2) kd.arms[0].rotation.set(-1.25, 0, -0.55);
+            if (o.ear) kd.arms[1].rotation.set(-0.4, 0, -2.25);
+            if (o.tummy) {
+              kd.arms[0].rotation.set(-0.95, 0, -0.3);
+              kd.arms[1].rotation.set(-0.95, 0, 0.3);
             }
           }
-        }
-      } else if (id === 'bandage') {
-        h.rotation.set(-1.0, 0, 0.3);
-        h.scale.setScalar(damp(h.scale.x, 0.55, 6, 1 / 60));
-      } else if (id === 'medicine') {
-        h.rotation.set(0, 0, Math.sin(kk * Math.PI) * 1.1);
-        if (Math.random() < 0.15) fx.burst(c.target.clone(), ['#ff9eb5', '#ffffff', '#ffd166'], 2);
-      } else if (id === 'icepack') {
-        h.rotation.set(0.3, 0, 0.2);
-        if (c.cues.bump) c.cues.bump.scale.setScalar(Math.max(0.01, 1 - kk));
-      } else if (id === 'light') {
-        h.rotation.set(0, 0.2, 0);
-        c.kid.mouth.scale.set(1.3, 1 + Math.sin(kk * Math.PI) * 1.6, 1);
-        if (kk > 0.2 && !c.ahh) {
-          c.ahh = true;
-          say.set(c.p.name, 'Ahhhh...', C.mintDeep);
-        }
-      } else if (id === 'splint') {
-        h.rotation.set(0, 0, -1.3);
-        h.scale.setScalar(damp(h.scale.x, 0.6, 6, 1 / 60));
-      } else if (id === 'tweezers') {
-        h.rotation.set(0, 0, 0.6 + Math.sin(t * 25) * 0.08);
-        if (kk > 0.6 && c.cues.splinter && c.cues.splinter.parent !== scene) {
-          const wp = c.cues.splinter.getWorldPosition(new THREE.Vector3());
-          scene.attach(c.cues.splinter);
-          c.cues.splinter.position.copy(wp);
-          c.flyOff = c.cues.splinter;
-          fx.burst(wp, ['#ffffff', '#ffd166'], 8);
-        }
-      }
+          if (o.dangle) for (const lg of kd.legs) lg.rotation.x = -0.12;
+          if (o.kick) kd.legs[0].rotation.x += -0.9 * o.kick;
+          kd.mouth.scale.set(1 + o.mouth * 0.7, 1 + o.mouth * 2.6, 1);
+          if (o.nervous) {
+            kd.body.rotation.z += Math.sin(t * 34) * 0.025 * o.nervous;
+            kd.mouth.rotation.z = Math.PI * (1 - o.nervous) + 0;
+          }
+          if (this.lying) kd.blob.visible = false;
+          kd.root.updateMatrixWorld(true);
+        },
+      };
+      addCues(P);
+      return P;
     }
 
-    function heal(c) {
-      const keep = c.tool.id;
-      c.kid.setLook({ id: c.p.id, ...c.p.look });
-      dress(c.kid, c.p);
-      c.kid.hands = null;
-      c.cues = {};
-      if (keep === 'bandage') {
-        const b = k.rbox(0.1, 0.03, 0.06, '#f4c7a1', 0.01);
-        c.kid.legs[0].add(at(b, 0, -0.11, 0.06));
-        b.rotation.x = Math.PI / 2;
-      } else if (keep === 'splint') {
-        const sp = k.rbox(0.13, 0.05, 0.13, '#9fe0c8', 0.02);
-        c.kid.arms[1].add(at(sp, 0, -0.2, 0));
-      }
-      c.kid.squash = 1.2;
-      const head = c.kid.head.getWorldPosition(new THREE.Vector3()).add(v.set(0, 0.5, 0.1));
-      fx.heartsAt(head, 6);
-      fx.burst(head, ['#ff8fb1', '#ffd166', '#7fd8bf', '#ffffff'], 40);
+    // How the hurt shows while they wait
+    function addCues(P) {
+      const kd = P.kid;
+      const cue = P.entry.c.cue;
+      const add = (o, parent) => (parent.add(o), P.cues.push(o), o);
+      if (cue === 'fever') {
+        kd.head.traverse((o) => o.isMesh && o.material.isMeshBasicMaterial && o.material.transparent && (o.material = o.material.clone(), o.material.color.set('#ff4d63'), (o.material.opacity = 0.85)));
+        const heat = new THREE.Sprite(new THREE.SpriteMaterial({ map: heatTex(), transparent: true, depthWrite: false }));
+        heat.scale.set(0.36, 0.18, 1);
+        heat.position.set(0, 0.74, 0);
+        add(heat, kd.head);
+      } else if (cue === 'knee') {
+        const s = k.sph(0.05, '#ef5b6f', { rough: 0.6 }, 10);
+        s.scale.set(1.1, 0.7, 0.45);
+        add(k.at(s, 0, -0.1, 0.055), kd.legs[0]);
+      } else if (cue === 'elbow' || cue === 'cut') {
+        const s = cue === 'cut' ? k.cap(0.008, 0.07, '#e8607a') : k.sph(0.04, '#ef5b6f', { rough: 0.6 }, 10);
+        if (cue === 'cut') s.rotation.z = 1.2;
+        else s.scale.set(1, 0.7, 0.5);
+        add(k.at(s, 0, -0.15, 0.045), kd.arms[0]);
+      } else if (cue === 'arm') {
+        P.over.cradle = 1;
+        const s = k.sph(0.055, '#ff9eb5', { rough: 0.6 }, 10);
+        s.scale.set(1, 1.4, 1);
+        add(k.at(s, 0, -0.19, 0), kd.arms[0]);
+      } else if (cue === 'leg') {
+        const s = k.sph(0.068, '#ff9eb5', { rough: 0.6 }, 10);
+        s.scale.set(1, 1.3, 1);
+        add(k.at(s, 0, -0.17, 0), kd.legs[0]);
+      } else if (cue === 'head') {
+        add(k.at(k.sph(0.06, '#ff9eb5', { rough: 0.5 }, 12), 0.1, 0.52, 0.18), kd.head);
+      } else if (cue === 'ear') P.over.ear = 1;
+      else if (cue === 'tummy' || cue === 'squeak' || cue === 'whistle') P.over.tummy = 1;
+      if (cue === 'cough' || cue === 'squeak' || cue === 'whistle') P.puffT = 1;
+    }
+    let heatT = null;
+    function heatTex() {
+      if (heatT && heatT.image.width > 1) return heatT;
+      heatT = util.canvasTexture(128, 64, (g) => {
+        g.strokeStyle = '#ff7a59';
+        g.lineWidth = 7;
+        g.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+          g.beginPath();
+          for (let x = 0; x <= 16; x++) g.lineTo(24 + i * 38 + Math.sin(x * 0.8) * 6, 56 - x * 3);
+          g.stroke();
+        }
+      });
+      return heatT;
+    }
+    function heal(P) {
+      for (const o of P.cues) bin.add(o);
+      P.cues = [];
+      P.over.cradle = P.over.ear = P.over.tummy = P.over.nervous = 0;
+      P.puffT = undefined;
+      P.kid.head.traverse((o) => o.isMesh && o.material.isMeshBasicMaterial && o.material.transparent && o.material.color.getHexString() === 'ff4d63' && (o.material.color.set('#ff8fa0'), (o.material.opacity = 0.55)));
+      P.kid.squash = 1.2;
+      const head = P.part('head').add(new THREE.Vector3(0, 0.5, 0));
+      fx.heartsAt(head, 5);
+      fx.burst(head, ['#ff8fb1', '#ffd166', '#7fd8bf', '#ffffff'], 36);
       sound.ui('good');
-      const ac = sound.ctx;
-      if (ac) [72, 76, 79, 84].forEach((n, i) => sound.tone(440 * Math.pow(2, (n - 69) / 12), ac.currentTime + 0.1 + i * 0.08, 0.5, { gain: 0.05 }));
-      say.set(c.p.name, `${c.s.thanks} Thank you, Dr. Roji!`, C.rose);
-      roji.hands = null;
-      rojiYaw = -0.45;
-      setTimeout(() => roji.emote(me === 'roji' ? 'heart' : 'cheer'), 60);
-      if (homama) setTimeout(() => homama.emote('cheer'), 260);
-      helped++;
-      healed.push(c.p.id);
       try {
-        ctx.opts.onCured?.(c.p.id);
+        if (PEOPLE[ctx.opts.patient] && P.person.id === ctx.opts.patient) ctx.opts.onCured?.(P.person.id);
       } catch (e) {
         console.error(e);
       }
     }
 
-    function endShift(all) {
-      if (over) return;
-      over = true;
-      clockOn = false;
-      say.hide();
-      hint.hide();
-      let stars;
-      if (all) stars = Math.max(1, 3 - (mistakes >= 2) - (mistakes >= 5) - (time < 25));
-      else stars = helped >= 3 ? 1 : 0;
-      const best = Math.max(stars, ctx.load('best', 0));
-      ctx.save('best', best);
-      const partnerLine = me === 'roji' ? '<b>Homama:</b> "You were amazing today, Dr. Roji."' : '<b>Roji:</b> "Thank you for helping, Homama. Best team ever."';
-      const wrong = mistakes === 0 ? 'Not a single wrong tool!' : `${mistakes} wrong ${mistakes === 1 ? 'tool' : 'tools'} along the way.`;
-      fx.burst(new THREE.Vector3(0, 1.6, -1), ['#ffd166', '#ff8fb1', '#7fd8bf', '#ffffff'], 90);
-      setTimeout(
-        () =>
-          ctx.finish(
-            all
-              ? { win: true, stars, title: stars === 3 ? 'Wonderful shift!' : stars === 2 ? 'Great shift!' : 'Shift complete!', text: `${starsHtml(stars)}<br>Five patients feel better. ${wrong}<br>${partnerLine}`, helped: healed }
-              : { win: false, stars, title: 'Time for a break', text: `${starsHtml(stars)}<br>You helped ${helped} of ${SHIFT} patients. The rest can come back after a cup of tea.`, helped: healed },
-          ),
-        700,
-      );
+    // Cough puffs and squeaks while a patient is poorly
+    const puffs = [];
+    for (let i = 0; i < 6; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, transparent: true, depthWrite: false, opacity: 0 }));
+      s.visible = false;
+      scene.add(s);
+      puffs.push({ s, life: 0, v: new THREE.Vector3() });
+    }
+    const puffAt = (pos, n) => {
+      for (let i = 0; i < n; i++) {
+        const q = puffs.find((x) => x.life <= 0) || puffs[0];
+        q.life = 1;
+        q.s.visible = true;
+        q.s.position.copy(pos);
+        q.v.set((Math.random() - 0.3) * 0.5, 0.25 + Math.random() * 0.3, 0.5 + Math.random() * 0.4);
+      }
+    };
+
+    // ---------------------------------------------------------------- the game object steps use
+    const debug = { speed: 1, auto: false };
+    const hv = new THREE.Vector3();
+    const G = {
+      THREE,
+      scene,
+      camera,
+      k,
+      ui,
+      fx,
+      input,
+      sound,
+      sfx,
+      rooms,
+      roji,
+      homama,
+      nurse,
+      bin,
+      cam,
+      monitor,
+      softTex,
+      gold: have.has('gold'),
+      rainbow: have.has('rainbow'),
+      boost: false,
+      r,
+      autoStep: false,
+      get player() {
+        return nurse ? homama : roji;
+      },
+      get patient() {
+        return patient;
+      },
+      get auto() {
+        return debug.auto || G.autoStep;
+      },
+      get touch() {
+        return document.body.classList.contains('touch');
+      },
+      place,
+      frameAt(look, h, w, dir) {
+        return cam.set(look, h, w, dir);
+      },
+      // The patient and the doctor together
+      frameMedium(s = 1) {
+        const p = patient.kid.root.position;
+        const rp = roji.root.position;
+        const c = new THREE.Vector3(p.x * 0.6 + rp.x * 0.4, 0.95, p.z * 0.6 + rp.z * 0.4);
+        return cam.set(c, 2.05 * s, 3.0 * s, new THREE.Vector3(0.05, 0.3, 1));
+      },
+      frameOp() {
+        return cam.set(G.op.anchor.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0, 0.02)), 0.44, 0.66, new THREE.Vector3(0, 1, 0.62));
+      },
+      frameMonitor() {
+        const m = rooms.theatre.spots.monitor;
+        const h = patient.part('head');
+        return cam.set(new THREE.Vector3(m.x - 0.85, 1.2, m.z + 0.6), 1.45, 2.6, new THREE.Vector3(0.05, 0.3, 1));
+      },
+      placeTeam() {
+        const s = rooms.theatre.spots;
+        place(roji, s.roji, 0, 'theatre');
+        if (nurse) place(homama, s.homama, -0.2, 'theatre');
+      },
+      say(who, text, kind) {
+        const b = bubbles[who] || bubbles.other;
+        const kid = who === 'roji' ? roji : who === 'homama' ? homama : who === 'patient' ? patient?.kid : null;
+        if (!kid) return;
+        b.kid = kid;
+        const col = who === 'roji' ? C.rose : who === 'homama' ? '#3f7bf0' : C.mintDeep;
+        const nm = who === 'roji' ? (nurse ? 'Dr. Roji' : 'Roji') : who === 'homama' ? (nurse ? 'Nurse Homama' : 'Homama') : patient.name;
+        b.b.say(nm, kind === 'big' ? `<span style="font-size:1.4em">${text}</span>` : text, col);
+        b.ttl = 3.4;
+      },
+      word(text, at, color, small) {
+        ui.word(text, at, color, small);
+      },
+      setHint(h, keys) {
+        hud.title(stepTitle, h);
+        hud.hint(keys || '');
+      },
+      find(text) {
+        if (patient) {
+          patient.found = patient.found || [];
+          patient.found.push(text);
+        }
+      },
+      showNotes() {
+        ui.notes(`${patient.name}'s chart`, patient.found?.length ? patient.found : ['Feeling poorly']);
+      },
+      showItems(o) {
+        if (!G.op) return;
+        G.op.items.forEach((m) => {
+          m.visible = o > 0.4;
+          m.scale.setScalar(1.35 * Math.min(1, Math.max(0, (o - 0.4) / 0.6)) + 0.001);
+        });
+      },
+      op: null,
+    };
+    const cursor = new Cursor(G);
+    G.cursor = cursor;
+
+    // ---------------------------------------------------------------- waits and steps
+    const waits = [];
+    const wait = (s) => new Promise((res) => waits.push({ t: s, res }));
+    let step = null;
+    let stepTitle = '';
+    let stepRes = null;
+    let afterT = 0;
+    function runStep(type, spec = {}) {
+      const S = STEPS[type];
+      const st = new S(G, spec);
+      step = st;
+      stepTitle = st.title;
+      const doc = nurse && !NURSE_STEPS.has(type);
+      hud.title(doc ? `Dr. Roji: ${st.title.charAt(0).toLowerCase()}${st.title.slice(1)}` : st.title, doc ? 'Nurse Homama watches and helps' : st.hint);
+      hud.hint(doc ? '' : st.keys || '');
+      G.autoStep = doc;
+      ctx.online.progress(STEP_LINE[type] || st.title);
+      st.enter();
+      afterT = 0.65;
+      return new Promise((res) => (stepRes = res));
+    }
+    function endStep() {
+      const st = step;
+      st.exit();
+      step = null;
+      G.autoStep = false;
+      stepRes?.(st);
+    }
+    // A doctor step: played by Dr. Roji when Homama is the nurse (after he hands her the tool)
+    async function doStep(type, spec = {}) {
+      if (nurse && !NURSE_STEPS.has(type)) {
+        if (type === 'choice') {
+          hud.title('Dr. Roji decides', 'Nurse Homama listens');
+          G.frameMedium();
+          G.say('roji', `What we found tells me: ${TREATS[patient.entry.c.treat].name.toLowerCase()}.`);
+          await wait(1.8);
+          return;
+        }
+        const h = await runStep('handoff', { tool: HANDOFF[type] });
+        score(h.q);
+        await runStep(type, spec);
+        return;
+      }
+      const st = await runStep(type, spec);
+      if (st.scored) score(st.q);
+    }
+    let points = 0;
+    function score(q) {
+      patient?.qs.push(q);
+      points += Math.round(q * 100);
+      ctx.online.score(points);
+      badge();
     }
 
-    // ---------------------------------------------------------------- camera
-    const LOOK = new THREE.Vector3(0, 1.15, -0.8);
-    const camPos = new THREE.Vector3();
-    const camLook = LOOK.clone();
-    // Far enough that the whole tray fits the width, and the bed and bubbles fit the height
-    const fit = () => {
-      const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-      return Math.max(4.5, 2.6 / (tan * camera.aspect) + 1.25);
-    };
-    const dir = new THREE.Vector3(0, 0.45, 1).normalize();
+    // ---------------------------------------------------------------- the shift
+    const shift = makeShift(shiftN, r, { first: PEOPLE[ctx.opts.patient] ? ctx.opts.patient : null, have });
+    // Test hook: window.__patientsCases = ['toy', 'cut', ...] plays exactly those cases
+    if (Array.isArray(window.__patientsCases)) {
+      const used = new Set();
+      shift.cases = window.__patientsCases.map((id) => {
+        const c = CASES.find((x) => x.id === id);
+        const who = c.who.find((w) => !used.has(w)) || c.who[0];
+        used.add(who);
+        return { c, who, emergency: !!window.__patientsSiren && c.kind === 'surgery', pair: false, nervous: !!c.nervous };
+      });
+      if (window.__patientsPair && shift.cases.length > 2) {
+        shift.cases[1].pair = true;
+        shift.cases[2].pairWith = true;
+      }
+    }
+    const N = shift.cases.length;
+    let doneCount = 0;
+    const results = [];
+    const badge = () => hud.score(`Case ${Math.min(N, doneCount + 1)} / ${N} &nbsp;<span style="color:#e0a800">${points}</span>`);
+    hud.buttons({ action: null, jump: null, stick: false });
+    badge();
 
-    hud.buttons({ action: null, jump: null });
-    hud.hint('Tap a tool or press 1 to 8');
-    hud.score(scoreText());
-    hud.message('Rounds start!', 1300);
-    nextPatient();
+    // Seats in reception
+    const seats = rooms.reception.spots.seats.map(() => null);
+    const queue = shift.cases.slice();
+    // Opened from a ward bed: that patient is seen first, without triage
+    const wardFirst = PEOPLE[ctx.opts.patient] && queue[0]?.who === ctx.opts.patient ? queue.shift() : null;
+    const waiting = [];
+    async function arrive(entry) {
+      const P = makePatient(entry);
+      const i = Math.max(0, seats.findIndex((s) => !s));
+      seats[i] = P;
+      P.seat = i;
+      const door = rooms.reception.spots.door;
+      place(P.kid, door, 0, 'reception');
+      const seat = rooms.reception.spots.seats[i];
+      waiting.push(P);
+      await walkTo(P.kid, seat.clone().add(new THREE.Vector3(0, 0, 0.45)), 2.4);
+      P.kid.pose = 'sit';
+      place(P.kid, seat.clone().add(new THREE.Vector3(0, 0.17, 0.02)), 0, 'reception');
+      P.kid.squash = 0.85;
+      return P;
+    }
+    async function fillWaiting() {
+      const want = Math.min(shift.room, 4);
+      const arrivals = [];
+      while (waiting.length + arrivals.length < want) {
+        const i = queue.findIndex((e) => !e.emergency && !e.pairWith);
+        if (i < 0) break;
+        const e = queue[i];
+        const twin = e.pair ? queue[i + 1] : null;
+        if (twin && waiting.length + arrivals.length + 2 > 4) break;
+        queue.splice(i, twin ? 2 : 1);
+        e.urgNow = Math.max(e.c.urg, twin?.c.urg || 0);
+        arrivals.push(e);
+        if (twin) {
+          twin.urgNow = e.urgNow;
+          arrivals.push(twin);
+        }
+      }
+      const ps = [];
+      for (const [j, e] of arrivals.entries()) {
+        ps.push(wait(j * 0.5).then(() => arrive(e)));
+      }
+      await Promise.all(ps);
+    }
+    const ROOM_LINE = { reception: 'Patients are waiting', exam: 'Hands-on check-up', theatre: 'Surgery time', recovery: 'Feeling better' };
+    async function toRoom(id, setup) {
+      ui.fade(true, `${rooms[id].name}`);
+      hud.title(rooms[id].name, ROOM_LINE[id]);
+      hud.hint('');
+      await wait(0.4);
+      if (!alive) return;
+      for (const rm of Object.values(rooms)) rm.group.visible = rm.id === id;
+      current = id;
+      for (const a of actors.values()) a.kid.root.visible = a.room === id;
+      env.sun.position.set(rooms[id].x - 4, 9, 6);
+      env.sun.target.position.set(rooms[id].x, 0, -1);
+      for (const b of Object.values(bubbles)) b.b.hide();
+      setup?.();
+      cam.snap();
+      await wait(0.15);
+      ui.fade(false);
+    }
+    const bedPos = (bed) => (bed === 'B' ? rooms.exam.spots.bedB : rooms.exam.spots.bedA);
 
-    const debug = {
-      speed: 1,
-      pick: (i) => pickTool(i),
-      get state() {
-        return cur?.state;
+    async function examCase(P) {
+      patient = P;
+      const bed = bedPos(P.bed);
+      P.kid.pose = 'sit';
+      P.over.dangle = 1;
+      place(P.kid, bed.clone().add(new THREE.Vector3(0, 0.32, 0.4)), 0, 'exam');
+      const sideX = P.bed === 'B' ? -1 : 1;
+      place(roji, bed.clone().add(new THREE.Vector3(1.1 * sideX, 0, 0.3)), -1.15 * sideX, 'exam');
+      roji.hands = 'hold';
+      if (nurse) place(homama, bed.clone().add(new THREE.Vector3(2.0 * sideX, 0, 0.3)), -1.2 * sideX, 'exam');
+      G.frameMedium();
+      hud.title(`${P.name} is here`, P.entry.c.chips.map((c) => c[1]).join(', '));
+      G.say('patient', P.entry.c.line);
+      await wait(1.6);
+      if (P.entry.nervous && !P.calm) {
+        G.say('roji', `${P.name} is a little nervous. Let us breathe together first.`);
+        await wait(0.8);
+        await doStep('calm');
+      }
+      for (const s of P.entry.c.steps) {
+        if (s.type === 'xray') {
+          G.frameMedium();
+          G.say('roji', 'Let us take a picture of the inside.');
+          await wait(0.9);
+        }
+        await doStep(s.type, s);
+        P.over.armOut = 0;
+      }
+      await doStep('choice');
+      const t = P.entry.c.treat;
+      if (t === 'surgery') return 'surgery';
+      const spec = { limb: P.entry.c.limb, part: P.entry.c.part };
+      if (t === 'vaccine' && !P.calm && !P.person.grown) {
+        G.say('roji', `A tiny pinch is easier when we are calm. Breathe with me, ${P.name}.`);
+        await wait(1.0);
+        await doStep('calm');
+      }
+      await doStep(t, spec);
+      P.over.armOut = 0;
+      heal(P);
+      G.frameMedium();
+      G.say('patient', `${P.entry.c.thanks} Thank you, Dr. Roji!`);
+      roji.hands = null;
+      later(80, () => roji.emote(nurse ? 'cheer' : 'heart'));
+      if (nurse) later(300, () => homama.emote('cheer'));
+      await wait(1.8);
+      return 'done';
+    }
+
+    async function surgeryCase(P, emergency) {
+      patient = P;
+      const s = rooms.theatre.spots;
+      await toRoom('theatre', () => {
+        if (emergency) {
+          rooms.theatre.alarm.material.emissiveIntensity = 1.2;
+        }
+        layDown(P);
+        place(roji, s.sink.clone().add(new THREE.Vector3(0, 0, -0.55)), 0, 'theatre');
+        if (nurse) place(homama, s.sink.clone().add(new THREE.Vector3(1.3, 0, 0.3)), -0.6, 'theatre');
+        roomView('theatre');
+      });
+      monitor.on = true;
+      monitor.hr = 104;
+      monitor.asleep = false;
+      if (emergency) ui.banner('Emergency surgery: no time to lose!', 'red', 2600);
+      G.say('roji', `To the theatre! We will take out ${P.entry.c.what}.`);
+      await wait(1.4);
+      await doStep('scrub');
+      await doStep('gown');
+      G.placeTeam();
+      await doStep('sleep');
+      G.placeTeam();
+      await doStep('incise');
+      await doStep('remove');
+      await doStep('vitals');
+      await doStep('close');
+      await doStep('sticker');
+      // Wake up happy
+      for (const o of P.keepTheatre) bin.add(o);
+      P.asleep = false;
+      monitor.asleep = false;
+      rooms.theatre.alarm.material.emissiveIntensity = 0.1;
+      P.kid.pose = 'stand';
+      heal(P);
+      cam.set(P.part('head').add(new THREE.Vector3(0.3, 0.1, 0)), 1.2, 1.7, new THREE.Vector3(0.2, 0.9, 0.75));
+      G.say('patient', 'Is it over? I feel great!');
+      sceneName = 'wake';
+      ctx.online.progress('Surgery: the patient wakes up happy');
+      await wait(2.0);
+    }
+
+    // The patient lies on the operating table under a soft drape, with the tummy window on top
+    function layDown(P) {
+      const t = rooms.theatre.spots.table;
+      const kd = P.kid;
+      const sc = kd.root.scale.x;
+      kd.pose = 'stand';
+      P.lying = true;
+      P.over.dangle = 0;
+      // Only the head shows above the drape
+      P.hiddenParts = kd.body.children.filter((c) => c !== kd.head && c.visible);
+      for (const c of P.hiddenParts) c.visible = false;
+      const rootX = t.x + 0.72;
+      place(kd, new THREE.Vector3(rootX, 0.89 + 0.3 * sc, t.z), 0, 'theatre');
+      kd.root.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+      actors.get(kd).lying = true;
+      const op = {};
+      const drapeTop = 0.89 + 0.4 * sc;
+      const drape = k.rbox(0.95, drapeTop - 0.86, 0.82, '#7fd3c0', 0.2, { rough: 0.9 });
+      drape.position.set(rootX - 0.42, (drapeTop + 0.86) / 2, t.z);
+      scene.add(drape);
+      op.drape = drape;
+      op.anchor = new THREE.Object3D();
+      op.anchor.position.set(rootX - 0.5 * sc, drapeTop + 0.004, t.z);
+      op.anchor.rotation.x = -Math.PI / 2;
+      scene.add(op.anchor);
+      op.board = new Board(0.5, 0.36, 768, { basic: false });
+      op.anchor.add(op.board.mesh);
+      op.board.mesh.material.transparent = false;
+      op.pic = surgeryPic(op.board, r, P.entry.c.item, P.look.skin);
+      op.board.flush();
+      op.items = op.pic.items.map((it, i) => {
+        const m = M.surgeryItem(k, P.entry.c.item, i);
+        const lp = op.board.local(it.u, it.v);
+        m.position.copy(op.anchor.localToWorld(new THREE.Vector3(lp.x, lp.y, 0.015)));
+        m.visible = false;
+        scene.add(m);
+        return m;
+      });
+      op.dish = new THREE.Group();
+      const dish = k.cyl(0.065, 0.045, 0.025, '#cfd8e2', 18, { rough: 0.35 });
+      dish.scale.set(1.35, 1, 1);
+      const rim = k.tor(0.065, 0.007, '#e8eef4', Math.PI * 2, undefined, 20);
+      rim.rotation.x = Math.PI / 2;
+      rim.scale.set(1.35, 1, 1);
+      rim.position.y = 0.012;
+      op.dish.add(dish, rim);
+      op.dish.position.copy(op.anchor.localToWorld(new THREE.Vector3(0.31, -0.1, 0.02)));
+      scene.add(op.dish);
+      G.op = op;
+      P.op = op;
+    }
+    function clearOp() {
+      const op = G.op;
+      if (!op) return;
+      for (const o of [op.drape, op.anchor, op.dish, ...op.items]) bin.add(o);
+      op.board.dispose();
+      G.op = null;
+    }
+
+    async function recovery(P, surgery, pairWith) {
+      const s = rooms.recovery.spots;
+      const fam = familyFor(P);
+      let signKid = null;
+      await toRoom('recovery', () => {
+        clearOp();
+        P.lying = false;
+        for (const c of P.hiddenParts || []) c.visible = true;
+        P.hiddenParts = null;
+        actors.get(P.kid).lying = false;
+        P.over.dangle = 0;
+        if (pairWith) pairWith.over.dangle = 0;
+        if (surgery) {
+          P.kid.pose = 'sit';
+          place(P.kid, s.bed.clone().add(new THREE.Vector3(0, 0.3, -0.62)), 0, 'recovery');
+        } else {
+          P.kid.pose = 'stand';
+          place(P.kid, s.stand, 0.2, 'recovery');
+          const b = M.balloon(k, ['#ff9eb5', '#ffd166', '#8fd3ff'][doneCount % 3]);
+          b.root.scale.setScalar(0.8);
+          P.kid.arms[1].add(b.root);
+          b.root.position.set(0, -0.3, 0);
+          b.root.rotation.z = 0.35;
+          P.keep.push(b.root);
+          P.balloon = b;
+        }
+        if (pairWith) {
+          pairWith.kid.pose = 'stand';
+          place(pairWith.kid, s.stand.clone().add(new THREE.Vector3(-0.75, 0, 0.1)), 0.15, 'recovery');
+        }
+        fam.forEach((f, i) => place(f, s.family[i], -0.35 + i * 0.2, 'recovery'));
+        place(roji, s.roji, -0.6, 'recovery');
+        roji.hands = null;
+        for (const g of G.gowned || []) for (const p of g) bin.add(p);
+        G.gowned = null;
+        if (nurse) place(homama, s.homama.clone().add(new THREE.Vector3(0.5, 0, 0.5)), -0.5, 'recovery');
+        else if (surgery && love.sign && !love.signDone) {
+          love.signDone = true;
+          signKid = homama;
+          place(homama, s.homama, -0.4, 'recovery');
+          const sg = M.sign(k, 'You did it!');
+          sg.scale.setScalar(0.8);
+          homama.carry(sg);
+          sg.position.set(0, -0.1, 0.05);
+        }
+        roomView('recovery');
+      });
+      ctx.online.progress(`Recovery: ${P.name} says thank you`);
+      sceneName = `recovery-${P.name}`;
+      later(200, () => fam.forEach((f, i) => later(i * 250, () => f.emote('wave'))));
+      G.say('patient', surgery ? `${P.entry.c.thanks} Thank you, Dr. Roji!` : 'Look, a balloon! Thank you, Dr. Roji!');
+      if (signKid) {
+        later(900, () => G.say('homama', 'You did it, Dr. Roji! I knew you would.'));
+        later(1200, () => roji.emote('heart'));
+        ui.banner('Homama waited outside the theatre for you', 'love', 3200);
+      } else if (nurse) later(900, () => G.say('roji', ['Thank you, Nurse Homama. Best team ever.', 'I could not do this without you, Homama.', 'Look at that smile. We did that together!'][doneCount % 3]));
+      await wait(1.6);
+      const st = caseStars(P.qs.length ? P.qs.reduce((a, b) => a + b, 0) / P.qs.length : 1);
+      results.push({ name: P.name, stars: st, surgery, qs: P.qs.map((q) => +q.toFixed(2)) });
+      sfx.chime(st);
+      const last = doneCount + 1 >= N;
+      await Promise.race([ui.caseCard({ title: `${P.name} feels better!`, stars: st, text: surgery ? `Surgery done: ${P.entry.c.what} is out.` : `${TREATS[P.entry.c.treat].name} for ${P.name}.`, button: last ? 'Finish the shift' : 'Next patient', ms: debug.auto ? 900 : 6000 }), waitAuto()]);
+      ui.closeCase?.();
+      if (signKid) {
+        homama.carry(null);
+        actors.get(homama).room = 'none';
+      }
+      for (const f of fam) disposeKid(f);
+      disposeKid(P.kid);
+      if (pairWith) disposeKid(pairWith.kid);
+      patient = null;
+    }
+    const waitAuto = () => new Promise((res) => {
+      const chk = () => (debug.auto ? res() : alive && later(300, chk));
+      later(1200, chk);
+    });
+    function familyFor(P) {
+      const pal = ['#ff9eb5', '#8fd3ff', '#ffd166', '#c7a6ff', '#7fd8bf', '#f6907a'];
+      const a = Math.floor(r() * pal.length);
+      const base = P.person.look;
+      const grownP = !!P.person.grown;
+      const looks = [
+        { name: 'Family', gender: 'girl', skin: base.skin, hair: base.hair === '#e9e4de' ? '#2a1a13' : base.hair, hairstyle: 'long', outfit: 'dress', top: pal[a], bottom: pal[a], shoes: '#7a2e3a', accent: '#ffffff' },
+        grownP
+          ? { name: 'Family', gender: 'girl', skin: base.skin, hair: '#4a2c1a', hairstyle: 'pigtails', outfit: 'overalls', top: '#ffffff', bottom: pal[(a + 2) % 6], shoes: '#ffffff', accent: '#ff7fa3', kid: true }
+          : { name: 'Family', gender: 'boy', skin: base.skin, hair: '#2a1a13', hairstyle: r() < 0.3 ? 'bald' : 'short', mustache: r() < 0.6, outfit: 'tee-pants', top: pal[(a + 3) % 6], bottom: '#3b2b3f', shoes: '#3b2b3f' },
+      ];
+      return looks.map((lk) => {
+        const kd = prep(ctx.makeKid(lk));
+        if (!lk.kid) kd.root.scale.setScalar(1.17);
+        actor(kd, 'none');
+        return kd;
+      });
+    }
+
+    // ---------------------------------------------------------------- love: a note, a coffee
+    let sceneName = 'start';
+    async function lockerNote() {
+      sceneName = 'note';
+      const s = rooms.reception.spots;
+      place(roji, s.locker.clone().setY(0).add(new THREE.Vector3(-0.7, 0, -0.62)), 0.85, 'reception');
+      cam.set(s.locker.clone().add(new THREE.Vector3(-0.3, -0.1, 0.3)), 1.7, 2.4, new THREE.Vector3(-1, 0.3, 0.32));
+      cam.snap();
+      ui.banner('A sticky note on your locker: "My favourite doctor"', 'love', 3000);
+      await wait(1.2);
+      roji.emote('heart');
+      fx.heartsAt(s.locker.clone().add(new THREE.Vector3(0, 0.2, 0.2)), 4);
+      G.say('roji', 'Homama... I love you too.');
+      await wait(2.0);
+    }
+    async function coffee() {
+      sceneName = 'coffee';
+      const s = rooms.reception.spots;
+      love.coffeeDone = true;
+      actor(homama, 'reception');
+      place(homama, s.door, 0, 'reception');
+      const mug = heartMug(k);
+      mug.scale.setScalar(1.6);
+      homama.carry(mug);
+      cam.set(s.roji.clone().add(new THREE.Vector3(-0.35, 0.95, 0.2)), 2.3, 3.4);
+      await walkTo(homama, s.roji.clone().add(new THREE.Vector3(-0.7, 0, 0.3)), 2.6);
+      actors.get(homama).yaw = 0.9;
+      actors.get(roji).yaw = -0.9;
+      G.say('homama', 'A coffee for the best doctor in town.');
+      await wait(1.0);
+      homama.carry(null);
+      roji.carry(mug);
+      fx.heartsAt(roji.head.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.5, 0)), 5);
+      sound.ui('coin');
+      G.say('roji', 'Thank you, Homama. Just what I needed!');
+      G.boost = true;
+      ui.banner('Coffee boost: steadier hands for the next stitches and cuts', 'love', 3200);
+      await wait(1.4);
+      later(400, () => homama.emote('wave'));
+      await walkTo(homama, s.door, 2.6);
+      actors.get(homama).room = 'none';
+      homama.root.visible = false;
+      roji.carry(null);
+      bin.add(mug);
+    }
+
+    // ---------------------------------------------------------------- the whole shift
+    async function run() {
+      await toRoom('reception', () => {
+        place(roji, rooms.reception.spots.roji, -0.9, 'reception');
+        if (nurse) place(homama, rooms.reception.spots.roji.clone().add(new THREE.Vector3(0.8, 0, 0.35)), -0.8, 'reception');
+        roomView('reception');
+      });
+      hud.title(nurse ? 'Nurse Homama helps Dr. Roji' : "Dr. Roji's Shift", `Shift ${shiftN}: ${N} ${N === 1 ? 'patient' : 'patients'}${shift.twists.length ? ' and a surprise' : ''}`);
+      if (love.note) await lockerNote();
+      place(roji, rooms.reception.spots.roji, -0.9, 'reception');
+      roomView('reception');
+      ui.banner(`Shift ${shiftN} begins`, '', 1800);
+      sceneName = 'reception';
+      G.say('roji', nurse ? 'Good morning, Nurse Homama. Ready to help?' : 'Good morning, Sunny Hill! Let us help everyone feel better.');
+      if (nurse) later(1200, () => G.say('homama', 'Ready, Dr. Roji! I will hand you the tools.'));
+      await fillWaiting();
+      while (doneCount < N && alive) {
+        const emergency = doneCount >= 1 ? queue.find((e) => e.emergency) : null;
+        let picked;
+        if (wardFirst && doneCount === 0) {
+          const P = makePatient(wardFirst);
+          actor(P.kid, 'none');
+          picked = [P];
+          ui.banner(`${P.name} first: Dr. Roji came to check on ${P.name}`, '', 2600);
+          await wait(1.2);
+        } else if (emergency) {
+          queue.splice(queue.indexOf(emergency), 1);
+          sfx.siren();
+          sceneName = 'siren';
+          ui.banner('Siren! An emergency is on the way', 'red', 2600);
+          rooms.reception.group.visible && fx.burst(rooms.reception.spots.door.clone().add(new THREE.Vector3(0, 1.5, 0.3)), ['#ff5d72', '#ffffff'], 20);
+          const P = makePatient(emergency);
+          place(P.kid, rooms.reception.spots.door, 0, 'reception');
+          await walkTo(P.kid, rooms.reception.spots.door.clone().add(new THREE.Vector3(1.4, 0, 1.4)), 3);
+          patient = P;
+          G.say('patient', P.entry.c.line);
+          G.say('roji', 'No time to lose. Straight to the theatre!');
+          await wait(1.8);
+          picked = [P];
+        } else {
+          if (!waiting.length) await fillWaiting();
+          if (!waiting.length) break;
+          if (love.coffee && !love.coffeeDone && doneCount >= 2) await coffee();
+          roomView('reception');
+          cam.set(rooms.reception.view.look.clone().add(new THREE.Vector3(-0.85, 0.15, -0.3)), 2.65, 5.4);
+          let chosen;
+          if (waiting.length === 1 && !(waiting[0].entry.pair || waiting[0].entry.pairWith)) {
+            // Only one patient left: no need to choose
+            chosen = waiting[0];
+            G.say('roji', `Your turn, ${chosen.name}. Come with me!`);
+            ctx.online.progress(`Reception: ${chosen.name} is next`);
+            await wait(1.4);
+          } else {
+            const tri = await runStep('triage', { waiting: waiting.map((P) => ({ entry: P.entry, kid: P.kid, name: P.name, P })) });
+            score(tri.q);
+            chosen = tri.chosen.P;
+          }
+          picked = [chosen];
+          if (chosen.entry.pair || chosen.entry.pairWith) {
+            const other = waiting.find((x) => x !== chosen && (x.entry.pair || x.entry.pairWith));
+            if (other) picked.push(other);
+          }
+          for (const P of picked) {
+            waiting.splice(waiting.indexOf(P), 1);
+            seats[P.seat] = null;
+          }
+          // The picked ones walk off, the others wait
+          for (const P of picked) {
+            P.kid.pose = 'stand';
+            place(P.kid, P.kid.root.position.clone().setY(0).add(new THREE.Vector3(0, 0, 0.45)), 0, 'reception');
+            walkTo(P.kid, rooms.reception.spots.roji.clone().add(new THREE.Vector3(1.2, 0, 1.0)), 2.6);
+          }
+          await wait(0.9);
+        }
+        const first = picked[0];
+        const pairP = picked[1] || null;
+        first.bed = 'A';
+        if (pairP) pairP.bed = 'B';
+        let surgery = first.entry.c.kind === 'surgery';
+        if (emergency) {
+          await surgeryCase(first, true);
+        } else {
+          await toRoom('exam', () => {
+            if (pairP) {
+              pairP.kid.pose = 'sit';
+              pairP.over.dangle = 1;
+              place(pairP.kid, rooms.exam.spots.bedB.clone().add(new THREE.Vector3(0, 0.32, 0.4)), 0, 'exam');
+            }
+          });
+          if (pairP) ui.banner('Two patients at once!', 'gold', 2400);
+          const res = await examCase(first);
+          if (res === 'surgery') {
+            surgery = true;
+            await surgeryCase(first, false);
+          } else if (pairP) {
+            // The second twin on the other bed
+            later(200, () => first.kid.emote('wave'));
+            const r2 = await examCase(pairP);
+            if (r2 === 'surgery') await surgeryCase(pairP, false);
+          }
+        }
+        G.boost = false;
+        await recovery(first, surgery, pairP);
+        if (pairP) {
+          results.push({ name: pairP.name, stars: caseStars(pairP.qs.length ? pairP.qs.reduce((a, b) => a + b, 0) / pairP.qs.length : 1), surgery: false });
+          doneCount++;
+        }
+        doneCount++;
+        badge();
+        if (doneCount < N) {
+          await toRoom('reception', () => {
+            place(roji, rooms.reception.spots.roji, -0.9, 'reception');
+            if (nurse) place(homama, rooms.reception.spots.roji.clone().add(new THREE.Vector3(0.8, 0, 0.35)), -0.8, 'reception');
+            roomView('reception');
+          });
+          await fillWaiting();
+        }
+      }
+      if (alive) endShift();
+    }
+
+    function endShift() {
+      over = true;
+      const avg = results.reduce((a, b) => a + b.stars, 0) / Math.max(1, results.length);
+      const stars = shiftStars(avg);
+      const caseStarSum = results.reduce((a, b) => a + b.stars, 0);
+      const total = totalStars0 + caseStarSum;
+      ctx.save('stars', total);
+      ctx.save('shifts', shiftN);
+      const best = Math.max(points, ctx.load('bestScore', 0));
+      const newBest = points > ctx.load('bestScore', 0);
+      ctx.save('bestScore', best);
+      ctx.save('best', Math.max(stars, ctx.load('best', 0)));
+      let plaque = '';
+      if (stars === 3) {
+        ctx.save('plaque', plaques0 + 1);
+        plaque = `<br><b style="color:#c9921e">Doctor of the week!</b> A golden plaque goes up in reception.`;
+      }
+      const fresh = UNLOCKS.filter((u) => totalStars0 < u.at && total >= u.at);
+      const next = UNLOCKS.find((u) => total < u.at);
+      const list = results.map((x) => `${x.name} ${starsInline(x.stars)}`).join(' &nbsp; ');
+      const partner = nurse ? '<b>Roji:</b> "Thank you, Nurse Homama. Best team ever."' : '<b>Homama:</b> "You were amazing today, Dr. Roji."';
+      fx.burst(cam.look.clone().add(new THREE.Vector3(0, 0.4, 0)), ['#ffd166', '#ff8fb1', '#7fd8bf', '#ffffff'], 80);
+      hud.title(nurse ? 'Nurse Homama helps Dr. Roji' : "Dr. Roji's Shift", 'Shift complete');
+      later(500, () =>
+        ctx.finish({
+          win: true,
+          stars,
+          score: points,
+          title: stars === 3 ? 'Wonderful shift!' : stars === 2 ? 'Great shift!' : 'Shift complete!',
+          text: `${starsHtml(stars)}<br>${list}<br>${points} points${newBest ? ' <b>(new best!)</b>' : ` (best ${best})`}${plaque}${fresh.map((u) => `<br><b style="color:#3fbf9f">New: ${u.name}.</b> ${u.text}`).join('')}${!fresh.length && next ? `<br><small>${next.at - total} more stars to unlock: ${next.name}</small>` : ''}<br>${partner}`,
+          helped: results.map((x) => x.name),
+        }),
+      );
+    }
+    const starsInline = (n) => `<span style="color:#e0a800;letter-spacing:-1px">${'&#9733;'.repeat(n)}</span><span style="color:#e6d8cc;letter-spacing:-1px">${'&#9733;'.repeat(3 - n)}</span>`;
+
+    // ---------------------------------------------------------------- test hook
+    let over = false;
+    const defs = {
+      get room() {
+        return current;
       },
-      get index() {
-        return index;
+      get step() {
+        return step?.constructor.name || null;
       },
-      get right() {
-        return cur ? TOOLS.findIndex((tl) => tl.id === cur.s.tool) : -1;
+      get stepTitle() {
+        return stepTitle;
       },
-      get mistakes() {
-        return mistakes;
+      get done() {
+        return doneCount;
       },
-      set time(v) {
-        time = v;
+      get cases() {
+        return shift.cases.map((e) => e.c.id + (e.emergency ? '!' : '') + (e.pair ? '+' : ''));
       },
+      get twists() {
+        return shift.twists;
+      },
+      get points() {
+        return points;
+      },
+      get results() {
+        return results;
+      },
+      get scene() {
+        return sceneName;
+      },
+      get over() {
+        return over;
+      },
+      get stepObj() {
+        return step;
+      },
+      skip() {
+        step?.finish(1);
+      },
+      probe: () => probe(step, G),
+      cursor,
+      G,
     };
-    let hovered = -1;
-    // Kid springs (hair, squash) stay stable with small steps, even on a slow frame
-    const animate = (kid, dt, t, speed = 0, air = 0) => {
-      const n = Math.max(1, Math.ceil(dt / 0.05));
-      for (let i = 0; i < n; i++) kid.update(dt / n, t, speed, air, 0);
-    };
+    Object.defineProperties(debug, Object.getOwnPropertyDescriptors(defs));
+    window.__patients = debug;
+
+    run().catch((e) => alive && console.error(e));
 
     return {
       debug,
       update(rdt, t) {
+        if (!alive) return;
         const dt = rdt * debug.speed;
-        // Input
-        if (!over) {
-          for (let i = 0; i < 8; i++) if (input.pressed(String(i + 1))) pickTool(i);
-          if (input.taps().length) {
-            const hit = input.pick(hits)[0];
-            if (hit) pickTool(hit.object.userData.slot);
-          }
-          const pt = input.pointer;
-          hovered = -1;
-          if (!document.body.classList.contains('touch')) {
-            const h = input.pick(hits, pt.ndc)[0];
-            if (h) hovered = h.object.userData.slot;
+        for (let i = waits.length - 1; i >= 0; i--) {
+          waits[i].t -= dt;
+          if (waits[i].t <= 0) {
+            const w = waits.splice(i, 1)[0];
+            w.res();
           }
         }
-        // Clock
-        if (clockOn && !over) {
-          time -= dt;
-          if (time <= 0) {
-            time = 0;
-            endShift(false);
+        cursor.update(dt);
+        if (step) {
+          if (G.auto && !step.done) step.auto(dt);
+          step.update(dt);
+          if (step.done) {
+            afterT -= dt;
+            if (afterT <= 0) endStep();
           }
         }
-        if (Math.floor(time * 2) !== Math.floor((time + dt) * 2) || !clockOn) hud.score(scoreText());
-
-        // Patient
-        const c = cur;
-        if (c && !over) {
-          c.t += dt;
-          const kid = c.kid;
+        // People
+        for (const a of actors.values()) {
+          const kd = a.kid;
           let speed = 0;
-          let air = 0;
-          if (c.state === 'enter') {
-            const d = Math.hypot(FRONT.x - kid.root.position.x, FRONT.z - kid.root.position.z);
-            if (d > 0.05) {
-              speed = 2.2;
-              const step = Math.min(d, speed * dt);
-              const dx = (FRONT.x - kid.root.position.x) / d;
-              const dz = (FRONT.z - kid.root.position.z) / d;
-              kid.root.position.x += dx * step;
-              kid.root.position.z += dz * step;
-              c.yaw = Math.atan2(dx, dz);
+          if (a.walk) {
+            const w = a.walk;
+            const dx = w.to.x - kd.root.position.x;
+            const dz = w.to.z - kd.root.position.z;
+            const d = Math.hypot(dx, dz);
+            if (d < 0.05) {
+              a.walk = null;
+              w.res();
             } else {
-              c.state = 'hopOn';
-              c.t = 0;
-              c.from = kid.root.position.clone();
-            }
-          } else if (c.state === 'hopOn' || c.state === 'hopOff') {
-            const on = c.state === 'hopOn';
-            const kk = Math.min(1, c.t / 0.5);
-            const a = on ? c.from : SIT;
-            const b = on ? SIT : FRONT;
-            kid.root.position.lerpVectors(a, b, easeOutCubic(kk));
-            kid.root.position.y += Math.sin(kk * Math.PI) * 0.4;
-            air = Math.sin(kk * Math.PI) * 0.4;
-            c.yaw = damp(c.yaw, 0, 12, dt);
-            if (kk > 0.5) kid.pose = on ? 'sit' : 'stand';
-            if (kk >= 1) {
-              kid.squash = 0.8;
-              if (on) {
-                c.state = 'wait';
-                c.t = 0;
-                say.set(c.p.name, c.s.line);
-                clockOn = true;
-                sound.ui('pop');
-              } else {
-                c.state = 'cheer';
-                c.t = 0;
-                kid.emote('cheer');
-              }
-            }
-          } else if (c.state === 'wait') {
-            if (c.cues.puffT !== undefined) {
-              c.cues.puffT -= dt;
-              if (c.cues.puffT <= 0) {
-                const sneeze = c.p.symptom === 'sneeze';
-                c.cues.puffT = sneeze ? 2.6 : 1.7;
-                puffAt(partPos(c, 'mouth'), sneeze ? 4 : 2, sneeze);
-                kid.squash = sneeze ? 1.18 : 0.92;
-                const ac = sound.ctx;
-                if (ac) sound.tone(sneeze ? 520 : 220, ac.currentTime, 0.16, { type: 'triangle', gain: 0.03, slideTo: sneeze ? 300 : 160 });
-              }
-            }
-            if (c.mistakes >= 2) {
-              const tool = tools.find((tl) => tl.id === c.s.tool);
-              tool.ring.material.opacity = 0.5 + Math.sin(t * 6) * 0.35;
-            }
-          } else if (c.state === 'treat') {
-            const tool = c.tool;
-            const fly = 0.55;
-            const act = 1.5;
-            if (c.t < fly) {
-              const kk = easeOutCubic(c.t / fly);
-              const dest = c.target.clone().add(v.set(0, 0.02, 0.14));
-              tool.holder.position.lerpVectors(c.start, dest, kk);
-              tool.holder.position.y += Math.sin(kk * Math.PI) * 0.5;
-              tool.holder.scale.setScalar(1.55 - kk * 0.6);
-            } else if (c.t < fly + act) {
-              tool.holder.position.copy(c.target).add(v.set(0, 0.02, 0.14));
-              action(c, (c.t - fly) / act, t);
-            } else {
-              heal(c);
-              c.state = 'better';
-              c.t = 0;
-              tool.back = 0;
-              tool.backFrom = tool.holder.position.clone();
-            }
-          } else if (c.state === 'better') {
-            if (c.t > 1.5) {
-              c.state = 'hopOff';
-              c.t = 0;
-            }
-          } else if (c.state === 'cheer') {
-            if (c.t > 1.4) {
-              c.state = 'leave';
-              c.t = 0;
-              say.hide();
-            }
-          } else if (c.state === 'leave') {
-            speed = 2.6;
-            const d = Math.hypot(DOOR.x - kid.root.position.x, DOOR.z - kid.root.position.z);
-            const dx = (DOOR.x - kid.root.position.x) / d;
-            const dz = (DOOR.z - kid.root.position.z) / d;
-            kid.root.position.x += dx * speed * dt;
-            kid.root.position.z += dz * speed * dt;
-            c.yaw = damp(c.yaw, Math.atan2(dx, dz), 8, dt);
-            if (c.t > 0.4 && !c.waved) {
-              c.waved = true;
-              kid.emote('wave');
-            }
-            if (d < 0.2 || kid.root.position.x < DOOR.x + 0.1) {
-              disposeKid(kid);
-              cur = null;
-              nextPatient();
+              speed = w.speed;
+              const s = Math.min(d, speed * dt);
+              kd.root.position.x += (dx / d) * s;
+              kd.root.position.z += (dz / d) * s;
+              a.yaw = Math.atan2(dx, dz);
             }
           }
-          if (cur === c) {
-            kid.root.rotation.y = c.yaw;
-            animate(kid, dt, t, speed, air);
-          }
-          if (c.flyOff) {
-            c.flyOff.position.add(v.set(0.9 * dt, 1.4 * dt, 0.6 * dt));
-            c.flyOff.rotation.z += dt * 8;
+          if (!a.lying) kd.root.rotation.y = util.dampAngle(kd.root.rotation.y, a.yaw, 8, dt);
+          if (kd.root.visible) {
+            const n = Math.max(1, Math.ceil(dt / 0.05));
+            for (let i = 0; i < n; i++) kd.update(dt / n, t, speed, 0, 0);
+            if (kd.over?.rub !== undefined) {
+              kd.arms[0].rotation.set(-1.1, 0, -0.35 + kd.over.rub * 0.25);
+              kd.arms[1].rotation.set(-1.1, 0, 0.35 + kd.over.rub * 0.25);
+            }
           }
         }
-
-        // Tools: hover lift, wrong-pick shake, return after use
-        tools.forEach((tl, i) => {
-          if (tl.back !== undefined) {
-            tl.back += dt / 0.6;
-            const kk = Math.min(1, tl.back);
-            const keep = tl.id === 'bandage' || tl.id === 'splint';
-            if (keep) {
-              tl.holder.position.copy(tl.home);
-              tl.holder.rotation.set(0, 0, 0);
-              tl.holder.scale.setScalar(1.55 * easeOutBack(kk));
-            } else {
-              tl.holder.position.lerpVectors(tl.backFrom, tl.home, easeOutCubic(kk));
-              tl.holder.position.y += Math.sin(kk * Math.PI) * 0.4;
-              tl.holder.rotation.set(0, 0, 0);
-              tl.holder.scale.setScalar(0.95 + kk * 0.6);
+        for (const P of [patient, ...waiting]) {
+          if (!P || !P.kid.root.visible) continue;
+          if (P.asleep) P.kid.pose = 'sleep';
+          P.update(dt, t);
+          if (P.puffT !== undefined) {
+            P.puffT -= dt;
+            if (P.puffT <= 0) {
+              const cue = P.entry.c.cue;
+              P.puffT = 1.8 + Math.random();
+              if (cue === 'cough') {
+                puffAt(P.part('mouth').add(new THREE.Vector3(0, 0, 0.1)), 2);
+                P.kid.squash = 0.92;
+                if (P === patient) sfx.cut();
+              } else if (cue === 'squeak' && P === patient) sfx.squeak();
+              else if (cue === 'whistle' && P === patient) sfx.whistle();
             }
-            if (kk >= 1) {
-              tl.back = undefined;
-              tl.busy = false;
-            }
-            return;
           }
-          if (tl.busy) return;
-          tl.lift = damp(tl.lift, hovered === i ? 1 : 0, 12, rdt);
-          tl.shake = Math.max(0, tl.shake - rdt);
-          const sh = tl.shake > 0 ? Math.sin(tl.shake * 40) * 0.25 * (tl.shake / 0.6) : 0;
-          tl.holder.position.set(tl.home.x, tl.home.y + tl.lift * 0.08 + (tl.shake > 0 ? Math.sin((tl.shake / 0.6) * Math.PI) * 0.12 : 0), tl.home.z);
-          tl.holder.rotation.set(0, Math.sin(t * 1.2 + i) * 0.06 + tl.lift * 0.3, sh);
-          const helping = cur && cur.mistakes >= 2 && cur.state === 'wait' && tl.id === cur.s.tool;
-          if (!helping) tl.ring.material.opacity = damp(tl.ring.material.opacity, hovered === i ? 0.75 : 0, 12, rdt);
-        });
-
-        // Dr. Roji and Homama
-        const ry = roji.root.rotation.y;
-        roji.root.rotation.y = ry + (rojiYaw - ry) * Math.min(1, dt * 6);
-        animate(roji, dt, t);
-        if (homama) animate(homama, dt, t);
-
-        // Bubbles and puffs
-        hintT = Math.max(0, hintT - dt);
-        if (hintT <= 0 && hint.on) hint.hide();
-        layout();
-        say.update(rdt, SAY_AT);
-        hint.update(rdt, HINT_AT);
+        }
         for (const q of puffs) {
           if (q.life <= 0) continue;
           q.life -= dt * 1.4;
@@ -871,22 +1190,37 @@ export default {
           q.s.material.opacity = Math.max(0, q.life) * 0.8;
           if (q.life <= 0) q.s.visible = false;
         }
-
-        // Camera: fits the bed and the tray, leans in while a tool is at work
-        const d = fit();
-        const lean = cur && (cur.state === 'treat' || cur.state === 'better') ? 0.12 : 0;
-        const want = LOOK.clone().lerp(new THREE.Vector3(BX, 1.25, BZ), lean);
-        camLook.x = damp(camLook.x, want.x, 3, rdt);
-        camLook.y = damp(camLook.y, want.y, 3, rdt);
-        camLook.z = damp(camLook.z, want.z, 3, rdt);
-        camPos.copy(camLook).addScaledVector(dir, d * (1 - lean * 0.6));
-        camPos.x += Math.sin(t * 0.3) * 0.06;
-        camera.position.copy(camPos);
-        camera.lookAt(camLook);
+        rooms[current].update?.(dt, t);
+        if (current === 'theatre') {
+          monitor.update(dt);
+          if (rooms.theatre.alarm.material.emissiveIntensity > 0.2) rooms.theatre.alarm.material.emissiveIntensity = 0.6 + Math.sin(t * 10) * 0.6;
+        }
+        // Speech bubbles over heads (or in a corner in close-ups)
+        for (const b of Object.values(bubbles)) {
+          if (b.ttl > 0) {
+            b.ttl -= dt;
+            if (b.ttl <= 0 || !b.kid?.root.visible) b.b.hide();
+            else b.b.at(b.kid.head.getWorldPosition(b.b.a.pos).add(new THREE.Vector3(0, 0.78 * b.kid.root.scale.y, 0)));
+          }
+        }
+        cam.update(rdt * Math.min(debug.speed, 3));
+        for (const kd of [roji, homama, maya]) {
+          const a = actors.get(kd);
+          if (!a || a.room !== current) continue;
+          // In a close-up, whoever stands nearer the camera than the patient steps out of the shot
+          const d = kd.head.getWorldPosition(hv).distanceTo(camera.position);
+          const near = step && cam.want?.h < 1.6 ? Math.min(1.9, camera.position.distanceTo(cam.look) * 0.98) : 0.95;
+          kd.root.visible = d > near * kd.root.scale.y;
+        }
+        ui.update();
       },
       dispose() {
-        hud.hint('');
+        alive = false;
+        for (const t of timers) clearTimeout(t);
+        ui.dispose();
         style.remove();
+        hud.hint('');
+        if (window.__patients === debug) delete window.__patients;
       },
     };
   },
