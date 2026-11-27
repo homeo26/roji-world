@@ -153,6 +153,7 @@ export function bakeStatic(group, dynamic = [], mergeGeometries) {
   for (const b of buckets.values()) {
     const merged = mergeGeometries(b.list, false);
     if (!merged) continue;
+    merged.userData.baked = true; // static: src/engine/texmem.js may free its arrays once it is on the GPU
     const m = new THREE.Mesh(merged, b.material);
     m.castShadow = b.cast;
     m.receiveShadow = b.receive;
