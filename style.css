@@ -2512,3 +2512,37 @@ body.touch #journey .chip::after {
     display: none;
   }
 }
+
+/* The browser took the 3D drawing away (low memory on a phone): a reload card */
+#gl-lost {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgba(40, 24, 36, 0.55);
+}
+#gl-lost > div {
+  max-width: 320px;
+  margin: 16px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+#gl-lost p {
+  margin: 8px 0 14px;
+  font-size: 0.95rem;
+}
+#gl-lost button {
+  min-height: 44px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--rose);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+}

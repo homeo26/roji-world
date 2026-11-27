@@ -6,6 +6,7 @@ import { STOPS } from './config.js';
 import { World, islandSdf, PADS, FUTURE, CAR_SPOT } from './world.js';
 import { Station, BUILDERS, makePony } from './stations.js';
 import { makeScooter } from './scooter.js';
+import { installTextureMemory, releaseCanvases, releaseGeometry } from './engine/texmem.js';
 import { buildYumYum, buildPlaza } from './places.js';
 import { Kid } from './kid.js';
 import { Car } from './car.js';
@@ -57,6 +58,21 @@ await bootStep(0.02, 'Shaping the island');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('capture') });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+// Phones and tablets: textures at most 1024 px on a side, and every canvas texture's 2D canvas is let go
+// once it is on the GPU (see src/engine/texmem.js). ?hd turns the size cap off, ?lite turns it on.
+const TOUCH_DEVICE = window.matchMedia?.('(pointer: coarse)').matches;
+installTextureMemory(renderer, { maxSize: params.has('hd') ? 0 : TOUCH_DEVICE || params.has('lite') ? 1024 : 0 });
+// The browser took the 3D drawing away (it does that when a phone runs out of memory): say so and offer a
+// reload instead of a frozen picture
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  if (document.getElementById('gl-lost')) return;
+  const el = document.createElement('div');
+  el.id = 'gl-lost';
+  el.innerHTML = '<div><b>Roji World needs a fresh start</b><p>This device ran short of memory for the 3D island. Your progress is saved.</p><button type="button">Reload</button></div>';
+  el.querySelector('button').addEventListener('click', () => location.reload());
+  document.body.appendChild(el);
+});
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -197,7 +213,14 @@ await Promise.allSettled(
 const stopInteriors = Object.entries(stopMods)
   .filter(([, m]) => m?.interior && m.door)
   .map(([id, m]) => ({ id, def: m.interior, door: m.door }));
-await spaces.load({ extra: stopInteriors, progress: (i, n, title) => bootStep(0.32 + (0.5 * i) / n, `Building ${title}`) });
+await spaces.load({
+  extra: stopInteriors,
+  progress: (i, n, title) => {
+    releaseCanvases(scene); // the places built so far go to the GPU and their canvases are let go
+    return bootStep(0.32 + (0.5 * i) / n, `Building ${title}`);
+  },
+});
+releaseCanvases(scene);
 // Town life modules (see src/engine/life.js)
 const lifeState = () => ({
   playerId,
@@ -1818,6 +1841,7 @@ const insideColor = new THREE.Color();
 // Test hooks for headless checks
 window.__roji = {
   renderer,
+  releaseCanvases: () => releaseCanvases(scene),
   scoot: () => toggleScooting(),
   scooting: () => scooting,
   minimap,
@@ -2041,6 +2065,7 @@ function frame() {
   else scene.background.lerp(bg, 1 - Math.exp(-6 * dt));
   scene.fog.color.copy(scene.background);
   if (frameCount % 30 === 0) updateClock();
+  if (frameCount % 300 === 150) releaseCanvases(scene); // new rooms and redrawn boards let go of their canvases too
 
   world.update(dt, t);
   spaces.update(dt, t, P().pos);
@@ -2063,6 +2088,13 @@ function frame() {
 }
 // Before the first frame: every material in the town (all places, the kids, the stops) gets its shader ready
 await bootStep(0.97, 'Mixing the paints');
+releaseCanvases(scene);
+// Touch devices: the town's merged buildings keep their vertex data only on the GPU (the ski hill is
+// raycast by a love secret, so it keeps its own)
+if (TOUCH_DEVICE && !params.has('hd')) {
+  for (const s of spaces.places) if (s.id !== 'ski') releaseGeometry(s.inst.group);
+  releaseGeometry(world.statics);
+}
 if (!params.has('noprecompile')) await precompile(scene);
 if (DEV) boot.log?.push(['programs after precompile', renderer.info.programs.length]);
 renderer.setAnimationLoop(frame);
