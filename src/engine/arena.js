@@ -62,6 +62,7 @@ body.touch #arena .a-btns { display: flex; }
 #arena .a-btn { border: 0; border-radius: 50%; width: 64px; height: 64px; background: #fffaf4; box-shadow: 0 6px 18px rgba(60,30,40,.2); font: 700 .78rem var(--font, system-ui); color: #3b2b3f; touch-action: none; }
 #arena .a-btn.main { width: 88px; height: 88px; background: #ef5b6f; color: #fff; font-size: .9rem; }
 #arena .a-btn.on { transform: scale(.94); filter: brightness(.95); }
+#arena .a-btns, #arena .a-btn { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #arena .a-btn:empty, #arena .a-btn.off { display: none; }
 #arena .a-result { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(40,24,40,.35); pointer-events: auto; z-index: 50; }
 #arena .a-result.hidden { display: none; }
@@ -198,6 +199,9 @@ export class ArenaHost {
         this.pressedSet.add(id);
         this.heldSet.add(id);
       });
+      // iPhone Safari: without this a held button turns into a text selection or a page scroll
+      btn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
       const up = () => {
         btn.classList.remove('on');
         this.heldSet.delete(id);
