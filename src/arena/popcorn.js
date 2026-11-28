@@ -172,6 +172,7 @@ export default {
       heapMesh.setColorAt(i, col.set(i % 9 === 4 ? KERNEL_COLORS.gold : i % 4 ? KERNEL_COLORS.plain : KERNEL_COLORS.butter));
     }
     heapMesh.count = 0;
+    heapMesh.frustumCulled = false; // starts empty, so bounds taken then would hide it for good
     pail.add(heapMesh);
     const holder = new THREE.Group();
     holder.position.set(0, -0.2, 0.08);

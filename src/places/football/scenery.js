@@ -369,6 +369,7 @@ export function buildScenery() {
   for (const y of [0.205, 0.685]) for (let i = 0; i < 4; i++) cupSpots.push([-0.48 + i * 0.32, y]);
   cupSpots.forEach(([x, y], i) => cups.setMatrixAt(i, m4.compose(v.set(x, y, 0.05), q.identity(), one)));
   cups.count = 0;
+  cups.frustumCulled = false; // starts empty, so bounds taken then would hide it for good
   cups.castShadow = true;
   shelf.add(cups);
   dynamic.push(cups);

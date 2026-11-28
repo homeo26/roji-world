@@ -341,6 +341,8 @@ export default {
     const bananaIM = new THREE.InstancedMesh(bananaGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }), MAXB);
     bananaIM.castShadow = true;
     bananaIM.count = 0;
+    // It starts empty: three.js would size its bounds then and cull it for good, so it is never culled
+    bananaIM.frustumCulled = false;
     add(bananaIM);
     keep.push(bananaIM);
     const bananas = [];

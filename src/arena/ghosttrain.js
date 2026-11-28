@@ -82,6 +82,7 @@ export default {
     const PILE = 44;
     const pile = new THREE.InstancedMesh(cGeo, candyMat, PILE);
     pile.count = 0;
+    pile.frustumCulled = false; // starts empty, so bounds taken then would hide it for good
     pile.castShadow = false;
     {
       const r = rng(3);
